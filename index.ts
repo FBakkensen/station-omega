@@ -1,5 +1,5 @@
 import { CopilotClient, defineTool } from '@github/copilot-sdk';
-import * as readline from 'readline';
+import { GameUI } from './tui';
 
 // ─── Game Data ───────────────────────────────────────────────────────────────
 
@@ -396,12 +396,20 @@ Begin by welcoming the player and describing the Airlock Bay using the look_arou
 
 // ─── Main Game Loop ──────────────────────────────────────────────────────────
 
-async function main() {
-    console.log('\n╔══════════════════════════════════════════════╗');
-    console.log('║          🚀  STATION OMEGA  🚀               ║');
-    console.log('║   A Copilot SDK-Powered Text Adventure       ║');
-    console.log('╚══════════════════════════════════════════════╝\n');
+function getStatus() {
+    const room = ROOMS[state.currentRoom];
+    return {
+        hp: state.hp,
+        maxHp: state.maxHp,
+        roomName: room.name,
+        roomNumber: state.currentRoom + 1,
+        totalRooms: ROOMS.length,
+        inventory: state.inventory.length > 0 ? state.inventory : [],
+    };
+}
 
+async function main() {
+    // Initialize Copilot SDK first (before TUI) so auth prompts are visible
     const client = new CopilotClient();
     const session = await client.createSession({
         model: 'gpt-4.1',
@@ -410,52 +418,43 @@ async function main() {
         systemMessage: { content: SYSTEM_MESSAGE },
     });
 
-    // Stream AI responses
+    // Now start the TUI
+    const ui = new GameUI();
+    await ui.init();
+    ui.updateStatus(getStatus());
+
+    // Stream AI responses into the TUI
     session.on('assistant.message_delta', (event) => {
-        process.stdout.write(event.data.deltaContent);
+        ui.appendNarrativeDelta(event.data.deltaContent);
     });
     session.on('session.idle', () => {
-        console.log('\n');
+        ui.finalizeDelta();
+        ui.updateStatus(getStatus());
+
+        if (state.gameOver) {
+            ui.showGameOver(state.won);
+        }
     });
 
     // Kick off the game — Copilot will use look_around to describe room 0
     await session.sendAndWait({ prompt: 'I step through the airlock onto Station Omega. What do I see?' });
 
-    // Input loop
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    // Wire up input from the TUI
+    ui.onInput((input: string) => {
+        if (state.gameOver) return;
 
-    const promptUser = () => {
-        if (state.gameOver) {
-            if (state.won) {
-                console.log('🏆 Thanks for playing Station Omega!');
-            } else {
-                console.log('💀 You died on Station Omega. Better luck next time.');
-            }
-            rl.close();
+        if (input.toLowerCase() === 'quit' || input.toLowerCase() === 'exit') {
+            ui.destroy();
             void client.stop().then(() => { process.exit(0); });
             return;
         }
 
-        rl.question('> ', (input: string) => {
-            const trimmed = input.trim();
-            if (!trimmed) { promptUser(); return; }
-            if (trimmed.toLowerCase() === 'quit' || trimmed.toLowerCase() === 'exit') {
-                console.log('Abandoning the mission...');
-                rl.close();
-                void client.stop().then(() => { process.exit(0); });
-                return;
-            }
-
-            void session.sendAndWait({ prompt: trimmed }).then(() => {
-                promptUser();
-            });
-        });
-    };
-
-    promptUser();
+        void session.sendAndWait({ prompt: input });
+    });
 }
 
 main().catch((err: unknown) => {
-    console.error('Fatal error:', err);
+    // Write to stderr to bypass TUI
+    process.stderr.write(`Fatal error: ${String(err)}\n`);
     process.exit(1);
 });

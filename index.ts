@@ -109,7 +109,7 @@ function hpDescription(): string {
 const lookAround = defineTool('look_around', {
     description: 'Look around the current room. Returns details about the environment, items, threats, and exits.',
     parameters: { type: 'object', properties: {}, required: [] },
-    handler: async () => {
+    handler: () => {
         const room = ROOMS[state.currentRoom];
         const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
         const threatPresent = room.threat && !state.roomEnemyDefeated.has(state.currentRoom);
@@ -119,10 +119,10 @@ const lookAround = defineTool('look_around', {
 
         return {
             room_name: room.name,
-            room_number: `${state.currentRoom + 1} of ${ROOMS.length}`,
+            room_number: `${String(state.currentRoom + 1)} of ${String(ROOMS.length)}`,
             description: room.descriptionSeed,
             item_visible: lootPresent ? room.loot : null,
-            threat: threatPresent ? { name: room.threat!.name, demeanor: 'hostile' } : null,
+            threat: threatPresent && room.threat ? { name: room.threat.name, demeanor: 'hostile' } : null,
             exits,
             player_condition: hpDescription(),
             inventory: state.inventory.length > 0 ? state.inventory : ['empty'],
@@ -139,7 +139,7 @@ const moveTo = defineTool('move_to', {
         },
         required: ['direction'],
     },
-    handler: async (args: { direction: 'forward' | 'back' }) => {
+    handler: (args: { direction: 'forward' | 'back' }) => {
         if (state.gameOver) return { error: 'The game is over.' };
 
         const { direction } = args;
@@ -175,9 +175,9 @@ const moveTo = defineTool('move_to', {
         return {
             success: true,
             room_name: room.name,
-            room_number: `${newRoom + 1} of ${ROOMS.length}`,
+            room_number: `${String(newRoom + 1)} of ${String(ROOMS.length)}`,
             description: room.descriptionSeed,
-            threat_present: threatPresent ? room.threat!.name : null,
+            threat_present: threatPresent && room.threat ? room.threat.name : null,
             player_condition: hpDescription(),
         };
     },
@@ -192,7 +192,7 @@ const pickUpItem = defineTool('pick_up_item', {
         },
         required: ['item'],
     },
-    handler: async (args: { item: string }) => {
+    handler: (args: { item: string }) => {
         if (state.gameOver) return { error: 'The game is over.' };
 
         const room = ROOMS[state.currentRoom];
@@ -244,7 +244,7 @@ const useItem = defineTool('use_item', {
         },
         required: ['item'],
     },
-    handler: async (args: { item: string }) => {
+    handler: (args: { item: string }) => {
         if (state.gameOver) return { error: 'The game is over.' };
 
         const { item } = args;
@@ -259,12 +259,12 @@ const useItem = defineTool('use_item', {
             case 'medkit': {
                 const healed = Math.min(30, state.maxHp - state.hp);
                 state.hp += healed;
-                return { success: true, item, effect: `Healed ${healed} HP.`, player_condition: hpDescription() };
+                return { success: true, item, effect: `Healed ${String(healed)} HP.`, player_condition: hpDescription() };
             }
             case 'stim_pack': {
                 const healed = Math.min(20, state.maxHp - state.hp);
                 state.hp += healed;
-                return { success: true, item, effect: `Healed ${healed} HP. Adrenaline surges through you.`, player_condition: hpDescription() };
+                return { success: true, item, effect: `Healed ${String(healed)} HP. Adrenaline surges through you.`, player_condition: hpDescription() };
             }
             case 'plasma_cell': {
                 state.plasmaBoost = true;
@@ -292,7 +292,7 @@ const attack = defineTool('attack', {
         },
         required: ['approach'],
     },
-    handler: async (args: { approach: string }) => {
+    handler: (args: { approach: string }) => {
         if (state.gameOver) return { error: 'The game is over.' };
 
         const room = ROOMS[state.currentRoom];
@@ -300,7 +300,7 @@ const attack = defineTool('attack', {
             return { error: 'There is no enemy to fight here.' };
         }
 
-        const enemy = { ...room.threat! }; // copy so we don't mutate template
+        const enemy = { ...room.threat }; // copy so we don't mutate template
 
         // Player attacks
         let playerDamage = randInt(15, 25);
@@ -335,7 +335,7 @@ const attack = defineTool('attack', {
             return {
                 approach: args.approach,
                 player_damage_dealt: playerDamage,
-                enemy_name: room.threat!.name,
+                enemy_name: room.threat.name,
                 enemy_damage_dealt: enemyDamage,
                 shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
                 enemy_defeated: defeated,
@@ -348,7 +348,7 @@ const attack = defineTool('attack', {
         const result: Record<string, unknown> = {
             approach: args.approach,
             player_damage_dealt: playerDamage,
-            enemy_name: room.threat!.name,
+            enemy_name: room.threat.name,
             enemy_damage_dealt: enemyDamage,
             shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
             enemy_defeated: defeated,
@@ -356,13 +356,13 @@ const attack = defineTool('attack', {
             player_condition: hpDescription(),
         };
 
-        if (defeated && room.threat!.drop) {
-            result.loot_dropped = room.threat!.drop;
-            result.loot_hint = `The ${room.threat!.name} dropped a ${room.threat!.drop}. You can pick it up.`;
+        if (defeated && room.threat.drop) {
+            result.loot_dropped = room.threat.drop;
+            result.loot_hint = `The ${room.threat.name} dropped a ${room.threat.drop}. You can pick it up.`;
             // Place loot in room if room loot was already taken or was different
-            if (state.roomLootTaken.has(state.currentRoom) || room.loot !== room.threat!.drop) {
+            if (state.roomLootTaken.has(state.currentRoom) || room.loot !== room.threat.drop) {
                 // Add to room as bonus loot by temporarily setting room loot
-                ROOMS[state.currentRoom] = { ...room, loot: room.threat!.drop };
+                ROOMS[state.currentRoom] = { ...room, loot: room.threat.drop };
                 state.roomLootTaken.delete(state.currentRoom);
             }
         }
@@ -432,30 +432,30 @@ async function main() {
                 console.log('💀 You died on Station Omega. Better luck next time.');
             }
             rl.close();
-            client.stop().then(() => process.exit(0));
+            void client.stop().then(() => { process.exit(0); });
             return;
         }
 
-        rl.question('> ', async (input) => {
+        rl.question('> ', (input: string) => {
             const trimmed = input.trim();
             if (!trimmed) { promptUser(); return; }
             if (trimmed.toLowerCase() === 'quit' || trimmed.toLowerCase() === 'exit') {
                 console.log('Abandoning the mission...');
                 rl.close();
-                await client.stop();
-                process.exit(0);
+                void client.stop().then(() => { process.exit(0); });
+                return;
             }
 
-            await session.sendAndWait({ prompt: trimmed });
-
-            promptUser();
+            void session.sendAndWait({ prompt: trimmed }).then(() => {
+                promptUser();
+            });
         });
     };
 
     promptUser();
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
     console.error('Fatal error:', err);
     process.exit(1);
 });

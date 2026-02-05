@@ -10,7 +10,12 @@ Station Omega is a single-file interactive text adventure game powered by the `@
 npm start        # runs: node --import tsx index.ts
 ```
 
-There are no tests, linting, or build steps configured.
+```bash
+npm run typecheck  # runs: tsc --noEmit
+npm run lint       # runs: eslint .
+```
+
+Always run both `npm run typecheck` and `npm run lint` before returning results to the user. All errors must be resolved before considering a task complete.
 
 ## Architecture
 
@@ -27,5 +32,6 @@ The entire application is a single `index.ts` file structured in sections:
 - **Tool-driven gameplay**: The AI never fabricates game state. All game actions are resolved through `defineTool` handlers that read/write the shared `state` object. New gameplay mechanics should follow this pattern.
 - **Combat is stateless per-round**: Enemy HP is copied from the template each attack call — enemies don't persist HP across rounds within the tool handler. Multi-round fights work because defeated enemies are tracked in `state.roomEnemyDefeated`.
 - **Room progression is linear**: Rooms are an ordered array navigated with "forward"/"back". Room index 5 (Command Bridge) requires a keycard. The win condition triggers when returning to room 0 with the black box.
-- **TypeScript via tsx**: The project uses `tsx` for direct TypeScript execution without a compile step. There is no `tsconfig.json`.
+- **TypeScript via tsx**: The project uses `tsx` for direct TypeScript execution without a compile step. `tsconfig.json` is configured with `strict: true` and `noEmit: true` for type-checking only.
+- **Linting**: ESLint is configured with `typescript-eslint` `strictTypeChecked` rules via flat config (`eslint.config.js`).
 - **ESM modules**: `"type": "module"` is set in `package.json`.

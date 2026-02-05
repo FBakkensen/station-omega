@@ -1,0 +1,16 @@
+{
+  "name": "station-omega",
+  "version": "1.0.0",
+  "description": "AI Dungeon Crawler powered by GitHub Copilot SDK",
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@github/copilot-sdk": "^0.1.22",
+    "tsx": "^4.21.0"
+  }
+}

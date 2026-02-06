@@ -3,11 +3,13 @@ import {
     Box,
     Text,
     InputRenderableEvents,
+    SelectRenderableEvents,
     TextRenderable,
     MarkdownRenderable,
     BoxRenderable,
     ScrollBoxRenderable,
     InputRenderable,
+    SelectRenderable,
     SyntaxStyle,
     RGBA,
     t,
@@ -16,7 +18,7 @@ import {
     bg,
     DistortionEffect,
 } from '@opentui/core';
-import type { CliRenderer } from '@opentui/core';
+import type { CliRenderer, KeyEvent } from '@opentui/core';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
 
@@ -71,6 +73,14 @@ export interface GameStatus {
     npcs: NPCDisplayInfo[];
 }
 
+export interface SlashCommandDef {
+    name: string;
+    description: string;
+    needsTarget: boolean;
+    getTargets: () => { label: string; value: string }[];
+    toPrompt: (target?: string) => string;
+}
+
 // ─── GameUI ──────────────────────────────────────────────────────────────────
 
 export class GameUI {
@@ -87,6 +97,14 @@ export class GameUI {
     private distortionFn = (buffer: Parameters<typeof this.distortion.apply>[0], deltaTime: number) => {
         this.distortion.apply(buffer, deltaTime);
     };
+
+    // Slash command state
+    private slashCommands: SlashCommandDef[] = [];
+    private popupState: 'idle' | 'command' | 'target' = 'idle';
+    private selectedCommand: SlashCommandDef | null = null;
+    private popupBox!: BoxRenderable;
+    private popupSelect!: SelectRenderable;
+    private popupHint!: TextRenderable;
 
     async init(): Promise<void> {
         this.renderer = await createCliRenderer({
@@ -135,11 +153,77 @@ export class GameUI {
         this.inputField.on(InputRenderableEvents.ENTER, (value: string) => {
             const trimmed = value.trim();
             if (!trimmed || !this.inputEnabled) return;
+
+            // If popup is active, let selectPopupItem handle it
+            if (this.popupState !== 'idle') return;
+
             this.inputField.value = '';
+
+            // Try to translate typed slash commands (e.g. "/move forward")
+            const prompt = this.translateSlashInput(trimmed);
             if (this.inputCallback) {
-                this.inputCallback(trimmed);
+                this.inputCallback(prompt);
             }
         });
+
+        // Create popup components
+        this.popupHint = new TextRenderable(this.renderer, {
+            id: 'popup-hint',
+            content: t`${fg(COLORS.title)('/ Commands')}`,
+        });
+
+        this.popupSelect = new SelectRenderable(this.renderer, {
+            id: 'popup-select',
+            options: [],
+            flexGrow: 1,
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: '#0d1117',
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        this.popupSelect.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+            this.selectPopupItem();
+        });
+
+        this.popupBox = new BoxRenderable(this.renderer, {
+            id: 'popup-box',
+            position: 'absolute',
+            bottom: 1,
+            left: 1,
+            width: '50%',
+            height: 14,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            backgroundColor: '#0d1117',
+            zIndex: 10,
+            visible: false,
+            flexDirection: 'column',
+            paddingLeft: 1,
+            paddingRight: 1,
+        });
+        this.popupBox.add(this.popupHint);
+        this.popupBox.add(this.popupSelect);
+
+        // Intercept key presses on the input field for popup navigation
+        const origHandleKey = this.inputField.handleKeyPress.bind(this.inputField);
+        this.inputField.handleKeyPress = (key: KeyEvent): boolean => {
+            if (this.popupState !== 'idle') {
+                if (key.name === 'up') { this.popupSelect.moveUp(); return true; }
+                if (key.name === 'down') { this.popupSelect.moveDown(); return true; }
+                if (key.name === 'escape') { this.dismissPopup(); return true; }
+                if (key.name === 'return' || key.name === 'tab') {
+                    this.selectPopupItem();
+                    return true;
+                }
+            }
+
+            const result = origHandleKey(key);
+            this.updatePopupFromInput();
+            return result;
+        };
 
         // Build layout
         const layout = Box(
@@ -200,6 +284,7 @@ export class GameUI {
         );
 
         this.renderer.root.add(layout);
+        this.renderer.root.add(this.popupBox);
         this.inputField.focus();
     }
 
@@ -338,6 +423,103 @@ export class GameUI {
             id: `gameover-hint`,
             content: t`${fg(COLORS.textDim)('Press Ctrl+C to exit.')}`,
         }));
+    }
+
+    setSlashCommands(commands: SlashCommandDef[]): void {
+        this.slashCommands = commands;
+    }
+
+    private updatePopupFromInput(): void {
+        const value = this.inputField.value;
+
+        // Not a slash command — dismiss if open
+        if (!value.startsWith('/')) {
+            if (this.popupState !== 'idle') this.dismissPopup();
+            return;
+        }
+
+        if (this.popupState === 'idle' || this.popupState === 'command') {
+            // Show/filter command list
+            const typed = value.slice(1).toLowerCase(); // text after "/"
+            const filtered = this.slashCommands
+                .filter(c => c.name.startsWith(typed))
+                .map(c => ({ name: c.name, description: c.description, value: c.name }));
+
+            this.popupState = 'command';
+            this.popupHint.content = t`${fg(COLORS.title)('/ Commands')}`;
+            this.popupSelect.options = filtered;
+            this.popupSelect.setSelectedIndex(0);
+            this.popupBox.visible = true;
+        } else if (this.selectedCommand) {
+            // Filter target list (popupState === 'target')
+            const prefix = `/${this.selectedCommand.name} `;
+            const typed = value.startsWith(prefix) ? value.slice(prefix.length).toLowerCase() : '';
+            const targets = this.selectedCommand.getTargets()
+                .filter(t => t.label.toLowerCase().startsWith(typed))
+                .map(t => ({ name: t.label, description: '', value: t.value }));
+
+            this.popupSelect.options = targets;
+            this.popupSelect.setSelectedIndex(0);
+        }
+    }
+
+    private selectPopupItem(): void {
+        const selected = this.popupSelect.getSelectedOption();
+        if (!selected) return;
+
+        if (this.popupState === 'command') {
+            const cmd = this.slashCommands.find(c => c.name === selected.value);
+            if (!cmd) return;
+
+            if (cmd.needsTarget) {
+                const targets = cmd.getTargets();
+                if (targets.length > 0) {
+                    // Enter target selection mode
+                    this.selectedCommand = cmd;
+                    this.popupState = 'target';
+                    this.inputField.value = `/${cmd.name} `;
+                    this.popupHint.content = t`${fg(COLORS.title)(`/ ${cmd.name} → target`)}`;
+                    this.popupSelect.options = targets.map(t => ({
+                        name: t.label, description: '', value: t.value,
+                    }));
+                    this.popupSelect.setSelectedIndex(0);
+                    return;
+                }
+            }
+
+            // No targets needed — submit immediately
+            this.dismissPopup();
+            this.inputField.value = '';
+            const prompt = cmd.toPrompt();
+            if (this.inputCallback) this.inputCallback(prompt);
+        } else if (this.popupState === 'target' && this.selectedCommand) {
+            const target = selected.value as string;
+            const prompt = this.selectedCommand.toPrompt(target);
+            this.dismissPopup();
+            this.inputField.value = '';
+            if (this.inputCallback) this.inputCallback(prompt);
+        }
+    }
+
+    private dismissPopup(): void {
+        this.popupState = 'idle';
+        this.popupBox.visible = false;
+        this.selectedCommand = null;
+    }
+
+    private translateSlashInput(input: string): string {
+        if (!input.startsWith('/')) return input;
+
+        const withoutSlash = input.slice(1);
+        const spaceIdx = withoutSlash.indexOf(' ');
+        const cmdName = spaceIdx === -1 ? withoutSlash.toLowerCase() : withoutSlash.slice(0, spaceIdx).toLowerCase();
+        const arg = spaceIdx === -1 ? undefined : withoutSlash.slice(spaceIdx + 1).trim() || undefined;
+
+        const cmd = this.slashCommands.find(c => c.name === cmdName);
+        if (cmd) return cmd.toPrompt(arg);
+
+        // Unknown slash command — send as-is without the "/"
+        return withoutSlash;
     }
 
     destroy(): void {

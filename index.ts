@@ -1,6 +1,7 @@
 import { CopilotClient, defineTool } from '@github/copilot-sdk';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui';
+import type { SlashCommandDef } from './tui';
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -747,6 +748,64 @@ function getStatus() {
     };
 }
 
+function getSlashCommands(): SlashCommandDef[] {
+    return [
+        {
+            name: 'look',
+            description: 'Examine the room',
+            needsTarget: false,
+            getTargets: () => [],
+            toPrompt: () => 'look around',
+        },
+        {
+            name: 'move',
+            description: 'Move to adjacent room',
+            needsTarget: true,
+            getTargets: () => {
+                const dirs: { label: string; value: string }[] = [];
+                if (state.currentRoom > 0) dirs.push({ label: 'Back', value: 'back' });
+                if (state.currentRoom < ROOMS.length - 1)
+                    dirs.push({ label: 'Forward', value: 'forward' });
+                return dirs;
+            },
+            toPrompt: (t) => t ? `move ${t}` : 'move',
+        },
+        {
+            name: 'pickup',
+            description: 'Pick up an item',
+            needsTarget: true,
+            getTargets: () => {
+                const items: { label: string; value: string }[] = [];
+                const room = ROOMS[state.currentRoom];
+                if (room.loot && !state.roomLootTaken.has(state.currentRoom))
+                    items.push({ label: room.loot, value: room.loot });
+                const drop = state.roomDrops.get(state.currentRoom);
+                if (drop) items.push({ label: drop, value: drop });
+                return items;
+            },
+            toPrompt: (t) => t ? `pick up ${t}` : 'pick up',
+        },
+        {
+            name: 'use',
+            description: 'Use an inventory item',
+            needsTarget: true,
+            getTargets: () =>
+                state.inventory.map(i => ({ label: i, value: i })),
+            toPrompt: (t) => t ? `use ${t}` : 'use item',
+        },
+        {
+            name: 'attack',
+            description: 'Attack the enemy',
+            needsTarget: true,
+            getTargets: () => {
+                const threat = getRoomThreat(state.currentRoom);
+                return threat ? [{ label: threat.name, value: threat.name }] : [];
+            },
+            toPrompt: (t) => t ? `attack the ${t}` : 'attack',
+        },
+    ];
+}
+
 async function main() {
     initDebugLog();
     debugLog('SYSTEM', SYSTEM_MESSAGE);
@@ -763,6 +822,7 @@ async function main() {
     // Now start the TUI
     const ui = new GameUI();
     await ui.init();
+    ui.setSlashCommands(getSlashCommands());
     ui.updateStatus(getStatus());
 
     // Stream AI responses into the TUI, accumulate for debug log

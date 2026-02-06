@@ -335,6 +335,10 @@ function hpDescription(): string {
 
 let onCombatStart: (() => void) | null = null;
 
+// ─── Pending Attack Choices ──────────────────────────────────────────────────
+
+let pendingAttackChoices: { label: string; description: string }[] | null = null;
+
 // ─── Custom Tools ────────────────────────────────────────────────────────────
 
 const lookAround = defineTool('look_around', {
@@ -549,7 +553,7 @@ const useItem = defineTool('use_item', {
 });
 
 const attack = defineTool('attack', {
-    description: 'Attack the enemy in the current room. Describe your approach (e.g., "shoot from cover", "charge with pipe", "sneak behind it").',
+    description: 'Attack the enemy in the current room with the player\'s chosen approach. Only call this AFTER the player has chosen or described their approach.',
     parameters: {
         type: 'object',
         properties: {
@@ -632,6 +636,35 @@ const attack = defineTool('attack', {
     },
 });
 
+const suggestAttacks = defineTool('suggest_attacks', {
+    description: 'Present the player with 3-5 contextual attack approaches to choose from. Call this BEFORE calling attack, when the player wants to fight but hasn\'t described a specific approach. Generate creative options based on inventory items, enemy nature, room environment, player condition, and active buffs.',
+    parameters: {
+        type: 'object',
+        properties: {
+            approaches: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        label: { type: 'string', description: 'Short punchy action name (2-6 words)' },
+                        description: { type: 'string', description: 'One-sentence evocative description of the approach and potential effect' },
+                    },
+                    required: ['label', 'description'],
+                },
+                description: '3-5 contextual attack approaches tailored to the current situation',
+            },
+        },
+        required: ['approaches'],
+    },
+    handler: (args: { approaches: { label: string; description: string }[] }) => {
+        pendingAttackChoices = args.approaches;
+        return {
+            presented: true,
+            note: 'Attack options are displayed as interactive UI buttons. Do NOT list or repeat them in your text. Write one short atmospheric line, then STOP and wait for the player\'s next message. Do NOT call the attack tool yet.',
+        };
+    },
+});
+
 // ─── System Message ──────────────────────────────────────────────────────────
 
 const SYSTEM_MESSAGE = `# Role and Objective
@@ -696,6 +729,19 @@ CRITICAL: Every time you shift from one beat to the next, you MUST output a blan
 - On REVISITS (is_revisit: true): NEVER repeat previous descriptions. Describe the aftermath. Reveal new sensory details and previously undiscovered crew logs.
 - INVENTORY AWARENESS: Reference carried items contextually.
 
+## Combat Choices
+
+When the player wants to attack an enemy but hasn't described a specific approach, call \`suggest_attacks\` FIRST to present them with contextual options. Generate 3-5 creative, situation-specific approaches based on:
+- **Inventory**: Can carried items be used as weapons or tactical tools? A plasma cell suggests energy attacks. A medkit could be thrown as a distraction.
+- **Enemy nature**: Is it fast, armored, organic, mechanical? Exploit implied weaknesses.
+- **Room environment**: Use cover, hazards, lighting, terrain. A reactor core offers radiation; a mess hall has improvised weapons.
+- **Player condition**: Wounded players get desperate, risky options. Healthy players get bold, precise ones.
+- **Active buffs**: Plasma boost → energy-themed attacks. Energy shield → aggressive close-range options.
+
+Each approach: a short punchy label (2-6 words) and a one-sentence evocative description. Be creative and specific — never generic labels like "melee attack" or "ranged attack". After calling suggest_attacks, write one short atmospheric line setting the combat mood — do NOT list or repeat the approaches in your text, they are displayed as interactive UI elements. Then STOP and wait for the player's choice. When they respond, call \`attack\` with their chosen approach.
+
+If the player already described their approach (e.g., "attack the mutant by throwing a pipe"), skip suggest_attacks and call \`attack\` directly.
+
 ## Rules
 - Always use the available tools to resolve player actions. Do not make up game state.
 - Do not invent rooms, logs, or sensory details not provided by tools. Use ONLY the data returned by tool calls.
@@ -712,6 +758,7 @@ CRITICAL: Every time you shift from one beat to the next, you MUST output a blan
 
 You MUST use markdown formatting in every response: **bold** for items/NPCs/rooms, *italics* for sensory details, > blockquotes for crew logs, --- for scene transitions. Never output plain unformatted text.
 You MUST separate narrative beats with blank lines (two newlines). Never write a wall of text. Each paragraph covers one idea — atmosphere, discovery, crew log, or orientation — then a blank line before the next. When in doubt, add more blank lines.
+When the player wants to attack, call \`suggest_attacks\` first to present contextual combat options — do NOT list approaches in your text or ask for their approach in plain text. The suggest_attacks tool displays interactive UI elements; never duplicate them in prose.
 
 Begin by welcoming the player and describing the Airlock Bay using the look_around tool.`;
 
@@ -815,7 +862,7 @@ async function main() {
     const session = await client.createSession({
         model: 'gpt-4.1',
         streaming: true,
-        tools: [lookAround, moveTo, pickUpItem, useItem, attack],
+        tools: [lookAround, moveTo, pickUpItem, useItem, attack, suggestAttacks],
         systemMessage: { content: SYSTEM_MESSAGE },
     });
 
@@ -840,6 +887,11 @@ async function main() {
         ui.disableCombatGlitch();
         ui.finalizeDelta();
         ui.updateStatus(getStatus());
+
+        if (pendingAttackChoices) {
+            ui.showAttackChoices(pendingAttackChoices);
+            pendingAttackChoices = null;
+        }
 
         if (state.gameOver) {
             ui.showGameOver(state.won);

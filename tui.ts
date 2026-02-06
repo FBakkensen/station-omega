@@ -106,6 +106,11 @@ export class GameUI {
     private popupSelect!: SelectRenderable;
     private popupHint!: TextRenderable;
 
+    // Inline attack choices state
+    private inlineChoices: SelectRenderable | null = null;
+    private inlineChoicesCard: BoxRenderable | null = null;
+    private inlineChoicesActive = false;
+
     async init(): Promise<void> {
         this.renderer = await createCliRenderer({
             exitOnCtrlC: true,
@@ -159,6 +164,9 @@ export class GameUI {
 
             this.inputField.value = '';
 
+            // Dismiss inline choices when player types their own text
+            if (this.inlineChoicesActive) this.dismissInlineChoices();
+
             // Try to translate typed slash commands (e.g. "/move forward")
             const prompt = this.translateSlashInput(trimmed);
             if (this.inputCallback) {
@@ -207,9 +215,21 @@ export class GameUI {
         this.popupBox.add(this.popupHint);
         this.popupBox.add(this.popupSelect);
 
-        // Intercept key presses on the input field for popup navigation
+        // Intercept key presses on the input field for popup + inline choices navigation
         const origHandleKey = this.inputField.handleKeyPress.bind(this.inputField);
         this.inputField.handleKeyPress = (key: KeyEvent): boolean => {
+            // Inline attack choices navigation
+            if (this.inlineChoicesActive && this.inlineChoices) {
+                if (key.name === 'up') { this.inlineChoices.moveUp(); return true; }
+                if (key.name === 'down') { this.inlineChoices.moveDown(); return true; }
+                if (key.name === 'escape') { this.dismissInlineChoices(); return true; }
+                if (key.name === 'return' && !this.inputField.value.trim()) {
+                    this.selectInlineChoice();
+                    return true;
+                }
+            }
+
+            // Slash command popup navigation
             if (this.popupState !== 'idle') {
                 if (key.name === 'up') { this.popupSelect.moveUp(); return true; }
                 if (key.name === 'down') { this.popupSelect.moveDown(); return true; }
@@ -423,6 +443,82 @@ export class GameUI {
             id: `gameover-hint`,
             content: t`${fg(COLORS.textDim)('Press Ctrl+C to exit.')}`,
         }));
+    }
+
+    showAttackChoices(approaches: { label: string; description: string }[]): void {
+        this.dismissInlineChoices();
+
+        const select = new SelectRenderable(this.renderer, {
+            id: `choices-${String(Date.now())}`,
+            options: approaches.map((a, i) => ({
+                name: `${String(i + 1)}. ${a.label}`,
+                description: a.description,
+                value: a.label,
+            })),
+            flexGrow: 1,
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: '#0d1117',
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        select.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+            this.selectInlineChoice();
+        });
+
+        const hint = new TextRenderable(this.renderer, {
+            id: `choices-hint-${String(Date.now())}`,
+            content: t`${fg(COLORS.textDim)('  ↑↓ Navigate  Enter Select  Or type your own approach')}`,
+        });
+
+        // Each option with description ~2 lines + hint + padding + border
+        const cardHeight = approaches.length * 2 + 4;
+
+        const card = new BoxRenderable(this.renderer, {
+            id: `choices-card-${String(Date.now())}`,
+            backgroundColor: '#0d1117',
+            marginLeft: 1,
+            marginRight: 1,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 1,
+            paddingBottom: 0,
+            height: cardHeight,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            flexDirection: 'column',
+        });
+        card.add(select);
+        card.add(hint);
+        this.narrativeScroll.add(card);
+
+        this.inlineChoices = select;
+        this.inlineChoicesCard = card;
+        this.inlineChoicesActive = true;
+    }
+
+    private selectInlineChoice(): void {
+        if (!this.inlineChoices) return;
+        const selected = this.inlineChoices.getSelectedOption();
+        if (!selected) return;
+
+        const approach = selected.value as string;
+        this.dismissInlineChoices();
+        this.inputField.value = '';
+        if (this.inputCallback) {
+            this.inputCallback(approach);
+        }
+    }
+
+    private dismissInlineChoices(): void {
+        this.inlineChoicesActive = false;
+        if (this.inlineChoicesCard) {
+            this.inlineChoicesCard.visible = false;
+            this.inlineChoicesCard = null;
+        }
+        this.inlineChoices = null;
     }
 
     setSlashCommands(commands: SlashCommandDef[]): void {

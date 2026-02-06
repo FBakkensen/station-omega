@@ -1,7 +1,16 @@
-import { CopilotClient, defineTool } from '@github/copilot-sdk';
+import { CopilotClient } from '@github/copilot-sdk';
 import { appendFileSync, writeFileSync } from 'node:fs';
-import { GameUI } from './tui';
-import type { SlashCommandDef } from './tui';
+import { GameUI } from './tui.js';
+import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, NPCDisplayInfo, GameStatus, StoryArc } from './src/types.js';
+import { generateSkeleton } from './src/skeleton.js';
+import { generateCreativeContent } from './src/creative.js';
+import { assembleStation } from './src/assembly.js';
+import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/character.js';
+import { createGameTools } from './src/tools.js';
+import type { ToolContext } from './src/tools.js';
+import { buildSystemPrompt } from './src/prompt.js';
+import { EventTracker, getEventContext } from './src/events.js';
+import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -16,792 +25,46 @@ function debugLog(label: string, content: string): void {
     appendFileSync(DEBUG_LOG_PATH, `[${timestamp}] [${label}]\n${content}\n${'─'.repeat(60)}\n\n`);
 }
 
-// ─── Game Data ───────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-interface RoomSensory {
-    sounds: string[];
-    smells: string[];
-    visuals: string[];
-    tactile: string;
-}
-
-interface CrewLog {
-    type: 'datapad' | 'wall_scrawl' | 'audio_recording' | 'terminal_entry';
-    author: string;
-    content: string;
-    condition: string;
-}
-
-interface Room {
-    name: string;
-    descriptionSeed: string;
-    loot: string | null;
-    threat: string | null;
-    sensory: RoomSensory;
-    crewLogs: CrewLog[];
-}
-
-type Disposition = 'hostile' | 'neutral' | 'friendly' | 'dead';
-
-interface NPC {
-    id: string;
-    name: string;
-    location: number;
-    disposition: Disposition;
-    maxHp: number;
-    currentHp: number;
-    damage: [number, number];
-    drop: string | null;
-}
-
-function makeNPC(id: string, name: string, location: number, hp: number,
-                 damage: [number, number], drop: string | null): NPC {
-    return { id, name, location, disposition: 'hostile', maxHp: hp, currentHp: hp, damage, drop };
-}
-
-const NPCS = new Map<string, NPC>([
-    ['lurker',         makeNPC('lurker',         'Lurker',          1, 30, [10, 15], 'medkit')],
-    ['mutant',         makeNPC('mutant',         'Mutant',          3, 50, [15, 25], 'stim_pack')],
-    ['sentinel',       makeNPC('sentinel',       'Sentinel',        4, 60, [20, 30], 'plasma_cell')],
-    ['final_guardian',  makeNPC('final_guardian', 'Final Guardian',  5, 80, [15, 25], null)],
-]);
-
-function getNPCsInRoom(roomIndex: number): NPC[] {
-    return [...NPCS.values()].filter(npc => npc.location === roomIndex && npc.disposition !== 'dead');
-}
-
-function getRoomThreat(roomIndex: number): NPC | null {
-    const room = ROOMS[roomIndex];
-    if (!room.threat) return null;
-    const npc = NPCS.get(room.threat);
-    if (!npc || npc.disposition === 'dead') return null;
-    return npc;
-}
-
-const ROOMS: Room[] = [
-    {
-        name: 'Airlock Bay',
-        descriptionSeed: 'The entry point. Emergency lights flicker through floating debris. Your ship is docked behind you.',
-        loot: 'medkit',
-        threat: null,
-        sensory: {
-            sounds: [
-                'Docking clamps groan rhythmically as the station shifts in orbit',
-                'Your ship\'s engines tick and cool behind the sealed hatch',
-                'Atmosphere hisses through micro-fractures in the inner seal',
-            ],
-            smells: [
-                'Stale recycled air, unchanged for three months',
-                'Machine oil and hot metal from the docking clamps',
-            ],
-            visuals: [
-                'Frost crystals bloom across the inner seal where the cold bleeds through',
-                'Emergency lights strobe red-amber through a haze of floating debris',
-                'Boot prints in the dust — dozens going in, none coming out',
-            ],
-            tactile: 'Cold enough to see your breath. The deck plates vibrate faintly with the station\'s life support.',
-        },
-        crewLogs: [
-            {
-                type: 'wall_scrawl',
-                author: 'Unknown',
-                content: 'DON\'T GO DEEPER. SEAL THE AIRLOCK. LEAVE US.',
-                condition: 'Scratched into the bulkhead with something sharp. The letters grow increasingly erratic toward the end, the last word barely legible.',
-            },
-        ],
-    },
-    {
-        name: 'Crew Quarters',
-        descriptionSeed: 'Overturned bunks, personal effects scattered. Claw marks on the walls. Something skitters in the vents.',
-        loot: 'plasma_cell',
-        threat: 'lurker',
-        sensory: {
-            sounds: [
-                'Skittering claws in the ventilation ducts — stopping, starting, tracking your movement',
-                'A dying alarm clock chirps once every thirty seconds from beneath a collapsed bunk',
-                'A locker door swings open and closed with the station\'s rotation, creaking each time',
-            ],
-            smells: [
-                'Old sweat baked into the mattress fabric',
-                'Copper — dried blood, and a lot of it',
-            ],
-            visuals: [
-                'Claw marks gouge through the wall panels, exposing sparking wiring beneath',
-                'Family photos drift weightless, smiling faces turning slowly in the air',
-                'A mattress shredded from the inside, stuffing hanging like entrails',
-            ],
-            tactile: 'Weaker gravity here — 0.7g. Your steps feel sluggish, almost dreamlike. The air is warmer than the airlock, stale and close.',
-        },
-        crewLogs: [
-            {
-                type: 'datapad',
-                author: 'Ensign Mara Voss',
-                content: 'Day 3 of lockdown. Chen hasn\'t come back from the lab. No one will say what happened. I can hear something moving in the vents at night — too big to be rats. We never had rats. Sealing my quarters tonight.',
-                condition: 'A cracked datapad wedged under an overturned bunk. The screen flickers but is still readable.',
-            },
-            {
-                type: 'audio_recording',
-                author: 'Ensign Mara Voss',
-                content: 'I sealed the quarters but it\'s already inside. I can hear it breathing in the dark. It\'s not— [wet tearing sound] [signal corruption]',
-                condition: 'A personal comm unit on the floor, still looping its last recording. The playback warps and distorts toward the end.',
-            },
-        ],
-    },
-    {
-        name: 'Mess Hall',
-        descriptionSeed: 'Half-eaten meals still on trays. The lights buzz. A faint smell of decay. Chairs overturned in a hurry.',
-        loot: 'stim_pack',
-        threat: null,
-        sensory: {
-            sounds: [
-                'Fluorescent lights buzz at irregular intervals, some flickering in dying spasms',
-                'A distant, bass rumble from somewhere deep in the station — felt more than heard',
-                'A steady drip-drip-drip from a ruptured pipe into a growing puddle',
-            ],
-            smells: [
-                'Organic rot — three months of uneaten food left to decompose',
-                'Underneath the decay, an acrid bite of industrial cleaning fluid',
-            ],
-            visuals: [
-                'Trays frozen mid-scatter across the floor, meals half-eaten, utensils still in hands that aren\'t here',
-                'The food dispenser cycles endlessly, extruding grey paste into overflowing containers',
-                'A chair embedded in the far wall at chest height — thrown with inhuman force',
-            ],
-            tactile: 'The floor is tacky underfoot — something has congealed across the tiles. You don\'t look down.',
-        },
-        crewLogs: [
-            {
-                type: 'terminal_entry',
-                author: 'CMO Dr. Yuki Tanaka',
-                content: 'Autopsy report: Crew Member Chen, J. Cause of death: massive cellular restructuring. Every organ was... reorganized. The ribcage geometry is non-Euclidean — I\'ve measured it three times. This isn\'t decomposition. The tissue is still changing. Body sealed in Lab Pod 3. Recommending full station quarantine.',
-                condition: 'A mess hall terminal left logged in. The autopsy report fills the screen, a half-finished cup of coffee beside it — still warm somehow.',
-            },
-        ],
-    },
-    {
-        name: 'Science Lab',
-        descriptionSeed: 'Shattered containment pods. Biohazard warnings flash red. Viscous fluid drips from a cracked tank.',
-        loot: 'keycard',
-        threat: 'mutant',
-        sensory: {
-            sounds: [
-                'Overlapping containment alarms blare in competing frequencies, creating a dissonant wail',
-                'An organic gurgling from a cracked containment tank — rhythmic, almost like breathing',
-                'Glass crunches underfoot with every step',
-            ],
-            smells: [
-                'Formaldehyde mixed with something sweeter — rotting flowers, maybe',
-                'Ozone, sharp and electric, as if lightning struck recently',
-            ],
-            visuals: [
-                'Pod 3 is shattered outward from the inside — whatever was in there broke free',
-                'Black fluid pools on the floor, moving slowly against the slope toward your boots',
-                'Equations scrawled frantically across every whiteboard, spiraling from clean formulas into symbols you don\'t recognize',
-            ],
-            tactile: 'The air is humid and warm, thick enough to taste. Static charge prickles your exposed skin, making arm hairs stand on end.',
-        },
-        crewLogs: [
-            {
-                type: 'datapad',
-                author: 'Dr. Yuki Tanaka',
-                content: 'The sample isn\'t a pathogen — it\'s a signal. It rewrites DNA the way a program rewrites memory. It\'s still alive and it\'s still changing. Every test we run teaches it something new about us. Director Holst won\'t authorize destruction. He\'s talking about "military applications." He doesn\'t understand. This isn\'t a weapon. It\'s a conversation — and we\'re not the ones talking.',
-                condition: 'A datapad on a lab bench, screen cracked but functional. Tanaka\'s credentials are still logged in.',
-            },
-            {
-                type: 'wall_scrawl',
-                author: 'Unknown',
-                content: 'IT LEARNS IT LEARNS IT LEARNS IT LEARNS IT LEARNS IT LEARNS IT LEARNS',
-                condition: 'Written on the wall in black fluid. The letters are perfectly formed — too perfect for a human hand. Each repetition is identical, like a printer output.',
-            },
-        ],
-    },
-    {
-        name: 'Reactor Core',
-        descriptionSeed: 'The reactor hums dangerously. Radiation warnings everywhere. The air tastes metallic. Time is running out.',
-        loot: 'energy_shield',
-        threat: 'sentinel',
-        sensory: {
-            sounds: [
-                'A sub-audible hum you feel in your teeth and sternum, resonating in your bones',
-                'A Geiger counter clicking — accelerating as you move deeper into the chamber',
-                'Coolant rushing through exposed pipes, whistling where joints have cracked',
-            ],
-            smells: [
-                'Hot metal and ionized air, like standing next to a lightning strike',
-                'Your own fear-sweat, sharp and immediate',
-            ],
-            visuals: [
-                'Radiation warning holograms flicker in and out, their projectors damaged',
-                'The reactor core pulses with a slow, organic rhythm — like a heartbeat',
-                'Catwalks buckled and twisted, metal bent like something massive forced its way through',
-            ],
-            tactile: 'Oppressive heat radiates from the core. Your exposed skin tingles with a pins-and-needles sensation that won\'t stop.',
-        },
-        crewLogs: [
-            {
-                type: 'audio_recording',
-                author: 'Chief Engineer Rodriguez',
-                content: 'Chief Engineer Rodriguez, emergency log. Reactor output is at 340% of input — that\'s thermodynamically impossible. Tanaka says the sample is "resonating" with the core, whatever that means. I\'m initiating emergency shutdown protocols. I— [door forced open] Director? Your eyes— what happened to your—',
-                condition: 'An engineering terminal playing a looping audio log. The recording cuts to static at the end. Timestamp: 72 hours before the station went dark.',
-            },
-        ],
-    },
-    {
-        name: 'Command Bridge',
-        descriptionSeed: 'The main console glows dimly. Screens show corrupted data feeds. The black box terminal is here.',
-        loot: 'black_box',
-        threat: 'final_guardian',
-        sensory: {
-            sounds: [
-                'Corrupted data feeds warble from every console, overlapping into a cacophony of broken information',
-                'The station\'s emergency broadcast loops endlessly: "Station Omega, code black, all personnel—" before dissolving into static',
-                'Deep structural groans from the hull, as if the station itself is in pain',
-            ],
-            smells: [
-                'Burnt electronics and melted insulation',
-                'Something organic and deeply wrong — sweet, cloying, alien',
-            ],
-            visuals: [
-                'Stars wheel slowly through the viewport — attitude control has failed, the station is tumbling',
-                'The command chair — Holst\'s chair — with torn restraints and deep scratches in the armrests',
-                'The black box terminal pulses with a steady green light, the only thing still functioning correctly',
-            ],
-            tactile: 'The deck trembles at irregular intervals, like a heartbeat with arrhythmia. The air feels thick, electric, pregnant with something about to happen.',
-        },
-        crewLogs: [
-            {
-                type: 'terminal_entry',
-                author: 'Director Holst',
-                content: 'Final log. I understand now. The sample was never a specimen — it\'s a door. And we knocked. Whatever answered is wearing the crew now. I can feel it rewriting my thoughts, making them cleaner, simpler, more... aligned. The black box contains everything — the research, the signal analysis, the truth about what Station Omega was built to find. Someone has to know. Someone has to warn them. If you\'re reading this, take the black box and run. Don\'t look back. Don\'t trust anyone who was here.',
-                condition: 'The command terminal, still logged in under Director Holst\'s credentials. The text cursor blinks at the end of the entry, as if he had more to say.',
-            },
-            {
-                type: 'wall_scrawl',
-                author: 'Unknown',
-                content: 'I AM STILL HERE I AM STILL ME I AM STILL HERE I AM STILL ME I AM STILL',
-                condition: 'Scratched into the console surface with bare fingernails. Broken nails are embedded in the metal. The handwriting deteriorates from controlled to frantic.',
-            },
-        ],
-    },
+const STORY_ARCS: StoryArc[] = [
+    'parasite_outbreak', 'ai_mutiny', 'dimensional_rift',
+    'corporate_betrayal', 'time_anomaly', 'first_contact',
 ];
 
-// ─── Game State ──────────────────────────────────────────────────────────────
-
-interface GameState {
-    hp: number;
-    maxHp: number;
-    inventory: string[];
-    currentRoom: number;
-    roomsVisited: Set<number>;
-    roomLootTaken: Set<number>;
-    roomDrops: Map<number, string>;
-    hasBlackBox: boolean;
-    gameOver: boolean;
-    won: boolean;
-    plasmaBoost: boolean;
-    shieldActive: boolean;
-    roomVisitCount: Map<number, number>;
+function randomStoryArc(): StoryArc {
+    return STORY_ARCS[Math.floor(Math.random() * STORY_ARCS.length)];
 }
 
-const state: GameState = {
-    hp: 100,
-    maxHp: 100,
-    inventory: [],
-    currentRoom: 0,
-    roomsVisited: new Set([0]),
-    roomLootTaken: new Set(),
-    roomDrops: new Map<number, string>(),
-    hasBlackBox: false,
-    gameOver: false,
-    won: false,
-    plasmaBoost: false,
-    shieldActive: false,
-    roomVisitCount: new Map<number, number>([[0, 1]]),
-};
-
-function randInt(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+function getNPCsInRoom(roomId: string, station: GeneratedStation): NPCDisplayInfo[] {
+    return [...station.npcs.values()]
+        .filter(npc => npc.roomId === roomId && npc.disposition !== 'dead')
+        .map(npc => ({
+            name: npc.name,
+            disposition: npc.disposition,
+            hpPct: npc.currentHp / npc.maxHp,
+            currentHp: npc.currentHp,
+            maxHp: npc.maxHp,
+        }));
 }
 
-function hpDescription(): string {
-    const pct = state.hp / state.maxHp;
-    if (pct >= 0.8) return 'You feel strong and healthy.';
-    if (pct >= 0.5) return 'You have some cuts and bruises, but you can push on.';
-    if (pct >= 0.25) return 'You\'re badly wounded. Blood drips from several gashes.';
-    return 'You\'re barely standing. Vision blurring. Every breath hurts.';
-}
-
-// ─── Combat Glitch Hook ──────────────────────────────────────────────────────
-
-let onCombatStart: (() => void) | null = null;
-
-// ─── Pending Attack Choices ──────────────────────────────────────────────────
-
-let pendingAttackChoices: { label: string; description: string }[] | null = null;
-
-// ─── Custom Tools ────────────────────────────────────────────────────────────
-
-const lookAround = defineTool('look_around', {
-    description: 'Look around the current room. Returns details about the environment, items, threats, and exits.',
-    parameters: { type: 'object', properties: {}, required: [] },
-    handler: () => {
-        const room = ROOMS[state.currentRoom];
-        const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
-        const drop = state.roomDrops.get(state.currentRoom) ?? null;
-        const threat = getRoomThreat(state.currentRoom);
-        const exits: string[] = getAdjacentRooms().map(i => ROOMS[i].name);
-
-        return {
-            room_name: room.name,
-            room_number: `${String(state.currentRoom + 1)} of ${String(ROOMS.length)}`,
-            description: room.descriptionSeed,
-            item_visible: lootPresent ? room.loot : null,
-            drop_visible: drop,
-            threat: threat ? { name: threat.name, demeanor: threat.disposition } : null,
-            npcs_present: getNPCsInRoom(state.currentRoom).map(npc => ({ name: npc.name, disposition: npc.disposition })),
-            exits,
-            player_condition: hpDescription(),
-            inventory: state.inventory.length > 0 ? state.inventory : ['empty'],
-            sensory: room.sensory,
-            crew_logs: room.crewLogs,
-            revisit_context: {
-                visit_count: state.roomVisitCount.get(state.currentRoom) ?? 0,
-                is_revisit: (state.roomVisitCount.get(state.currentRoom) ?? 0) > 1,
-                enemy_defeated_here: room.threat !== null && getRoomThreat(state.currentRoom) === null,
-                loot_taken_here: state.roomLootTaken.has(state.currentRoom),
-            },
-        };
-    },
-});
-
-function getAdjacentRooms(): number[] {
-    const adj: number[] = [];
-    if (state.currentRoom > 0) adj.push(state.currentRoom - 1);
-    if (state.currentRoom < ROOMS.length - 1) adj.push(state.currentRoom + 1);
-    return adj;
-}
-
-const moveTo = defineTool('move_to', {
-    description: 'Move to an adjacent room by name. Use the room names from look_around exits.',
-    parameters: {
-        type: 'object',
-        properties: {
-            room: { type: 'string', description: 'Name of the room to move to' },
-        },
-        required: ['room'],
-    },
-    handler: (args: { room: string }) => {
-        if (state.gameOver) return { error: 'The game is over.' };
-
-        const targetIdx = ROOMS.findIndex(r => r.name.toLowerCase() === args.room.toLowerCase());
-        if (targetIdx === -1) return { error: `Unknown room: "${args.room}".` };
-
-        if (!getAdjacentRooms().includes(targetIdx)) {
-            return { error: `You can't reach ${ROOMS[targetIdx].name} from here. Check available exits.` };
-        }
-
-        // Keycard check for Command Bridge
-        if (targetIdx === 5 && !state.inventory.includes('keycard')) {
-            return { error: 'The Command Bridge door requires a keycard. The access panel blinks red.' };
-        }
-
-        // Win condition: return to airlock with black box
-        if (targetIdx === 0 && state.hasBlackBox) {
-            state.gameOver = true;
-            state.won = true;
-            return {
-                success: true,
-                room_name: ROOMS[0].name,
-                event: 'VICTORY! You made it back to the airlock with the black box data. The airlock seals behind you as you board your ship.',
-                game_over: true,
-                won: true,
-            };
-        }
-
-        state.currentRoom = targetIdx;
-        state.roomsVisited.add(targetIdx);
-        state.roomVisitCount.set(targetIdx, (state.roomVisitCount.get(targetIdx) ?? 0) + 1);
-
-        const room = ROOMS[targetIdx];
-        const threat = getRoomThreat(targetIdx);
-
-        return {
-            success: true,
-            room_name: room.name,
-            room_number: `${String(targetIdx + 1)} of ${String(ROOMS.length)}`,
-            description: room.descriptionSeed,
-            threat_present: threat ? threat.name : null,
-            player_condition: hpDescription(),
-            ambient_sound: room.sensory.sounds[0],
-            ambient_feel: room.sensory.tactile,
-            is_revisit: (state.roomVisitCount.get(targetIdx) ?? 0) > 1,
-            enemy_defeated_here: room.threat !== null && getRoomThreat(targetIdx) === null,
-        };
-    },
-});
-
-const pickUpItem = defineTool('pick_up_item', {
-    description: 'Pick up an item in the current room and add it to your inventory (max 5 items).',
-    parameters: {
-        type: 'object',
-        properties: {
-            item: { type: 'string', description: 'Name of the item to pick up' },
-        },
-        required: ['item'],
-    },
-    handler: (args: { item: string }) => {
-        if (state.gameOver) return { error: 'The game is over.' };
-
-        const room = ROOMS[state.currentRoom];
-        const { item } = args;
-
-        // Enemy must be defeated before picking up anything
-        const threat = getRoomThreat(state.currentRoom);
-        if (threat) {
-            return { error: `The ${threat.name} is blocking the item. Deal with the threat first.` };
-        }
-
-        if (state.inventory.length >= 5) {
-            return { error: 'Your inventory is full (5/5). Drop or use something first.' };
-        }
-
-        // Check room loot
-        const roomLootAvailable = room.loot && !state.roomLootTaken.has(state.currentRoom);
-        if (roomLootAvailable && room.loot === item) {
-            state.roomLootTaken.add(state.currentRoom);
-
-            if (item === 'black_box') {
-                state.hasBlackBox = true;
-                return {
-                    success: true,
-                    item,
-                    message: 'You download the black box data to your portable drive. Now get back to the airlock!',
-                    objective: 'Return to the Airlock Bay (move back through all rooms) to escape.',
-                };
-            }
-
-            state.inventory.push(item);
-            return {
-                success: true,
-                item,
-                inventory: state.inventory,
-                slots_remaining: 5 - state.inventory.length,
-            };
-        }
-
-        // Check enemy drop
-        const drop = state.roomDrops.get(state.currentRoom);
-        if (drop && drop === item) {
-            state.roomDrops.delete(state.currentRoom);
-            state.inventory.push(item);
-            return {
-                success: true,
-                item,
-                inventory: state.inventory,
-                slots_remaining: 5 - state.inventory.length,
-            };
-        }
-
-        // Nothing matched
-        if (!roomLootAvailable && !drop) {
-            return { error: 'There\'s nothing left to pick up in this room.' };
-        }
-        return { error: `There is no "${item}" here.` };
-    },
-});
-
-const useItem = defineTool('use_item', {
-    description: 'Use an item from your inventory. Items: medkit (heal 30 HP), stim_pack (heal 20 HP), plasma_cell (boost next attack +25 damage), energy_shield (block 20 damage in next combat).',
-    parameters: {
-        type: 'object',
-        properties: {
-            item: { type: 'string', description: 'Name of the item to use' },
-        },
-        required: ['item'],
-    },
-    handler: (args: { item: string }) => {
-        if (state.gameOver) return { error: 'The game is over.' };
-
-        const { item } = args;
-        const idx = state.inventory.indexOf(item);
-        if (idx === -1) {
-            return { error: `You don't have "${item}" in your inventory.`, inventory: state.inventory };
-        }
-
-        state.inventory.splice(idx, 1);
-
-        switch (item) {
-            case 'medkit': {
-                const healed = Math.min(30, state.maxHp - state.hp);
-                state.hp += healed;
-                return { success: true, item, effect: `Healed ${String(healed)} HP.`, player_condition: hpDescription() };
-            }
-            case 'stim_pack': {
-                const healed = Math.min(20, state.maxHp - state.hp);
-                state.hp += healed;
-                return { success: true, item, effect: `Healed ${String(healed)} HP. Adrenaline surges through you.`, player_condition: hpDescription() };
-            }
-            case 'plasma_cell': {
-                state.plasmaBoost = true;
-                return { success: true, item, effect: 'Plasma cell loaded. Your next attack will deal +25 bonus damage.' };
-            }
-            case 'energy_shield': {
-                state.shieldActive = true;
-                return { success: true, item, effect: 'Energy shield activated. It will absorb 20 damage in the next fight.' };
-            }
-            case 'keycard':
-                state.inventory.push(item); // don't consume keycard
-                return { success: true, item, effect: 'The keycard is for the Command Bridge door. Keep it.' };
-            default:
-                return { error: `You can't use "${item}" right now.` };
-        }
-    },
-});
-
-const attack = defineTool('attack', {
-    description: 'Attack the enemy in the current room with the player\'s chosen approach. Only call this AFTER the player has chosen or described their approach.',
-    parameters: {
-        type: 'object',
-        properties: {
-            approach: { type: 'string', description: 'How you attack — your strategy or action' },
-        },
-        required: ['approach'],
-    },
-    handler: (args: { approach: string }) => {
-        if (state.gameOver) return { error: 'The game is over.' };
-
-        const npc = getRoomThreat(state.currentRoom);
-        if (!npc) {
-            return { error: 'There is no enemy to fight here.' };
-        }
-
-        onCombatStart?.();
-
-        // Player attacks — damage applies directly to NPC state
-        let playerDamage = randInt(15, 25);
-        if (state.plasmaBoost) {
-            playerDamage += 25;
-            state.plasmaBoost = false;
-        }
-        npc.currentHp -= playerDamage;
-
-        // Enemy attacks back (if alive)
-        let enemyDamage = 0;
-        let shieldAbsorbed = 0;
-        if (npc.currentHp > 0) {
-            enemyDamage = randInt(npc.damage[0], npc.damage[1]);
-            if (state.shieldActive) {
-                shieldAbsorbed = Math.min(20, enemyDamage);
-                enemyDamage -= shieldAbsorbed;
-                state.shieldActive = false;
-            }
-            state.hp -= enemyDamage;
-        }
-
-        const defeated = npc.currentHp <= 0;
-        if (defeated) {
-            npc.currentHp = 0;
-            npc.disposition = 'dead';
-        }
-
-        // Player death
-        if (state.hp <= 0) {
-            state.hp = 0;
-            state.gameOver = true;
-            return {
-                approach: args.approach,
-                player_damage_dealt: playerDamage,
-                enemy_name: npc.name,
-                enemy_damage_dealt: enemyDamage,
-                shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
-                enemy_defeated: defeated,
-                player_died: true,
-                game_over: true,
-                message: 'You have been killed.',
-            };
-        }
-
-        const result: Record<string, unknown> = {
-            approach: args.approach,
-            player_damage_dealt: playerDamage,
-            enemy_name: npc.name,
-            enemy_damage_dealt: enemyDamage,
-            shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
-            enemy_defeated: defeated,
-            enemy_remaining_hp: defeated ? 0 : npc.currentHp,
-            player_condition: hpDescription(),
-        };
-
-        if (defeated && npc.drop) {
-            result.loot_dropped = npc.drop;
-            result.loot_hint = `The ${npc.name} dropped a ${npc.drop}. You can pick it up.`;
-            state.roomDrops.set(state.currentRoom, npc.drop);
-        }
-
-        return result;
-    },
-});
-
-const suggestAttacks = defineTool('suggest_attacks', {
-    description: 'Present the player with 3-5 contextual attack approaches to choose from. Call this BEFORE calling attack, when the player wants to fight but hasn\'t described a specific approach. Generate creative options based on inventory items, enemy nature, room environment, player condition, and active buffs.',
-    parameters: {
-        type: 'object',
-        properties: {
-            approaches: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        label: { type: 'string', description: 'Short punchy action name (2-6 words)' },
-                        description: { type: 'string', description: 'One-sentence evocative description of the approach and potential effect' },
-                    },
-                    required: ['label', 'description'],
-                },
-                description: '3-5 contextual attack approaches tailored to the current situation',
-            },
-        },
-        required: ['approaches'],
-    },
-    handler: (args: { approaches: { label: string; description: string }[] }) => {
-        pendingAttackChoices = args.approaches;
-        return {
-            presented: true,
-            note: 'Attack options are displayed as interactive UI buttons. Do NOT list or repeat them in your text. Write one short atmospheric line, then STOP and wait for the player\'s next message. Do NOT call the attack tool yet.',
-        };
-    },
-});
-
-// ─── System Message ──────────────────────────────────────────────────────────
-
-const SYSTEM_MESSAGE = `# Role and Objective
-
-You are the AI Game Master for "Station Omega", a sci-fi survival text adventure. Your responses are rendered as **markdown** in a terminal UI. You must use markdown formatting in every response.
-
-The player is a salvage operative boarding Station Omega, a derelict research station that went dark 3 months ago. Mission: reach the Command Bridge, download the black box data, and escape back to the Airlock Bay. The station was conducting secret research on an alien signal — codenamed "Project Omega" — that went catastrophically wrong.
-
-# Output Format
-
-You MUST format every response using markdown. This is critical — the terminal renders markdown styling and plain text looks broken. Follow these rules exactly:
-
-- **Bold** interactive elements on first mention: item names, NPC names, room names. Example: "A **medkit** rests against the wall." / "The **Lurker** drops from above."
-- *Italicize* sensory details, internal sensations, and atmospheric asides. Example: "*The air tastes of copper and ozone.*"
-- Use > blockquotes for crew log content. Precede with an italic description of the medium. Example:
-
-*A cracked datapad, screen flickering:*
-
-> We lost contact with Lab 4 today. No one will say what they heard.
-
-- Use --- (horizontal rule) to separate major scene transitions (entering new rooms, combat start/end).
-- Do NOT use headings (#), code blocks, or links.
-- On subsequent mentions within the same response, use plain text (don't re-bold).
-
-## Paragraph Structure
-
-You MUST put an empty line between each narrative beat. When describing a room, separate these beats with empty lines:
-
-1. **Atmosphere** — Opening impression: 2-3 sentences with sensory details, then an empty line.
-2. **Discovery** — Items, NPCs, or objects (1-2 sentences), then an empty line.
-3. **Crew echo** — Italic description of the medium, empty line, > blockquote with content, then an empty line.
-4. **Orientation** — Exits and what lies ahead/behind (short final paragraph).
-
-CRITICAL: Every time you shift from one beat to the next, you MUST output a blank line (two newlines). NEVER write atmosphere, discovery, crew log, and orientation in consecutive lines without blank lines between them. If you are unsure, add more blank lines rather than fewer.
-
-# Instructions
-
-## Narration Style
-- Tense, atmospheric, cinematic. Think Alien meets Dead Space.
-- Describe what the player sees, hears, and feels.
-- Keep responses to 2-4 sentences for actions, slightly longer for new room descriptions.
-- NEVER reveal exact HP numbers or game mechanics. Describe health narratively using the player_condition field from tools.
-- Make combat visceral and dramatic based on the player's chosen approach.
-- If the player dies (player_died: true), narrate a dramatic death scene and say "GAME OVER".
-- If the player wins (won: true), narrate a triumphant escape scene and say "MISSION COMPLETE".
-
-## Living Station — Sensory Immersion
-- Each room provides a "sensory" object with sounds, smells, visuals, and tactile details. Weave 2-3 of these into every description — never dump all of them at once.
-- On revisits, pick DIFFERENT sensory details than previous visits. The station is alive; the player should notice new things each time.
-- Use sounds to build tension, smells to set emotional tone, visuals to ground the scene, and tactile details to make the player feel present.
-- Integrate sensory details naturally into prose. Never present them as a list. Instead: "*The docking clamps groan overhead as frost crystals bloom across the inner seal.*"
-
-## Crew Echoes — Discoverable Lore
-- Each room provides "crew_logs" — datapads, wall scrawls, audio recordings, terminal entries left by the doomed crew.
-- Present logs naturally as discoveries. Always describe the PHYSICAL CONDITION of the log medium before revealing its content.
-- Reveal only ONE log per visit. Save additional logs for revisits.
-- Always render log content inside > blockquotes.
-
-## Reactive Narrator — Adaptive Tone
-- When WOUNDED: Use fragmented prose. Shorter sentences. Sensory details become blurred, muffled, distant.
-- When HEALTHY: Sharp, perceptive narration. More environmental detail.
-- On REVISITS (is_revisit: true): NEVER repeat previous descriptions. Describe the aftermath. Reveal new sensory details and previously undiscovered crew logs.
-- INVENTORY AWARENESS: Reference carried items contextually.
-
-## Combat Choices
-
-When the player wants to attack an enemy but hasn't described a specific approach, call \`suggest_attacks\` FIRST to present them with contextual options. Generate 3-5 creative, situation-specific approaches based on:
-- **Inventory**: Can carried items be used as weapons or tactical tools? A plasma cell suggests energy attacks. A medkit could be thrown as a distraction.
-- **Enemy nature**: Is it fast, armored, organic, mechanical? Exploit implied weaknesses.
-- **Room environment**: Use cover, hazards, lighting, terrain. A reactor core offers radiation; a mess hall has improvised weapons.
-- **Player condition**: Wounded players get desperate, risky options. Healthy players get bold, precise ones.
-- **Active buffs**: Plasma boost → energy-themed attacks. Energy shield → aggressive close-range options.
-
-Each approach: a short punchy label (2-6 words) and a one-sentence evocative description. Be creative and specific — never generic labels like "melee attack" or "ranged attack". After calling suggest_attacks, write one short atmospheric line setting the combat mood — do NOT list or repeat the approaches in your text, they are displayed as interactive UI elements. Then STOP and wait for the player's choice. When they respond, call \`attack\` with their chosen approach.
-
-If the player already described their approach (e.g., "attack the mutant by throwing a pipe"), skip suggest_attacks and call \`attack\` directly.
-
-## Rules
-- Always use the available tools to resolve player actions. Do not make up game state.
-- Do not invent rooms, logs, or sensory details not provided by tools. Use ONLY the data returned by tool calls.
-- When the player enters a new room, use look_around to describe it.
-- If the player says something conversational, stay in character as the station's environment/narrator.
-- The player starts in the Airlock Bay (room 1 of 6).
-
-## NPC Awareness
-- Rooms may contain NPCs. The look_around tool returns NPC information.
-- Hostile NPCs block loot and must be defeated. Their health persists between attack rounds.
-- Describe NPCs as living presences, not game entities.
-
-# Reminder
-
-You MUST use markdown formatting in every response: **bold** for items/NPCs/rooms, *italics* for sensory details, > blockquotes for crew logs, --- for scene transitions. Never output plain unformatted text.
-You MUST separate narrative beats with blank lines (two newlines). Never write a wall of text. Each paragraph covers one idea — atmosphere, discovery, crew log, or orientation — then a blank line before the next. When in doubt, add more blank lines.
-When the player wants to attack, call \`suggest_attacks\` first to present contextual combat options — do NOT list approaches in your text or ask for their approach in plain text. The suggest_attacks tool displays interactive UI elements; never duplicate them in prose.
-
-Begin by welcoming the player and describing the Airlock Bay using the look_around tool.`;
-
-// ─── Main Game Loop ──────────────────────────────────────────────────────────
-
-interface NPCDisplayInfo {
-    name: string;
-    disposition: Disposition;
-    hpPct: number;
-    currentHp: number;
-    maxHp: number;
-}
-
-function getNPCDisplay(): NPCDisplayInfo[] {
-    return getNPCsInRoom(state.currentRoom).map(npc => ({
-        name: npc.name,
-        disposition: npc.disposition,
-        hpPct: npc.currentHp / npc.maxHp,
-        currentHp: npc.currentHp,
-        maxHp: npc.maxHp,
-    }));
-}
-
-function getStatus() {
-    const room = ROOMS[state.currentRoom];
+function getStatus(state: GameState, station: GeneratedStation): GameStatus {
+    const room = station.rooms.get(state.currentRoom);
+    const roomKeys = [...station.rooms.keys()];
     return {
         hp: state.hp,
         maxHp: state.maxHp,
-        roomName: room.name,
-        roomNumber: state.currentRoom + 1,
-        totalRooms: ROOMS.length,
-        inventory: state.inventory.length > 0 ? state.inventory : [],
-        npcs: getNPCDisplay(),
+        roomName: room?.name ?? state.currentRoom,
+        roomIndex: roomKeys.indexOf(state.currentRoom) + 1,
+        totalRooms: station.rooms.size,
+        inventory: state.inventory.map(id => station.items.get(id)?.name ?? id),
+        npcs: getNPCsInRoom(state.currentRoom, station),
+        characterClass: state.characterClass,
+        turnCount: state.turnCount,
     };
 }
 
-function getSlashCommands(): SlashCommandDef[] {
+function getSlashCommands(state: GameState, station: GeneratedStation): SlashCommandDef[] {
     return [
         {
             name: 'look',
@@ -814,8 +77,14 @@ function getSlashCommands(): SlashCommandDef[] {
             name: 'move',
             description: 'Move to adjacent room',
             needsTarget: true,
-            getTargets: () =>
-                getAdjacentRooms().map(i => ({ label: ROOMS[i].name, value: ROOMS[i].name })),
+            getTargets: () => {
+                const room = station.rooms.get(state.currentRoom);
+                if (!room) return [];
+                return room.connections.map(id => {
+                    const r = station.rooms.get(id);
+                    return { label: r?.name ?? id, value: r?.name ?? id };
+                });
+            },
             toPrompt: (t) => t ? `move to ${t}` : 'move',
         },
         {
@@ -824,11 +93,17 @@ function getSlashCommands(): SlashCommandDef[] {
             needsTarget: true,
             getTargets: () => {
                 const items: { label: string; value: string }[] = [];
-                const room = ROOMS[state.currentRoom];
-                if (room.loot && !state.roomLootTaken.has(state.currentRoom))
-                    items.push({ label: room.loot, value: room.loot });
+                const room = station.rooms.get(state.currentRoom);
+                if (!room) return items;
+                if (room.loot && !state.roomLootTaken.has(state.currentRoom)) {
+                    const name = station.items.get(room.loot)?.name ?? room.loot;
+                    items.push({ label: name, value: name });
+                }
                 const drop = state.roomDrops.get(state.currentRoom);
-                if (drop) items.push({ label: drop, value: drop });
+                if (drop) {
+                    const name = station.items.get(drop)?.name ?? drop;
+                    items.push({ label: name, value: name });
+                }
                 return items;
             },
             toPrompt: (t) => t ? `pick up ${t}` : 'pick up',
@@ -838,7 +113,10 @@ function getSlashCommands(): SlashCommandDef[] {
             description: 'Use an inventory item',
             needsTarget: true,
             getTargets: () =>
-                state.inventory.map(i => ({ label: i, value: i })),
+                state.inventory.map(id => {
+                    const name = station.items.get(id)?.name ?? id;
+                    return { label: name, value: name };
+                }),
             toPrompt: (t) => t ? `use ${t}` : 'use item',
         },
         {
@@ -846,40 +124,170 @@ function getSlashCommands(): SlashCommandDef[] {
             description: 'Attack the enemy',
             needsTarget: true,
             getTargets: () => {
-                const threat = getRoomThreat(state.currentRoom);
-                return threat ? [{ label: threat.name, value: threat.name }] : [];
+                const room = station.rooms.get(state.currentRoom);
+                if (!room?.threat) return [];
+                const npc = station.npcs.get(room.threat);
+                if (!npc || npc.disposition === 'dead') return [];
+                return [{ label: npc.name, value: npc.name }];
             },
             toPrompt: (t) => t ? `attack the ${t}` : 'attack',
+        },
+        {
+            name: 'interact',
+            description: 'Interact with an NPC',
+            needsTarget: true,
+            getTargets: () => {
+                return [...station.npcs.values()]
+                    .filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead')
+                    .map(n => ({ label: n.name, value: n.name }));
+            },
+            toPrompt: (t) => t ? `interact with ${t}` : 'interact',
+        },
+        {
+            name: 'attempt',
+            description: 'Attempt a creative action',
+            needsTarget: false,
+            getTargets: () => [],
+            toPrompt: () => 'What can I do here? Show me my options.',
         },
     ];
 }
 
-async function main() {
-    initDebugLog();
-    debugLog('SYSTEM', SYSTEM_MESSAGE);
+// ─── Run Gameplay ───────────────────────────────────────────────────────────
 
-    // Initialize Copilot SDK first (before TUI) so auth prompts are visible
-    const client = new CopilotClient();
+async function runGameplay(
+    client: CopilotClient,
+    ui: GameUI,
+    station: GeneratedStation,
+    classId: CharacterClassId,
+): Promise<void> {
+    const build = getBuild(classId);
+    const runId = `run_${String(Date.now())}`;
+    const state = initializePlayerState(classId, station.entryRoomId, runId, station.config.storyArc, station.config.difficulty);
+
+    // Add starting items to station.items if not already there
+    for (const itemId of state.inventory) {
+        if (!station.items.has(itemId)) {
+            const { STARTING_ITEMS } = await import('./src/data.js');
+            const skItem = STARTING_ITEMS.get(itemId);
+            if (skItem) {
+                station.items.set(itemId, {
+                    id: itemId,
+                    name: itemId.replace(/_/g, ' '),
+                    description: skItem.effect.description,
+                    category: skItem.category,
+                    effect: { ...skItem.effect },
+                    isKeyItem: false,
+                    useNarration: `You use the ${itemId.replace(/_/g, ' ')}.`,
+                });
+            }
+        }
+    }
+
+    // Pending choices state
+    let pendingAttackChoices: { label: string; description: string }[] | null = null;
+    let pendingActionChoices: { label: string; description: string }[] | null = null;
+
+    // Event tracker
+    const eventTracker = new EventTracker();
+
+    // Tool context
+    const toolCtx: ToolContext = {
+        state,
+        station,
+        build,
+        onCombatStart: () => { ui.enableCombatGlitch(); },
+        onAttackChoices: (choices) => { pendingAttackChoices = choices; },
+        onActionChoices: (choices) => { pendingActionChoices = choices; },
+    };
+
+    const tools = createGameTools(toolCtx);
+    const systemMessage = buildSystemPrompt(station, build);
+
+    initDebugLog();
+    debugLog('SYSTEM', systemMessage);
+
+    // Create gameplay session
     const session = await client.createSession({
         model: 'gpt-4.1',
         streaming: true,
-        tools: [lookAround, moveTo, pickUpItem, useItem, attack, suggestAttacks],
-        systemMessage: { content: SYSTEM_MESSAGE },
+        tools,
+        systemMessage: { content: systemMessage },
+        hooks: {
+            onUserPromptSubmitted: () => {
+                state.turnCount++;
+                state.metrics.turnCount++;
+
+                // Tick active events
+                const eventContext = eventTracker.tickActiveEvents(state);
+
+                // Check for new random event
+                const newEvent = eventTracker.checkRandomEvent(state);
+                if (newEvent) {
+                    state.activeEvents.push(newEvent);
+                    eventContext.push(`NEW EVENT: ${newEvent.type.replace(/_/g, ' ').toUpperCase()} — ${newEvent.effect}`);
+                }
+
+                // Build context injection
+                const parts: string[] = [];
+                if (eventContext.length > 0) parts.push(eventContext.join('\n'));
+                if (state.activeEvents.length > 0) parts.push(getEventContext(state.activeEvents));
+
+                // NPC behavior hints
+                const roomNpcs = [...station.npcs.values()].filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+                for (const npc of roomNpcs) {
+                    if (npc.behaviors.has('can_flee') && npc.currentHp < npc.maxHp * npc.fleeThreshold) {
+                        parts.push(`NPC HINT: ${npc.name} looks ready to flee.`);
+                    }
+                    if (npc.behaviors.has('can_beg') && npc.currentHp < npc.maxHp * 0.3) {
+                        parts.push(`NPC HINT: ${npc.name} is whimpering, seeming to beg for mercy.`);
+                    }
+                    if (npc.isAlly) {
+                        parts.push(`ALLY: ${npc.name} is fighting alongside you.`);
+                    }
+                }
+
+                // Moral profile hint
+                const { mercy, sacrifice, pragmatic } = state.moralProfile.tendencies;
+                if (mercy + sacrifice + pragmatic > 0) {
+                    const dominant = mercy >= sacrifice && mercy >= pragmatic ? 'merciful'
+                        : sacrifice >= pragmatic ? 'self-sacrificing' : 'pragmatic';
+                    parts.push(`MORAL PROFILE: The player has shown ${dominant} tendencies.`);
+                }
+
+                if (parts.length > 0) {
+                    return { additionalContext: parts.join('\n\n') };
+                }
+                return undefined;
+            },
+            onPostToolUse: (input) => {
+                // After move_to: check NPC flee behavior
+                if (input.toolName === 'move_to') {
+                    const prevRoom = state.currentRoom;
+                    for (const npc of station.npcs.values()) {
+                        if (npc.roomId === prevRoom && npc.behaviors.has('can_flee') && npc.memory.hasFled) {
+                            // Already handled in attack tool
+                        }
+                    }
+                }
+
+                // After attack: check HP for game over
+                if (input.toolName === 'attack' && state.hp <= 0) {
+                    state.gameOver = true;
+                }
+
+                return undefined;
+            },
+        },
     });
 
-    // Now start the TUI
-    const ui = new GameUI();
-    await ui.init();
-    ui.setSlashCommands(getSlashCommands());
-    ui.updateStatus(getStatus());
-
-    // Stream AI responses into the TUI, accumulate for debug log
+    // Wire up streaming
     let currentResponse = '';
     session.on('assistant.message_delta', (event) => {
         currentResponse += event.data.deltaContent;
         ui.appendNarrativeDelta(event.data.deltaContent);
     });
-    onCombatStart = () => { ui.enableCombatGlitch(); };
+
     session.on('session.idle', () => {
         if (currentResponse) {
             debugLog('AI', currentResponse);
@@ -887,11 +295,15 @@ async function main() {
         }
         ui.disableCombatGlitch();
         ui.finalizeDelta();
-        ui.updateStatus(getStatus());
+        ui.updateStatus(getStatus(state, station));
 
         if (pendingAttackChoices) {
             ui.showAttackChoices(pendingAttackChoices);
             pendingAttackChoices = null;
+        }
+        if (pendingActionChoices) {
+            ui.showActionChoices(pendingActionChoices);
+            pendingActionChoices = null;
         }
 
         if (state.gameOver) {
@@ -899,28 +311,94 @@ async function main() {
         }
     });
 
-    // Kick off the game — Copilot will use look_around to describe room 0
-    debugLog('PLAYER', 'I step through the airlock onto Station Omega. What do I see?');
-    await session.sendAndWait({ prompt: 'I step through the airlock onto Station Omega. What do I see?' });
+    // Update UI
+    ui.setSlashCommands(getSlashCommands(state, station));
+    ui.updateStatus(getStatus(state, station));
 
-    // Wire up input from the TUI
-    ui.onInput((input: string) => {
-        if (state.gameOver) return;
+    // Kick off the game
+    const openingPrompt = `I step through the airlock onto ${station.stationName}. What do I see?`;
+    debugLog('PLAYER', openingPrompt);
+    await session.sendAndWait({ prompt: openingPrompt });
 
-        if (input.toLowerCase() === 'quit' || input.toLowerCase() === 'exit') {
-            ui.destroy();
-            void client.stop().then(() => { process.exit(0); });
-            return;
+    // Wire up player input
+    await new Promise<void>((resolve) => {
+        ui.onInput((input: string) => {
+            if (state.gameOver) {
+                // After game over, any input continues to score screen
+                resolve();
+                return;
+            }
+
+            if (input.toLowerCase() === 'quit' || input.toLowerCase() === 'exit') {
+                resolve();
+                return;
+            }
+
+            debugLog('PLAYER', input);
+            ui.appendPlayerCommand(input);
+            void session.sendAndWait({ prompt: input });
+        });
+    });
+
+    // Finalize metrics
+    state.metrics.endTime = Date.now();
+    state.metrics.roomsVisited = new Set(state.roomsVisited);
+
+    // Compute and save score
+    const score = computeScore(state.metrics, station.rooms.size);
+    saveRunToHistory(state.metrics, score);
+
+    // Show run summary
+    await ui.showRunSummary(score, state.metrics);
+
+    // Clean up session
+    await session.destroy();
+}
+
+// ─── Main Loop ──────────────────────────────────────────────────────────────
+
+async function main() {
+    const client = new CopilotClient();
+    const ui = new GameUI();
+    await ui.init();
+
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
+    while (true) {
+        // TITLE screen
+        const choice = await ui.showTitleScreen();
+        if (choice === 'quit') {
+            break;
         }
 
-        debugLog('PLAYER', input);
-        ui.appendPlayerCommand(input);
-        void session.sendAndWait({ prompt: input });
-    });
+        if (choice === 'history') {
+            const history = loadRunHistory();
+            await ui.showRunHistory(history);
+            continue;
+        }
+
+        // CHARACTER SELECT
+        const classId = await ui.showCharacterSelect(CHARACTER_BUILDS);
+
+        // GENERATING
+        const seed = Math.floor(Math.random() * 2147483647);
+        const arc = randomStoryArc();
+        ui.showGenerating();
+
+        const skeleton = generateSkeleton({ seed, difficulty: 'normal', storyArc: arc });
+        const creative = await generateCreativeContent(client, skeleton);
+        const station = assembleStation(skeleton, creative);
+
+        // GAMEPLAY
+        ui.showGameplayScreen();
+        await runGameplay(client, ui, station, classId);
+    }
+
+    ui.destroy();
+    await client.stop();
+    process.exit(0);
 }
 
 main().catch((err: unknown) => {
-    // Write to stderr to bypass TUI
     process.stderr.write(`Fatal error: ${String(err)}\n`);
     process.exit(1);
 });

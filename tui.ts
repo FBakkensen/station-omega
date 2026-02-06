@@ -19,6 +19,17 @@ import {
     DistortionEffect,
 } from '@opentui/core';
 import type { CliRenderer, KeyEvent } from '@opentui/core';
+import type {
+    CharacterBuild,
+    CharacterClassId,
+    GameStatus,
+    RunHistoryEntry,
+    RunMetrics,
+    RunScore,
+    ScoreGrade,
+    SlashCommandDef,
+} from './src/types.js';
+import { CHARACTER_BUILDS } from './src/character.js';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
 
@@ -40,6 +51,12 @@ const COLORS = {
     narrative: '#d0d8e0',
     cardBg: '#243348',
     cmdCardBg: '#1e2a3a',
+    gradeS: '#ffcc00',
+    gradeA: '#00ff88',
+    gradeB: '#00e5ff',
+    gradeC: '#c0c8d4',
+    gradeD: '#ff8844',
+    gradeF: '#ff4444',
 };
 
 // ─── Markdown Theme ─────────────────────────────────────────────────────────
@@ -53,32 +70,55 @@ const mdTheme = SyntaxStyle.fromStyles({
     'markup.list.marker': { fg: RGBA.fromHex('#00e5ff') },
 });
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── ASCII Art ──────────────────────────────────────────────────────────────
 
-export interface NPCDisplayInfo {
-    name: string;
-    disposition: 'hostile' | 'neutral' | 'friendly' | 'dead';
-    hpPct: number;
-    currentHp: number;
-    maxHp: number;
+const TITLE_ART = [
+    ' \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2557   \u2588\u2588\u2557',
+    ' \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D\u255A\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255D\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u255A\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255D\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551',
+    ' \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557   \u2588\u2588\u2551   \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551   \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2551',
+    ' \u255A\u2550\u2550\u2550\u2550\u2588\u2588\u2551   \u2588\u2588\u2551   \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551   \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551\u255A\u2588\u2588\u2557\u2588\u2588\u2551',
+    ' \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551   \u2588\u2588\u2551   \u2588\u2588\u2551  \u2588\u2588\u2551   \u2588\u2588\u2551   \u2588\u2588\u2551\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2551 \u255A\u2588\u2588\u2588\u2588\u2551',
+    ' \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D   \u255A\u2550\u255D   \u255A\u2550\u255D  \u255A\u2550\u255D   \u255A\u2550\u255D   \u255A\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D  \u255A\u2550\u2550\u2550\u255D',
+    '            \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2557   \u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557',
+    '           \u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557',
+    '           \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2588\u2588\u2588\u2588\u2554\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551  \u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551',
+    '           \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551\u255A\u2588\u2588\u2554\u255D\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255D  \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551',
+    '           \u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2551 \u255A\u2550\u255D \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u255A\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2551  \u2588\u2588\u2551',
+    '            \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D     \u255A\u2550\u255D\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D  \u255A\u2550\u255D',
+];
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function gradeColor(grade: ScoreGrade): string {
+    switch (grade) {
+        case 'S': return COLORS.gradeS;
+        case 'A': return COLORS.gradeA;
+        case 'B': return COLORS.gradeB;
+        case 'C': return COLORS.gradeC;
+        case 'D': return COLORS.gradeD;
+        case 'F': return COLORS.gradeF;
+    }
 }
 
-export interface GameStatus {
-    hp: number;
-    maxHp: number;
-    roomName: string;
-    roomNumber: number;
-    totalRooms: number;
-    inventory: string[];
-    npcs: NPCDisplayInfo[];
+function scoreBar(value: number, width: number): string {
+    const filled = Math.round((Math.min(100, Math.max(0, value)) / 100) * width);
+    return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled);
 }
 
-export interface SlashCommandDef {
-    name: string;
-    description: string;
-    needsTarget: boolean;
-    getTargets: () => { label: string; value: string }[];
-    toPrompt: (target?: string) => string;
+function formatDuration(ms: number): string {
+    const totalSec = Math.floor(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${String(min)}m ${String(sec)}s`;
+}
+
+function classIcon(cls: CharacterClassId): string {
+    switch (cls) {
+        case 'soldier': return '[S]';
+        case 'engineer': return '[E]';
+        case 'medic': return '[M]';
+        case 'hacker': return '[H]';
+    }
 }
 
 // ─── GameUI ──────────────────────────────────────────────────────────────────
@@ -110,6 +150,9 @@ export class GameUI {
     private inlineChoices: SelectRenderable | null = null;
     private inlineChoicesCard: BoxRenderable | null = null;
     private inlineChoicesActive = false;
+
+    // Layout root ref for screen swaps
+    private layoutRoot!: BoxRenderable;
 
     async init(): Promise<void> {
         this.renderer = await createCliRenderer({
@@ -245,68 +288,523 @@ export class GameUI {
             return result;
         };
 
-        // Build layout
-        const layout = Box(
-            {
-                flexDirection: 'column',
-                width: '100%',
-                height: '100%',
-                backgroundColor: COLORS.bg,
-            },
-            // Main narrative panel
-            Box(
-                {
-                    flexGrow: 1,
-                    flexDirection: 'column',
-                    borderStyle: 'rounded',
-                    borderColor: COLORS.border,
-                    title: ' 🚀 STATION OMEGA ',
-                    titleAlignment: 'center',
-                    backgroundColor: COLORS.panelBg,
-                },
-                this.narrativeScroll,
-            ),
-            // NPC contacts bar
-            Box(
-                {
-                    height: 1,
-                    width: '100%',
-                    flexDirection: 'row',
-                    backgroundColor: COLORS.panelBg,
-                    paddingLeft: 1,
-                    paddingRight: 1,
-                },
-                this.npcText,
-            ),
-            // Status bar
-            Box(
-                {
-                    height: 1,
-                    width: '100%',
-                    flexDirection: 'row',
-                    backgroundColor: COLORS.border,
-                    paddingLeft: 1,
-                    paddingRight: 1,
-                },
-                this.statusText,
-            ),
-            // Input area
-            Box(
-                {
-                    height: 1,
-                    width: '100%',
-                    flexDirection: 'row',
-                    paddingLeft: 1,
-                },
-                Text({ content: t`${fg(COLORS.title)('❯')} ` }),
-                this.inputField,
-            ),
-        );
+        // Build gameplay layout
+        this.layoutRoot = new BoxRenderable(this.renderer, {
+            id: 'layout-root',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+        });
 
-        this.renderer.root.add(layout);
+        this.buildGameplayLayout();
+        this.renderer.root.add(this.layoutRoot);
         this.renderer.root.add(this.popupBox);
         this.inputField.focus();
     }
+
+    private buildGameplayLayout(): void {
+        // Main narrative panel
+        const narrativePanel = Box(
+            {
+                flexGrow: 1,
+                flexDirection: 'column',
+                borderStyle: 'rounded',
+                borderColor: COLORS.border,
+                title: ' STATION OMEGA ',
+                titleAlignment: 'center',
+                backgroundColor: COLORS.panelBg,
+            },
+            this.narrativeScroll,
+        );
+
+        // NPC contacts bar
+        const npcBar = Box(
+            {
+                height: 1,
+                width: '100%',
+                flexDirection: 'row',
+                backgroundColor: COLORS.panelBg,
+                paddingLeft: 1,
+                paddingRight: 1,
+            },
+            this.npcText,
+        );
+
+        // Status bar
+        const statusBar = Box(
+            {
+                height: 1,
+                width: '100%',
+                flexDirection: 'row',
+                backgroundColor: COLORS.border,
+                paddingLeft: 1,
+                paddingRight: 1,
+            },
+            this.statusText,
+        );
+
+        // Input area
+        const inputBar = Box(
+            {
+                height: 1,
+                width: '100%',
+                flexDirection: 'row',
+                paddingLeft: 1,
+            },
+            Text({ content: t`${fg(COLORS.title)('>')} ` }),
+            this.inputField,
+        );
+
+        this.layoutRoot.add(narrativePanel);
+        this.layoutRoot.add(npcBar);
+        this.layoutRoot.add(statusBar);
+        this.layoutRoot.add(inputBar);
+    }
+
+    private clearLayout(): void {
+        for (const child of this.layoutRoot.getChildren()) {
+            this.layoutRoot.remove(child.id);
+        }
+    }
+
+    // ─── Title Screen ───────────────────────────────────────────────────────
+
+    showTitleScreen(): Promise<'new_run' | 'history' | 'quit'> {
+        this.clearLayout();
+
+        const artLines = TITLE_ART.map((line, i) =>
+            new TextRenderable(this.renderer, {
+                id: `title-art-${String(i)}`,
+                content: t`${fg(COLORS.title)(line)}`,
+            })
+        );
+
+        const subtitle = new TextRenderable(this.renderer, {
+            id: 'title-subtitle',
+            content: t`${fg(COLORS.textDim)('A sci-fi survival text adventure powered by AI')}`,
+        });
+
+        const menu = new SelectRenderable(this.renderer, {
+            id: 'title-menu',
+            options: [
+                { name: 'New Run', description: 'Begin a new expedition into Station Omega', value: 'new_run' },
+                { name: 'Run History', description: 'View past expedition logs', value: 'history' },
+                { name: 'Quit', description: 'Exit the game', value: 'quit' },
+            ],
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: COLORS.bg,
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        const artBox = new BoxRenderable(this.renderer, {
+            id: 'title-art-box',
+            flexDirection: 'column',
+            alignItems: 'center',
+            paddingTop: 3,
+            paddingBottom: 1,
+            width: '100%',
+        });
+        for (const line of artLines) artBox.add(line);
+
+        const menuBox = new BoxRenderable(this.renderer, {
+            id: 'title-menu-box',
+            flexDirection: 'column',
+            alignItems: 'center',
+            paddingTop: 2,
+            width: '50%',
+            marginLeft: 15,
+        });
+        menuBox.add(subtitle);
+        menuBox.add(new TextRenderable(this.renderer, { id: 'title-spacer', content: ' ' }));
+        menuBox.add(menu);
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'title-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+        });
+        container.add(artBox);
+        container.add(menuBox);
+        this.layoutRoot.add(container);
+
+        menu.focus();
+
+        return new Promise((resolve) => {
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+                const selected = menu.getSelectedOption();
+                if (!selected) return;
+                resolve(selected.value as 'new_run' | 'history' | 'quit');
+            });
+        });
+    }
+
+    // ─── Character Select Screen ────────────────────────────────────────────
+
+    showCharacterSelect(builds: ReadonlyMap<CharacterClassId, CharacterBuild> = CHARACTER_BUILDS): Promise<CharacterClassId> {
+        this.clearLayout();
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'charsel-header',
+            content: t`${bold(fg(COLORS.title)('SELECT YOUR OPERATIVE'))}`,
+        });
+
+        const buildArray = [...builds.values()];
+        const menu = new SelectRenderable(this.renderer, {
+            id: 'charsel-menu',
+            options: buildArray.map(b => ({
+                name: `${classIcon(b.id)} ${b.name}`,
+                description: b.description,
+                value: b.id,
+            })),
+            height: buildArray.length * 2,
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: COLORS.bg,
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        const previewText = new TextRenderable(this.renderer, {
+            id: 'charsel-preview',
+            content: t`${fg(COLORS.textDim)('Select a class to see stats')}`,
+        });
+
+        const updatePreview = () => {
+            const selected = menu.getSelectedOption();
+            if (!selected) return;
+            const build = builds.get(selected.value as CharacterClassId);
+            if (!build) return;
+            const dmgRange = `${String(build.baseDamage[0])}-${String(build.baseDamage[1])}`;
+            const profs = build.proficiencies.join(', ');
+            const weaks = build.weaknesses.join(', ');
+            const startItem = build.startingItem ?? 'none';
+            previewText.content = t`${fg(COLORS.text)(`HP: ${String(build.baseHp)}  DMG: ${dmgRange}  INV: ${String(build.maxInventory)} slots`)}\n${fg(COLORS.hpGood)(`+ ${profs}`)}  ${fg(COLORS.hpLow)(`- ${weaks}`)}\n${fg(COLORS.textDim)(`Starting item: ${startItem}`)}`;
+        };
+
+        // Update preview on selection change via polling approach
+        let lastSelectedIdx = -1;
+        const pollInterval = setInterval(() => {
+            const opt = menu.getSelectedOption();
+            if (!opt) return;
+            const idx = buildArray.findIndex(b => b.id === opt.value);
+            if (idx !== lastSelectedIdx) {
+                lastSelectedIdx = idx;
+                updatePreview();
+            }
+        }, 100);
+
+        updatePreview();
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'charsel-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            paddingTop: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+        });
+        container.add(header);
+        container.add(new TextRenderable(this.renderer, { id: 'charsel-spacer1', content: ' ' }));
+        container.add(menu);
+        container.add(new TextRenderable(this.renderer, { id: 'charsel-spacer2', content: ' ' }));
+
+        const previewBox = new BoxRenderable(this.renderer, {
+            id: 'charsel-preview-box',
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            backgroundColor: COLORS.panelBg,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 1,
+            paddingBottom: 1,
+            width: '100%',
+        });
+        previewBox.add(previewText);
+        container.add(previewBox);
+
+        this.layoutRoot.add(container);
+        menu.focus();
+
+        return new Promise((resolve) => {
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+                clearInterval(pollInterval);
+                const selected = menu.getSelectedOption();
+                if (!selected) return;
+                resolve(selected.value as CharacterClassId);
+            });
+        });
+    }
+
+    // ─── Generation Loading Screen ──────────────────────────────────────────
+
+    private loadingText: TextRenderable | null = null;
+
+    showLoadingScreen(message: string): void {
+        this.clearLayout();
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'loading-header',
+            content: t`${bold(fg(COLORS.title)('STATION OMEGA'))}`,
+        });
+
+        this.loadingText = new TextRenderable(this.renderer, {
+            id: 'loading-text',
+            content: t`${fg(COLORS.text)(message)}`,
+        });
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'loading-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+        });
+        container.add(header);
+        container.add(this.loadingText);
+
+        this.layoutRoot.add(container);
+    }
+
+    updateLoadingMessage(message: string): void {
+        if (this.loadingText) {
+            this.loadingText.content = t`${fg(COLORS.text)(message)}`;
+        }
+    }
+
+    showGenerating(stationName?: string): void {
+        const msg = stationName
+            ? `Generating ${stationName}...`
+            : 'Generating station...';
+        this.showLoadingScreen(msg);
+    }
+
+    // ─── Transition to Gameplay ─────────────────────────────────────────────
+
+    showGameplayScreen(): void {
+        this.clearLayout();
+        this.buildGameplayLayout();
+        this.inputField.focus();
+    }
+
+    // ─── Run Summary Screen ─────────────────────────────────────────────────
+
+    showRunSummary(score: RunScore, metrics: RunMetrics): Promise<void> {
+        this.clearLayout();
+
+        const duration = (metrics.endTime ?? Date.now()) - metrics.startTime;
+        const gc = gradeColor(score.grade);
+        const barWidth = 30;
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'summary-header',
+            content: t`${bold(fg(COLORS.title)('MISSION REPORT'))}`,
+        });
+
+        const gradeDisplay = new TextRenderable(this.renderer, {
+            id: 'summary-grade',
+            content: t`${bold(fg(gc)(`Grade: ${score.grade}`))}  ${fg(COLORS.text)(`Total: ${String(score.total)}/500`)}`,
+        });
+
+        const outcome = metrics.won
+            ? t`${fg(COLORS.hpGood)('MISSION COMPLETE')}`
+            : t`${fg(COLORS.hpLow)('KIA')}`;
+        const outcomeText = new TextRenderable(this.renderer, {
+            id: 'summary-outcome',
+            content: outcome,
+        });
+
+        const bars = [
+            { label: 'Speed         ', value: score.speed },
+            { label: 'Combat        ', value: score.combatEfficiency },
+            { label: 'Exploration   ', value: score.exploration },
+            { label: 'Resourceful   ', value: score.resourcefulness },
+            { label: 'Completion    ', value: score.completion },
+        ];
+
+        const barTexts = bars.map((b, i) => {
+            const barColor = b.value >= 75 ? COLORS.hpGood : b.value >= 40 ? COLORS.hpMid : COLORS.hpLow;
+            return new TextRenderable(this.renderer, {
+                id: `summary-bar-${String(i)}`,
+                content: t`${fg(COLORS.textDim)(b.label)} ${fg(barColor)(scoreBar(b.value, barWidth))} ${fg(COLORS.text)(String(Math.round(b.value)))}`,
+            });
+        });
+
+        const statsText = new TextRenderable(this.renderer, {
+            id: 'summary-stats',
+            content: t`${fg(COLORS.textDim)('Turns:')} ${fg(COLORS.text)(String(metrics.turnCount))}  ${fg(COLORS.textDim)('Time:')} ${fg(COLORS.text)(formatDuration(duration))}  ${fg(COLORS.textDim)('Kills:')} ${fg(COLORS.text)(String(metrics.enemiesDefeated.length))}  ${fg(COLORS.textDim)('Rooms:')} ${fg(COLORS.text)(String(metrics.roomsVisited.size))}`,
+        });
+
+        const hint = new TextRenderable(this.renderer, {
+            id: 'summary-hint',
+            content: t`${fg(COLORS.textDim)('Press Enter to continue...')}`,
+        });
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'summary-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            paddingTop: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+            gap: 1,
+        });
+
+        container.add(header);
+        container.add(outcomeText);
+        container.add(gradeDisplay);
+        container.add(new TextRenderable(this.renderer, { id: 'summary-spacer1', content: ' ' }));
+        for (const bt of barTexts) container.add(bt);
+        container.add(new TextRenderable(this.renderer, { id: 'summary-spacer2', content: ' ' }));
+        container.add(statsText);
+        container.add(new TextRenderable(this.renderer, { id: 'summary-spacer3', content: ' ' }));
+        container.add(hint);
+
+        this.layoutRoot.add(container);
+
+        return new Promise((resolve) => {
+            const tempInput = new InputRenderable(this.renderer, {
+                id: 'summary-input',
+                width: 0 as unknown as number,
+                backgroundColor: COLORS.bg,
+                textColor: COLORS.bg,
+                cursorColor: COLORS.bg,
+            });
+            container.add(tempInput);
+            tempInput.focus();
+            tempInput.on(InputRenderableEvents.ENTER, () => {
+                resolve();
+            });
+        });
+    }
+
+    // ─── Run History Screen ─────────────────────────────────────────────────
+
+    showRunHistory(history: RunHistoryEntry[]): Promise<void> {
+        this.clearLayout();
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'history-header',
+            content: t`${bold(fg(COLORS.title)('EXPEDITION LOG'))}`,
+        });
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'history-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            paddingTop: 2,
+            paddingLeft: 2,
+            paddingRight: 2,
+        });
+        container.add(header);
+        container.add(new TextRenderable(this.renderer, { id: 'history-spacer', content: ' ' }));
+
+        if (history.length === 0) {
+            container.add(new TextRenderable(this.renderer, {
+                id: 'history-empty',
+                content: t`${fg(COLORS.textDim)('No expedition records found.')}`,
+            }));
+        } else {
+            // Table header
+            const tableHeader = new TextRenderable(this.renderer, {
+                id: 'history-table-header',
+                content: t`${fg(COLORS.title)('# ')} ${fg(COLORS.title)('Class')} ${fg(COLORS.title)('Arc              ')} ${fg(COLORS.title)('Grade')} ${fg(COLORS.title)('Score')} ${fg(COLORS.title)('Turns')} ${fg(COLORS.title)('Time    ')} ${fg(COLORS.title)('Result')}`,
+            });
+            container.add(tableHeader);
+
+            const separator = new TextRenderable(this.renderer, {
+                id: 'history-table-sep',
+                content: t`${fg(COLORS.border)('\u2500'.repeat(70))}`,
+            });
+            container.add(separator);
+
+            const scroll = new ScrollBoxRenderable(this.renderer, {
+                id: 'history-scroll',
+                flexGrow: 1,
+                width: '100%',
+                stickyScroll: false,
+                scrollY: true,
+                contentOptions: { flexDirection: 'column' },
+            });
+
+            const reversed = [...history].reverse();
+            for (let i = 0; i < reversed.length; i++) {
+                const entry = reversed[i];
+                const num = String(history.length - i).padStart(2, ' ');
+                const cls = classIcon(entry.characterClass);
+                const arc = entry.storyArc.replace(/_/g, ' ').padEnd(17, ' ').slice(0, 17);
+                const gc = gradeColor(entry.score.grade);
+                const scr = String(entry.score.total).padStart(3, ' ');
+                const turns = String(entry.turnCount).padStart(4, ' ');
+                const dur = formatDuration(entry.duration).padEnd(8, ' ');
+                const result = entry.won ? fg(COLORS.hpGood)('WIN ') : fg(COLORS.hpLow)('DEAD');
+
+                scroll.add(new TextRenderable(this.renderer, {
+                    id: `history-row-${String(i)}`,
+                    content: t`${fg(COLORS.textDim)(num)} ${fg(COLORS.text)(cls)}  ${fg(COLORS.text)(arc)} ${fg(gc)(entry.score.grade)}     ${fg(COLORS.text)(scr)}   ${fg(COLORS.text)(turns)}  ${fg(COLORS.textDim)(dur)} ${result}`,
+                }));
+            }
+
+            container.add(scroll);
+        }
+
+        container.add(new TextRenderable(this.renderer, { id: 'history-spacer2', content: ' ' }));
+        const hint = new TextRenderable(this.renderer, {
+            id: 'history-hint',
+            content: t`${fg(COLORS.textDim)('Press Enter to return...')}`,
+        });
+        container.add(hint);
+
+        this.layoutRoot.add(container);
+
+        return new Promise((resolve) => {
+            const tempInput = new InputRenderable(this.renderer, {
+                id: 'history-input',
+                width: 0 as unknown as number,
+                backgroundColor: COLORS.bg,
+                textColor: COLORS.bg,
+                cursorColor: COLORS.bg,
+            });
+            container.add(tempInput);
+            tempInput.focus();
+            tempInput.on(InputRenderableEvents.ENTER, () => {
+                resolve();
+            });
+        });
+    }
+
+    // ─── Clear Screen ────────────────────────────────────────────────────────
+
+    clearScreen(): void {
+        for (const child of this.narrativeScroll.getChildren()) {
+            this.narrativeScroll.remove(child.id);
+        }
+    }
+
+    // ─── Narrative / Cards ──────────────────────────────────────────────────
 
     private addCard(child: MarkdownRenderable | TextRenderable, bgColor: string): void {
         const card = new BoxRenderable(this.renderer, {
@@ -376,6 +874,8 @@ export class GameUI {
         this.addCard(cmdNode, COLORS.cmdCardBg);
     }
 
+    // ─── Combat Glitch ──────────────────────────────────────────────────────
+
     enableCombatGlitch(): void {
         this.renderer.addPostProcessFn(this.distortionFn);
     }
@@ -383,6 +883,8 @@ export class GameUI {
     disableCombatGlitch(): void {
         this.renderer.removePostProcessFn(this.distortionFn);
     }
+
+    // ─── Status Bar ─────────────────────────────────────────────────────────
 
     updateStatus(status: GameStatus): void {
         const hpPct = status.hp / status.maxHp;
@@ -393,8 +895,9 @@ export class GameUI {
             : 'Dying';
 
         const inv = status.inventory.length > 0 ? status.inventory.join(', ') : 'empty';
+        const classLabel = classIcon(status.characterClass);
 
-        this.statusText.content = t`${fg(hpColor)(`♥ ${hpLabel}`)}  ${fg(COLORS.textDim)('│')}  ${fg(COLORS.text)(status.roomName)} ${fg(COLORS.textDim)(`(${String(status.roomNumber)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('│')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
+        this.statusText.content = t`${fg(hpColor)(`HP ${String(status.hp)}/${String(status.maxHp)} ${hpLabel}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`${classLabel} ${status.roomName}`)} ${fg(COLORS.textDim)(`(${String(status.roomIndex + 1)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.textDim)(`T${String(status.turnCount)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
 
         // Update NPC contacts bar — name with HP background, icon-only disposition
         if (status.npcs.length === 0) {
@@ -404,16 +907,18 @@ export class GameUI {
             const icon = npc.disposition === 'hostile' ? '!'
                 : npc.disposition === 'friendly' ? '*'
                 : '?';
-            const hpColor = npc.hpPct >= 0.6 ? '#1a5c2a' : npc.hpPct >= 0.25 ? '#5c4a0a' : '#5c1a1a';
+            const npcHpColor = npc.hpPct >= 0.6 ? '#1a5c2a' : npc.hpPct >= 0.25 ? '#5c4a0a' : '#5c1a1a';
             const emptyColor = '#1a1a2a';
             const padded = ` ${npc.name} `;
             const split = Math.round(npc.hpPct * padded.length);
             const filledPart = padded.slice(0, split);
             const emptyPart = padded.slice(split);
 
-            this.npcText.content = t`${fg(COLORS.textDim)(icon)} ${bg(hpColor)(fg('#ffffff')(filledPart))}${bg(emptyColor)(fg(COLORS.textDim)(emptyPart))}`;
+            this.npcText.content = t`${fg(COLORS.textDim)(icon)} ${bg(npcHpColor)(fg('#ffffff')(filledPart))}${bg(emptyColor)(fg(COLORS.textDim)(emptyPart))}`;
         }
     }
+
+    // ─── Input ──────────────────────────────────────────────────────────────
 
     onInput(callback: (input: string) => void): void {
         this.inputCallback = callback;
@@ -423,13 +928,18 @@ export class GameUI {
         this.inputEnabled = false;
     }
 
+    enableInput(): void {
+        this.inputEnabled = true;
+    }
+
+    // ─── Game Over ──────────────────────────────────────────────────────────
+
     showGameOver(won: boolean): void {
-        this.disableInput();
         this.finalizeDelta();
 
         const message = won
-            ? t`${bold(fg('#00ff88')('🏆 MISSION COMPLETE'))}${fg(COLORS.textDim)(' — Thanks for playing Station Omega!')}`
-            : t`${bold(fg('#ff4444')('💀 GAME OVER'))}${fg(COLORS.textDim)(' — You died on Station Omega. Better luck next time.')}`;
+            ? t`${bold(fg('#00ff88')('MISSION COMPLETE'))}${fg(COLORS.textDim)(' -- Thanks for playing Station Omega!')}`
+            : t`${bold(fg('#ff4444')('GAME OVER'))}${fg(COLORS.textDim)(' -- You died on Station Omega. Better luck next time.')}`;
 
         this.narrativeScroll.add(new TextRenderable(this.renderer, {
             id: `gameover-spacer`,
@@ -441,9 +951,11 @@ export class GameUI {
         }));
         this.narrativeScroll.add(new TextRenderable(this.renderer, {
             id: `gameover-hint`,
-            content: t`${fg(COLORS.textDim)('Press Ctrl+C to exit.')}`,
+            content: t`${fg(COLORS.textDim)('Press Enter to continue...')}`,
         }));
     }
+
+    // ─── Inline Attack Choices ──────────────────────────────────────────────
 
     showAttackChoices(approaches: { label: string; description: string }[]): void {
         this.dismissInlineChoices();
@@ -470,7 +982,7 @@ export class GameUI {
 
         const hint = new TextRenderable(this.renderer, {
             id: `choices-hint-${String(Date.now())}`,
-            content: t`${fg(COLORS.textDim)('  ↑↓ Navigate  Enter Select  Or type your own approach')}`,
+            content: t`${fg(COLORS.textDim)('  Up/Down Navigate  Enter Select  Or type your own approach')}`,
         });
 
         // Each option with description ~2 lines + hint + padding + border
@@ -490,6 +1002,71 @@ export class GameUI {
             borderColor: COLORS.border,
             flexDirection: 'column',
         });
+        card.add(select);
+        card.add(hint);
+        this.narrativeScroll.add(card);
+
+        this.inlineChoices = select;
+        this.inlineChoicesCard = card;
+        this.inlineChoicesActive = true;
+    }
+
+    showActionChoices(actions: { label: string; description: string }[]): void {
+        this.showAttackChoices(actions);
+    }
+
+    // ─── Generalized Choice Cards ───────────────────────────────────────────
+
+    showChoiceCards(title: string, choices: { label: string; description: string }[]): void {
+        this.dismissInlineChoices();
+
+        const titleText = new TextRenderable(this.renderer, {
+            id: `choice-title-${String(Date.now())}`,
+            content: t`${bold(fg(COLORS.title)(title))}`,
+        });
+
+        const select = new SelectRenderable(this.renderer, {
+            id: `choice-select-${String(Date.now())}`,
+            options: choices.map((c, i) => ({
+                name: `${String(i + 1)}. ${c.label}`,
+                description: c.description,
+                value: c.label,
+            })),
+            flexGrow: 1,
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: '#0d1117',
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        select.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+            this.selectInlineChoice();
+        });
+
+        const hint = new TextRenderable(this.renderer, {
+            id: `choice-hint-${String(Date.now())}`,
+            content: t`${fg(COLORS.textDim)('  Up/Down Navigate  Enter Select  Or type your own idea')}`,
+        });
+
+        const cardHeight = choices.length * 2 + 5;
+
+        const card = new BoxRenderable(this.renderer, {
+            id: `choice-card-${String(Date.now())}`,
+            backgroundColor: '#0d1117',
+            marginLeft: 1,
+            marginRight: 1,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 1,
+            paddingBottom: 0,
+            height: cardHeight,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            flexDirection: 'column',
+        });
+        card.add(titleText);
         card.add(select);
         card.add(hint);
         this.narrativeScroll.add(card);
@@ -521,6 +1098,8 @@ export class GameUI {
         this.inlineChoices = null;
     }
 
+    // ─── Slash Commands ─────────────────────────────────────────────────────
+
     setSlashCommands(commands: SlashCommandDef[]): void {
         this.slashCommands = commands;
     }
@@ -551,8 +1130,8 @@ export class GameUI {
             const prefix = `/${this.selectedCommand.name} `;
             const typed = value.startsWith(prefix) ? value.slice(prefix.length).toLowerCase() : '';
             const targets = this.selectedCommand.getTargets()
-                .filter(t => t.label.toLowerCase().startsWith(typed))
-                .map(t => ({ name: t.label, description: '', value: t.value }));
+                .filter(tgt => tgt.label.toLowerCase().startsWith(typed))
+                .map(tgt => ({ name: tgt.label, description: '', value: tgt.value }));
 
             this.popupSelect.options = targets;
             this.popupSelect.setSelectedIndex(0);
@@ -574,9 +1153,9 @@ export class GameUI {
                     this.selectedCommand = cmd;
                     this.popupState = 'target';
                     this.inputField.value = `/${cmd.name} `;
-                    this.popupHint.content = t`${fg(COLORS.title)(`/ ${cmd.name} → target`)}`;
-                    this.popupSelect.options = targets.map(t => ({
-                        name: t.label, description: '', value: t.value,
+                    this.popupHint.content = t`${fg(COLORS.title)(`/ ${cmd.name} > target`)}`;
+                    this.popupSelect.options = targets.map(tgt => ({
+                        name: tgt.label, description: '', value: tgt.value,
                     }));
                     this.popupSelect.setSelectedIndex(0);
                     return;
@@ -617,6 +1196,8 @@ export class GameUI {
         // Unknown slash command — send as-is without the "/"
         return withoutSlash;
     }
+
+    // ─── Cleanup ────────────────────────────────────────────────────────────
 
     destroy(): void {
         this.renderer.destroy();

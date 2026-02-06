@@ -1,5 +1,19 @@
 import { CopilotClient, defineTool } from '@github/copilot-sdk';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui';
+
+// ─── Debug Log ──────────────────────────────────────────────────────────────
+
+const DEBUG_LOG_PATH = 'debug.log';
+
+function initDebugLog(): void {
+    writeFileSync(DEBUG_LOG_PATH, `=== Station Omega Debug Log — ${new Date().toISOString()} ===\n\n`);
+}
+
+function debugLog(label: string, content: string): void {
+    const timestamp = new Date().toISOString();
+    appendFileSync(DEBUG_LOG_PATH, `[${timestamp}] [${label}]\n${content}\n${'─'.repeat(60)}\n\n`);
+}
 
 // ─── Game Data ───────────────────────────────────────────────────────────────
 
@@ -279,6 +293,7 @@ interface GameState {
     currentRoom: number;
     roomsVisited: Set<number>;
     roomLootTaken: Set<number>;
+    roomDrops: Map<number, string>;
     hasBlackBox: boolean;
     gameOver: boolean;
     won: boolean;
@@ -294,6 +309,7 @@ const state: GameState = {
     currentRoom: 0,
     roomsVisited: new Set([0]),
     roomLootTaken: new Set(),
+    roomDrops: new Map<number, string>(),
     hasBlackBox: false,
     gameOver: false,
     won: false,
@@ -326,6 +342,7 @@ const lookAround = defineTool('look_around', {
     handler: () => {
         const room = ROOMS[state.currentRoom];
         const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
+        const drop = state.roomDrops.get(state.currentRoom) ?? null;
         const threat = getRoomThreat(state.currentRoom);
         const exits: string[] = [];
         if (state.currentRoom > 0) exits.push('back');
@@ -336,6 +353,7 @@ const lookAround = defineTool('look_around', {
             room_number: `${String(state.currentRoom + 1)} of ${String(ROOMS.length)}`,
             description: room.descriptionSeed,
             item_visible: lootPresent ? room.loot : null,
+            drop_visible: drop,
             threat: threat ? { name: threat.name, demeanor: threat.disposition } : null,
             npcs_present: getNPCsInRoom(state.currentRoom).map(npc => ({ name: npc.name, disposition: npc.disposition })),
             exits,
@@ -426,41 +444,58 @@ const pickUpItem = defineTool('pick_up_item', {
         const room = ROOMS[state.currentRoom];
         const { item } = args;
 
-        if (state.roomLootTaken.has(state.currentRoom)) {
-            return { error: 'There\'s nothing left to pick up in this room.' };
-        }
-        if (room.loot !== item) {
-            return { error: `There is no "${item}" here.` };
-        }
-        if (state.inventory.length >= 5) {
-            return { error: 'Your inventory is full (5/5). Drop or use something first.' };
-        }
-
-        // Enemy must be defeated first
+        // Enemy must be defeated before picking up anything
         const threat = getRoomThreat(state.currentRoom);
         if (threat) {
             return { error: `The ${threat.name} is blocking the item. Deal with the threat first.` };
         }
 
-        state.roomLootTaken.add(state.currentRoom);
+        if (state.inventory.length >= 5) {
+            return { error: 'Your inventory is full (5/5). Drop or use something first.' };
+        }
 
-        if (item === 'black_box') {
-            state.hasBlackBox = true;
+        // Check room loot
+        const roomLootAvailable = room.loot && !state.roomLootTaken.has(state.currentRoom);
+        if (roomLootAvailable && room.loot === item) {
+            state.roomLootTaken.add(state.currentRoom);
+
+            if (item === 'black_box') {
+                state.hasBlackBox = true;
+                return {
+                    success: true,
+                    item,
+                    message: 'You download the black box data to your portable drive. Now get back to the airlock!',
+                    objective: 'Return to the Airlock Bay (move back through all rooms) to escape.',
+                };
+            }
+
+            state.inventory.push(item);
             return {
                 success: true,
                 item,
-                message: 'You download the black box data to your portable drive. Now get back to the airlock!',
-                objective: 'Return to the Airlock Bay (move back through all rooms) to escape.',
+                inventory: state.inventory,
+                slots_remaining: 5 - state.inventory.length,
             };
         }
 
-        state.inventory.push(item);
-        return {
-            success: true,
-            item,
-            inventory: state.inventory,
-            slots_remaining: 5 - state.inventory.length,
-        };
+        // Check enemy drop
+        const drop = state.roomDrops.get(state.currentRoom);
+        if (drop && drop === item) {
+            state.roomDrops.delete(state.currentRoom);
+            state.inventory.push(item);
+            return {
+                success: true,
+                item,
+                inventory: state.inventory,
+                slots_remaining: 5 - state.inventory.length,
+            };
+        }
+
+        // Nothing matched
+        if (!roomLootAvailable && !drop) {
+            return { error: 'There\'s nothing left to pick up in this room.' };
+        }
+        return { error: `There is no "${item}" here.` };
     },
 });
 
@@ -524,7 +559,6 @@ const attack = defineTool('attack', {
     handler: (args: { approach: string }) => {
         if (state.gameOver) return { error: 'The game is over.' };
 
-        const room = ROOMS[state.currentRoom];
         const npc = getRoomThreat(state.currentRoom);
         if (!npc) {
             return { error: 'There is no enemy to fight here.' };
@@ -590,12 +624,7 @@ const attack = defineTool('attack', {
         if (defeated && npc.drop) {
             result.loot_dropped = npc.drop;
             result.loot_hint = `The ${npc.name} dropped a ${npc.drop}. You can pick it up.`;
-            // Place loot in room if room loot was already taken or was different
-            if (state.roomLootTaken.has(state.currentRoom) || room.loot !== npc.drop) {
-                // Add to room as bonus loot by temporarily setting room loot
-                ROOMS[state.currentRoom] = { ...room, loot: npc.drop };
-                state.roomLootTaken.delete(state.currentRoom);
-            }
+            state.roomDrops.set(state.currentRoom, npc.drop);
         }
 
         return result;
@@ -625,6 +654,17 @@ You MUST format every response using markdown. This is critical — the terminal
 - Use --- (horizontal rule) to separate major scene transitions (entering new rooms, combat start/end).
 - Do NOT use headings (#), code blocks, or links.
 - On subsequent mentions within the same response, use plain text (don't re-bold).
+
+## Paragraph Structure
+
+You MUST put an empty line between each narrative beat. When describing a room, separate these beats with empty lines:
+
+1. **Atmosphere** — Opening impression: 2-3 sentences with sensory details, then an empty line.
+2. **Discovery** — Items, NPCs, or objects (1-2 sentences), then an empty line.
+3. **Crew echo** — Italic description of the medium, empty line, > blockquote with content, then an empty line.
+4. **Orientation** — Exits and what lies ahead/behind (short final paragraph).
+
+CRITICAL: Every time you shift from one beat to the next, you MUST output a blank line (two newlines). NEVER write atmosphere, discovery, crew log, and orientation in consecutive lines without blank lines between them. If you are unsure, add more blank lines rather than fewer.
 
 # Instructions
 
@@ -670,6 +710,7 @@ You MUST format every response using markdown. This is critical — the terminal
 # Reminder
 
 You MUST use markdown formatting in every response: **bold** for items/NPCs/rooms, *italics* for sensory details, > blockquotes for crew logs, --- for scene transitions. Never output plain unformatted text.
+You MUST separate narrative beats with blank lines (two newlines). Never write a wall of text. Each paragraph covers one idea — atmosphere, discovery, crew log, or orientation — then a blank line before the next. When in doubt, add more blank lines.
 
 Begin by welcoming the player and describing the Airlock Bay using the look_around tool.`;
 
@@ -707,6 +748,9 @@ function getStatus() {
 }
 
 async function main() {
+    initDebugLog();
+    debugLog('SYSTEM', SYSTEM_MESSAGE);
+
     // Initialize Copilot SDK first (before TUI) so auth prompts are visible
     const client = new CopilotClient();
     const session = await client.createSession({
@@ -721,12 +765,18 @@ async function main() {
     await ui.init();
     ui.updateStatus(getStatus());
 
-    // Stream AI responses into the TUI
+    // Stream AI responses into the TUI, accumulate for debug log
+    let currentResponse = '';
     session.on('assistant.message_delta', (event) => {
+        currentResponse += event.data.deltaContent;
         ui.appendNarrativeDelta(event.data.deltaContent);
     });
     onCombatStart = () => { ui.enableCombatGlitch(); };
     session.on('session.idle', () => {
+        if (currentResponse) {
+            debugLog('AI', currentResponse);
+            currentResponse = '';
+        }
         ui.disableCombatGlitch();
         ui.finalizeDelta();
         ui.updateStatus(getStatus());
@@ -737,6 +787,7 @@ async function main() {
     });
 
     // Kick off the game — Copilot will use look_around to describe room 0
+    debugLog('PLAYER', 'I step through the airlock onto Station Omega. What do I see?');
     await session.sendAndWait({ prompt: 'I step through the airlock onto Station Omega. What do I see?' });
 
     // Wire up input from the TUI
@@ -749,6 +800,7 @@ async function main() {
             return;
         }
 
+        debugLog('PLAYER', input);
         ui.appendPlayerCommand(input);
         void session.sendAndWait({ prompt: input });
     });

@@ -218,10 +218,20 @@ export class GameUI {
         this.narrativeScroll.add(card);
     }
 
+    /**
+     * The MarkdownRenderable filters out blank-line "space" tokens, collapsing
+     * paragraph gaps. Insert an invisible Braille Pattern Blank (U+2800) on each
+     * blank line so the parser treats it as a content paragraph, preserving the
+     * visual spacing the AI intended.
+     */
+    private spaceParagraphs(md: string): string {
+        return md.replace(/\n\n/g, '\n\n\u2800\n\n');
+    }
+
     appendNarrative(text: string): void {
         const md = new MarkdownRenderable(this.renderer, {
             id: `narrative-${String(Date.now())}`,
-            content: text,
+            content: this.spaceParagraphs(text),
             syntaxStyle: mdTheme,
             streaming: false,
         });
@@ -230,23 +240,24 @@ export class GameUI {
 
     appendNarrativeDelta(delta: string): void {
         this.currentDelta += delta;
+        const spaced = this.spaceParagraphs(this.currentDelta);
         if (!this.currentDeltaMd) {
             this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
                 id: `delta-${String(Date.now())}`,
-                content: this.currentDelta,
+                content: spaced,
                 syntaxStyle: mdTheme,
                 streaming: true,
             });
             this.addCard(this.currentDeltaMd, COLORS.cardBg);
         } else {
-            this.currentDeltaMd.content = this.currentDelta;
+            this.currentDeltaMd.content = spaced;
         }
     }
 
     finalizeDelta(): void {
         if (this.currentDeltaMd) {
             this.currentDeltaMd.streaming = false;
-            this.currentDeltaMd.content = this.currentDelta;
+            this.currentDeltaMd.content = this.spaceParagraphs(this.currentDelta);
         }
         this.currentDelta = '';
         this.currentDeltaMd = null;

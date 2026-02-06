@@ -349,9 +349,7 @@ const lookAround = defineTool('look_around', {
         const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
         const drop = state.roomDrops.get(state.currentRoom) ?? null;
         const threat = getRoomThreat(state.currentRoom);
-        const exits: string[] = [];
-        if (state.currentRoom > 0) exits.push('back');
-        if (state.currentRoom < ROOMS.length - 1) exits.push('forward');
+        const exits: string[] = getAdjacentRooms().map(i => ROOMS[i].name);
 
         return {
             room_name: room.name,
@@ -376,31 +374,39 @@ const lookAround = defineTool('look_around', {
     },
 });
 
+function getAdjacentRooms(): number[] {
+    const adj: number[] = [];
+    if (state.currentRoom > 0) adj.push(state.currentRoom - 1);
+    if (state.currentRoom < ROOMS.length - 1) adj.push(state.currentRoom + 1);
+    return adj;
+}
+
 const moveTo = defineTool('move_to', {
-    description: 'Move to an adjacent room. Direction must be "forward" (deeper into the station) or "back" (toward the airlock).',
+    description: 'Move to an adjacent room by name. Use the room names from look_around exits.',
     parameters: {
         type: 'object',
         properties: {
-            direction: { type: 'string', enum: ['forward', 'back'], description: 'Direction to move' },
+            room: { type: 'string', description: 'Name of the room to move to' },
         },
-        required: ['direction'],
+        required: ['room'],
     },
-    handler: (args: { direction: 'forward' | 'back' }) => {
+    handler: (args: { room: string }) => {
         if (state.gameOver) return { error: 'The game is over.' };
 
-        const { direction } = args;
-        const newRoom = direction === 'forward' ? state.currentRoom + 1 : state.currentRoom - 1;
+        const targetIdx = ROOMS.findIndex(r => r.name.toLowerCase() === args.room.toLowerCase());
+        if (targetIdx === -1) return { error: `Unknown room: "${args.room}".` };
 
-        if (newRoom < 0) return { error: 'You\'re at the airlock. There\'s nothing behind you but empty space.' };
-        if (newRoom >= ROOMS.length) return { error: 'There\'s nowhere else to go. This is the deepest part of the station.' };
+        if (!getAdjacentRooms().includes(targetIdx)) {
+            return { error: `You can't reach ${ROOMS[targetIdx].name} from here. Check available exits.` };
+        }
 
         // Keycard check for Command Bridge
-        if (newRoom === 5 && !state.inventory.includes('keycard')) {
+        if (targetIdx === 5 && !state.inventory.includes('keycard')) {
             return { error: 'The Command Bridge door requires a keycard. The access panel blinks red.' };
         }
 
         // Win condition: return to airlock with black box
-        if (newRoom === 0 && state.hasBlackBox) {
+        if (targetIdx === 0 && state.hasBlackBox) {
             state.gameOver = true;
             state.won = true;
             return {
@@ -412,24 +418,24 @@ const moveTo = defineTool('move_to', {
             };
         }
 
-        state.currentRoom = newRoom;
-        state.roomsVisited.add(newRoom);
-        state.roomVisitCount.set(newRoom, (state.roomVisitCount.get(newRoom) ?? 0) + 1);
+        state.currentRoom = targetIdx;
+        state.roomsVisited.add(targetIdx);
+        state.roomVisitCount.set(targetIdx, (state.roomVisitCount.get(targetIdx) ?? 0) + 1);
 
-        const room = ROOMS[newRoom];
-        const threat = getRoomThreat(newRoom);
+        const room = ROOMS[targetIdx];
+        const threat = getRoomThreat(targetIdx);
 
         return {
             success: true,
             room_name: room.name,
-            room_number: `${String(newRoom + 1)} of ${String(ROOMS.length)}`,
+            room_number: `${String(targetIdx + 1)} of ${String(ROOMS.length)}`,
             description: room.descriptionSeed,
             threat_present: threat ? threat.name : null,
             player_condition: hpDescription(),
             ambient_sound: room.sensory.sounds[0],
             ambient_feel: room.sensory.tactile,
-            is_revisit: (state.roomVisitCount.get(newRoom) ?? 0) > 1,
-            enemy_defeated_here: room.threat !== null && getRoomThreat(newRoom) === null,
+            is_revisit: (state.roomVisitCount.get(targetIdx) ?? 0) > 1,
+            enemy_defeated_here: room.threat !== null && getRoomThreat(targetIdx) === null,
         };
     },
 });
@@ -808,14 +814,9 @@ function getSlashCommands(): SlashCommandDef[] {
             name: 'move',
             description: 'Move to adjacent room',
             needsTarget: true,
-            getTargets: () => {
-                const dirs: { label: string; value: string }[] = [];
-                if (state.currentRoom > 0) dirs.push({ label: 'Back', value: 'back' });
-                if (state.currentRoom < ROOMS.length - 1)
-                    dirs.push({ label: 'Forward', value: 'forward' });
-                return dirs;
-            },
-            toPrompt: (t) => t ? `move ${t}` : 'move',
+            getTargets: () =>
+                getAdjacentRooms().map(i => ({ label: ROOMS[i].name, value: ROOMS[i].name })),
+            toPrompt: (t) => t ? `move to ${t}` : 'move',
         },
         {
             name: 'pickup',

@@ -11,6 +11,7 @@ import type { ToolContext, ChoiceSet } from './src/tools.js';
 import { buildSystemPrompt } from './src/prompt.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
+import { TTSEngine } from './src/tts.js';
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
         maxInventory: state.maxInventory,
         shieldActive: state.shieldActive,
         plasmaBoost: state.plasmaBoost,
-        activeEvents: state.activeEvents.map(e => ({ type: e.type, turnsRemaining: e.turnsRemaining })),
+        activeEvents: state.activeEvents.map(e => ({ type: e.type, turnsRemaining: e.turnsRemaining, effect: e.effect })),
         objectiveTitle: station.objectives.title,
         objectiveStep: station.objectives.currentStepIndex,
         objectiveTotal: station.objectives.steps.length,
@@ -175,6 +176,7 @@ async function runGameplay(
     ui: GameUI,
     station: GeneratedStation,
     classId: CharacterClassId,
+    ttsEngine: TTSEngine,
 ): Promise<void> {
     const build = getBuild(classId);
     const runId = `run_${String(Date.now())}`;
@@ -205,6 +207,9 @@ async function runGameplay(
     // Event tracker
     const eventTracker = new EventTracker();
 
+    // Configure TTS for this run
+    ttsEngine.setNPCs(station.npcs);
+
     // Tool context
     const toolCtx: ToolContext = {
         state,
@@ -217,10 +222,18 @@ async function runGameplay(
     const tools = createGameTools(toolCtx);
     const systemMessage = buildSystemPrompt(station, build);
 
+    // Wire TTS reveal callback — syncs text display with audio playback
+    ttsEngine.onRevealChunk = (displayText, durationSec) => {
+        debugLog('TTS-REVEAL-CB', `displayText=${String(displayText.length)} chars, duration=${durationSec.toFixed(2)}s, text="${displayText.slice(0, 80)}..."`);
+        ui.revealChunk(displayText, durationSec);
+    };
+
     initDebugLog();
     debugLog('SYSTEM', systemMessage);
+    ui.setDebugLog(debugLog);
 
     // Create gameplay session
+    debugLog('SESSION', 'Creating session...');
     const session = await client.createSession({
         model: 'gpt-4.1',
         streaming: true,
@@ -296,27 +309,66 @@ async function runGameplay(
 
     // Wire up streaming
     let currentResponse = '';
+    let streamStarted = false;
+    let turnId = 0;
     session.on('assistant.message_delta', (event) => {
-        currentResponse += event.data.deltaContent;
-        ui.appendNarrativeDelta(event.data.deltaContent);
+        const delta = event.data.deltaContent;
+        currentResponse += delta;
+
+        if (ttsEngine.isEnabled()) {
+            // TTS-gated mode: buffer text, let TTS playback drive display
+            ui.bufferNarrativeDelta(delta);
+            if (!streamStarted) {
+                ttsEngine.beginStream();
+                streamStarted = true;
+            }
+            ttsEngine.pushDelta(delta);
+        } else {
+            // No TTS: hide typing indicator on first delta, display immediately
+            if (!streamStarted) {
+                ui.hideTypingIndicator();
+                streamStarted = true;
+            }
+            ui.appendNarrativeDelta(delta);
+        }
     });
 
     session.on('session.idle', () => {
+        debugLog('SESSION', `idle fired, ttsEnabled=${String(ttsEngine.isEnabled())}`);
         if (currentResponse) {
             debugLog('AI', currentResponse);
             currentResponse = '';
         }
+        streamStarted = false;
         ui.disableCombatGlitch();
-        ui.finalizeDelta();
         ui.updateStatus(getStatus(state, station));
 
-        if (pendingChoices) {
-            ui.showChoiceCards(pendingChoices.title, pendingChoices.choices);
-            pendingChoices = null;
-        }
+        const afterStream = () => {
+            debugLog('SESSION', 'afterStream — calling finalizeDelta');
+            ui.finalizeDelta();
+            if (pendingChoices) {
+                ui.showChoiceCards(pendingChoices.title, pendingChoices.choices);
+                pendingChoices = null;
+            }
+            if (state.gameOver) {
+                ui.showGameOver(state.won);
+            }
+        };
 
-        if (state.gameOver) {
-            ui.showGameOver(state.won);
+        if (ttsEngine.isEnabled()) {
+            // TTS-gated: wait for all audio to finish, then flush remaining text
+            const thisTurn = turnId;
+            debugLog('SESSION', 'Waiting for TTS flushStream...');
+            void ttsEngine.flushStream().then(() => {
+                if (turnId !== thisTurn) {
+                    debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
+                    return;
+                }
+                debugLog('SESSION', 'flushStream resolved');
+                afterStream();
+            });
+        } else {
+            afterStream();
         }
     });
 
@@ -327,11 +379,28 @@ async function runGameplay(
     // Kick off the game
     const openingPrompt = `I step through the airlock onto ${station.stationName}. What do I see?`;
     debugLog('PLAYER', openingPrompt);
-    await session.sendAndWait({ prompt: openingPrompt });
+    debugLog('SESSION', 'Calling sendAndWait for opening prompt...');
+    ui.showTypingIndicator();
+    try {
+        await session.sendAndWait({ prompt: openingPrompt });
+        debugLog('SESSION', 'Opening sendAndWait completed.');
+    } catch (err: unknown) {
+        debugLog('SESSION', `Opening sendAndWait error: ${String(err)}`);
+        ttsEngine.stop();
+        ui.hideTypingIndicator();
+        ui.finalizeDelta();
+        ui.appendNarrative('*The station systems flicker. Connection unstable. Try entering a command.*');
+    }
 
     // Wire up player input
     await new Promise<void>((resolve) => {
         ui.onInput((input: string) => {
+            // Invalidate any pending flushStream callback from the previous turn
+            turnId++;
+            // Stop any playing TTS audio and flush buffered text when player types
+            ttsEngine.stop();
+            ui.finalizeDelta();
+
             if (state.gameOver) {
                 // After game over, any input continues to score screen
                 resolve();
@@ -343,9 +412,24 @@ async function runGameplay(
                 return;
             }
 
+            // /voice toggle command — intercepted client-side
+            if (input.toLowerCase() === '/voice') {
+                const nowEnabled = !ttsEngine.isEnabled();
+                ttsEngine.setEnabled(nowEnabled);
+                ui.appendNarrative(nowEnabled ? '*Voice narration enabled.*' : '*Voice narration disabled.*');
+                return;
+            }
+
             debugLog('PLAYER', input);
             ui.appendPlayerCommand(input);
-            void session.sendAndWait({ prompt: input });
+            ui.showTypingIndicator();
+            session.sendAndWait({ prompt: input }).catch((err: unknown) => {
+                debugLog('SESSION', `sendAndWait error: ${String(err)}`);
+                ttsEngine.stop();
+                ui.hideTypingIndicator();
+                ui.finalizeDelta();
+                ui.appendNarrative('*Static crackles through the comms. The station systems are unresponsive. Try again.*');
+            });
         });
     });
 
@@ -360,7 +444,8 @@ async function runGameplay(
     // Show run summary
     await ui.showRunSummary(score, state.metrics);
 
-    // Clean up session
+    // Stop any playing TTS and clean up session
+    ttsEngine.stop();
     await session.destroy();
 }
 
@@ -370,6 +455,11 @@ async function main() {
     const client = new CopilotClient();
     const ui = new GameUI();
     await ui.init();
+
+    // Initialize TTS model (downloads ~86MB on first run)
+    const globalTTS = new TTSEngine({ enabled: true, debugLog });
+    ui.showLoadingScreen('Loading voice model...');
+    await globalTTS.init();
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
     while (true) {
@@ -399,9 +489,10 @@ async function main() {
 
         // GAMEPLAY
         ui.showGameplayScreen();
-        await runGameplay(client, ui, station, classId);
+        await runGameplay(client, ui, station, classId, globalTTS);
     }
 
+    await globalTTS.cleanup();
     ui.destroy();
     await client.stop();
     process.exit(0);

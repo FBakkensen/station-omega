@@ -29,6 +29,7 @@ import type {
     SlashCommandDef,
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
+import { stripVoiceMarkers } from './src/tts.js';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
 
@@ -111,6 +112,18 @@ function formatDuration(ms: number): string {
     return `${String(min)}m ${String(sec)}s`;
 }
 
+function alertEffectHint(type: string, effect: string): string {
+    // Keep this short; the alerts panel has limited width and height.
+    switch (type) {
+        case 'hull_breach': return '-5 HP/T';
+        case 'radiation_spike': return '-25% DMG';
+        case 'power_failure': return 'SENSORS DOWN';
+        case 'distress_signal': return 'NEW PATH';
+        case 'supply_cache': return 'SUPPLIES';
+        default: return effect ? effect.toUpperCase() : '';
+    }
+}
+
 function classIcon(cls: CharacterClassId): string {
     switch (cls) {
         case 'soldier': return '[S]';
@@ -169,6 +182,16 @@ export class GameUI {
     private prevObjectiveStep = -1;
     private prevObjectivesComplete = false;
     private lastStatus: GameStatus | null = null;
+
+    // Typing indicator + typewriter reveal state
+    private revealBuffer = '';
+    private revealedLength = 0;
+    private revealTimer: ReturnType<typeof setInterval> | null = null;
+    private revealRate = 60;
+    private ttsGated = false;
+    private typingIndicatorCard: BoxRenderable | null = null;
+    private revealFirstChunk = true;
+    private debugLog: ((label: string, content: string) => void) | null = null;
 
     // Layout root ref for screen swaps
     private layoutRoot!: BoxRenderable;
@@ -1051,7 +1074,8 @@ export class GameUI {
 
     appendNarrativeDelta(delta: string): void {
         this.currentDelta += delta;
-        const spaced = this.spaceParagraphs(this.currentDelta);
+        const cleaned = stripVoiceMarkers(this.currentDelta);
+        const spaced = this.spaceParagraphs(cleaned);
         if (!this.currentDeltaMd) {
             this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
                 id: `delta-${String(Date.now())}`,
@@ -1066,12 +1090,25 @@ export class GameUI {
     }
 
     finalizeDelta(): void {
+        this.debugLog?.('UI-FINALIZE', `ttsGated=${String(this.ttsGated)}, revealed=${this.revealedLength.toFixed(0)}/${String(this.revealBuffer.length)}, totalDelta=${String(this.currentDelta.length)} chars`);
+        // Stop the reveal timer and flush all remaining text instantly
+        this.stopRevealTimer();
+        this.hideTypingIndicator();
+
         if (this.currentDeltaMd) {
             this.currentDeltaMd.streaming = false;
-            this.currentDeltaMd.content = this.spaceParagraphs(this.currentDelta);
+            const cleaned = stripVoiceMarkers(this.currentDelta);
+            this.currentDeltaMd.content = this.spaceParagraphs(cleaned);
         }
         this.currentDelta = '';
         this.currentDeltaMd = null;
+
+        // Reset reveal state
+        this.revealBuffer = '';
+        this.revealedLength = 0;
+        this.revealRate = 60;
+        this.ttsGated = false;
+        this.revealFirstChunk = true;
     }
 
     appendPlayerCommand(command: string): void {
@@ -1211,12 +1248,19 @@ export class GameUI {
         this.alertsPanel.visible = true;
         this.alertsPanel.borderColor = COLORS.hpLow;
 
-        const alertLines = status.activeEvents.map(e => {
+        // Render each alert as two explicit lines to avoid awkward auto-wrapping (e.g. "(-5" / "HP/T)").
+        const lines: string[] = [];
+        for (const e of status.activeEvents) {
             const label = e.type.replace(/_/g, ' ').toUpperCase();
-            const name = label.length > 16 ? label.slice(0, 16) : label;
-            return `\u26A0 ${name} ${String(e.turnsRemaining)}T`;
-        });
-        this.alertsText.content = t`${fg(COLORS.hpLow)(alertLines.join('\n'))}`;
+            const turns = `${String(e.turnsRemaining)}T`;
+            const hint = alertEffectHint(e.type, e.effect);
+            lines.push(`\u26A0 ${label}`);
+            lines.push(hint ? `  ${turns}  ${hint}` : `  ${turns}`);
+        }
+
+        // Box border consumes 2 rows (top+bottom). Keep enough room for our content lines.
+        this.alertsPanel.height = Math.max(4, lines.length + 2);
+        this.alertsText.content = t`${fg(COLORS.hpLow)(lines.join('\n'))}`;
     }
 
     // ─── Mission Modal ─────────────────────────────────────────────────────
@@ -1353,7 +1397,140 @@ export class GameUI {
         this.narrativeScroll.add(card);
     }
 
+    // ─── Typing Indicator ─────────────────────────────────────────────────
+
+    showTypingIndicator(): void {
+        this.hideTypingIndicator();
+        const dots = new TextRenderable(this.renderer, {
+            id: `typing-dots-${String(Date.now())}`,
+            content: t`${fg(COLORS.textDim)('...')}`,
+        });
+        const card = new BoxRenderable(this.renderer, {
+            id: `typing-card-${String(Date.now())}`,
+            backgroundColor: COLORS.cardBg,
+            marginLeft: 1,
+            marginRight: 1,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 0,
+            paddingBottom: 0,
+        });
+        card.add(dots);
+        this.narrativeScroll.add(card);
+        this.typingIndicatorCard = card;
+    }
+
+    hideTypingIndicator(): void {
+        if (this.typingIndicatorCard) {
+            this.narrativeScroll.remove(this.typingIndicatorCard.id);
+            this.typingIndicatorCard = null;
+        }
+    }
+
+    // ─── TTS-Gated Typewriter Reveal ────────────────────────────────────
+
+    /**
+     * Buffer a streaming delta without displaying it.
+     * Creates the MarkdownRenderable container on first call so it exists
+     * in the scroll, but sets content to empty until revealChunk drives display.
+     */
+    bufferNarrativeDelta(delta: string): void {
+        this.ttsGated = true;
+        this.currentDelta += delta;
+        this.debugLog?.('UI-BUFFER', `+${String(delta.length)} chars, total buffered: ${String(this.currentDelta.length)}`);
+        if (!this.currentDeltaMd) {
+            this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
+                id: `delta-${String(Date.now())}`,
+                content: '',
+                syntaxStyle: mdTheme,
+                streaming: true,
+            });
+            this.addCard(this.currentDeltaMd, COLORS.cardBg);
+        }
+    }
+
+    /**
+     * Called by TTS playback pump when a chunk starts playing.
+     * Queues display text and starts the typewriter timer.
+     */
+    revealChunk(displayText: string, durationSec: number): void {
+        // On first chunk reveal, hide the typing indicator
+        if (this.revealFirstChunk) {
+            this.hideTypingIndicator();
+            this.revealFirstChunk = false;
+        }
+
+        if (!displayText) {
+            this.debugLog?.('UI-REVEAL', `Empty displayText, skipping (duration=${durationSec.toFixed(2)}s)`);
+            return;
+        }
+
+        const prevLen = this.revealBuffer.length;
+        this.revealBuffer += displayText;
+        // Calculate character reveal rate from audio duration
+        this.revealRate = displayText.length / Math.max(durationSec, 0.5);
+        this.debugLog?.('UI-REVEAL', `chunk +${String(displayText.length)} chars (buf ${String(prevLen)}->${String(this.revealBuffer.length)}), audio=${durationSec.toFixed(2)}s, rate=${this.revealRate.toFixed(1)} chars/s, revealed=${this.revealedLength.toFixed(0)}/${String(this.revealBuffer.length)}, text="${displayText.slice(0, 80)}..."`);
+        this.ensureRevealTimer();
+    }
+
+    private revealTickCount = 0;
+    private revealLastTickTime = 0;
+
+    private ensureRevealTimer(): void {
+        if (this.revealTimer) return;
+        this.revealTickCount = 0;
+        this.revealLastTickTime = Date.now();
+        const intervalMs = 33; // ~30fps
+        this.revealTimer = setInterval(() => {
+            this.revealTick();
+        }, intervalMs);
+        this.debugLog?.('UI-TIMER', 'Reveal timer started');
+    }
+
+    private revealTick(): void {
+        if (!this.currentDeltaMd) return;
+
+        // Use wall-clock elapsed time instead of assuming consistent 33ms intervals.
+        // TTS generation blocks the event loop for seconds — this lets us catch up.
+        const now = Date.now();
+        const dtSec = (now - this.revealLastTickTime) / 1000;
+        this.revealLastTickTime = now;
+
+        const prevLen = this.revealedLength;
+        this.revealedLength = Math.min(
+            this.revealedLength + this.revealRate * dtSec,
+            this.revealBuffer.length,
+        );
+
+        const visible = this.revealBuffer.slice(0, Math.floor(this.revealedLength));
+        const cleaned = stripVoiceMarkers(visible);
+        this.currentDeltaMd.content = this.spaceParagraphs(cleaned);
+
+        // Log every ~1s (every 30 ticks)
+        this.revealTickCount++;
+        if (this.revealTickCount % 30 === 0) {
+            this.debugLog?.('UI-TICK', `revealed=${this.revealedLength.toFixed(0)}/${String(this.revealBuffer.length)}, rate=${this.revealRate.toFixed(1)}, dt=${(dtSec * 1000).toFixed(0)}ms, delta=+${(this.revealedLength - prevLen).toFixed(1)} chars`);
+        }
+
+        // Stop timer when fully revealed and no more chunks expected
+        if (this.revealedLength >= this.revealBuffer.length) {
+            this.debugLog?.('UI-TIMER', `Reveal timer stopped — fully revealed ${String(this.revealBuffer.length)} chars`);
+            this.stopRevealTimer();
+        }
+    }
+
+    private stopRevealTimer(): void {
+        if (this.revealTimer) {
+            clearInterval(this.revealTimer);
+            this.revealTimer = null;
+        }
+    }
+
     // ─── Input ──────────────────────────────────────────────────────────────
+
+    setDebugLog(fn: (label: string, content: string) => void): void {
+        this.debugLog = fn;
+    }
 
     onInput(callback: (input: string) => void): void {
         this.inputCallback = callback;

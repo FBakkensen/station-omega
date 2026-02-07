@@ -58,9 +58,24 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
         roomIndex: roomKeys.indexOf(state.currentRoom) + 1,
         totalRooms: station.rooms.size,
         inventory: state.inventory.map(id => station.items.get(id)?.name ?? id),
+        inventoryKeyFlags: state.inventory.map(id => station.items.get(id)?.isKeyItem ?? false),
         npcs: getNPCsInRoom(state.currentRoom, station),
         characterClass: state.characterClass,
         turnCount: state.turnCount,
+        damage: state.damage,
+        maxInventory: state.maxInventory,
+        shieldActive: state.shieldActive,
+        plasmaBoost: state.plasmaBoost,
+        activeEvents: state.activeEvents.map(e => ({ type: e.type, turnsRemaining: e.turnsRemaining })),
+        objectiveTitle: station.objectives.title,
+        objectiveStep: station.objectives.currentStepIndex,
+        objectiveTotal: station.objectives.steps.length,
+        objectiveCurrentDesc: station.objectives.steps[station.objectives.currentStepIndex]?.description ?? '',
+        objectivesComplete: station.objectives.completed,
+        objectiveSteps: station.objectives.steps.map(s => ({
+            description: s.description,
+            completed: s.completed,
+        })),
     };
 }
 

@@ -15,7 +15,6 @@ import {
     t,
     bold,
     fg,
-    bg,
     DistortionEffect,
 } from '@opentui/core';
 import type { CliRenderer, KeyEvent } from '@opentui/core';
@@ -126,8 +125,6 @@ function classIcon(cls: CharacterClassId): string {
 export class GameUI {
     private renderer!: CliRenderer;
     private narrativeScroll!: ScrollBoxRenderable;
-    private npcText!: TextRenderable;
-    private statusText!: TextRenderable;
     private inputField!: InputRenderable;
     private currentDelta = '';
     private currentDeltaMd: MarkdownRenderable | null = null;
@@ -137,6 +134,20 @@ export class GameUI {
     private distortionFn = (buffer: Parameters<typeof this.distortion.apply>[0], deltaTime: number) => {
         this.distortion.apply(buffer, deltaTime);
     };
+
+    // Sidebar panel text renderables
+    private vitalsText!: TextRenderable;
+    private locationText!: TextRenderable;
+    private contactsText!: TextRenderable;
+    private inventoryText!: TextRenderable;
+    private missionText!: TextRenderable;
+    private alertsPanel!: BoxRenderable;
+    private alertsText!: TextRenderable;
+    private sidebar!: BoxRenderable;
+
+    // Compact fallback status (narrow terminals)
+    private compactStatusText!: TextRenderable;
+    private isNarrowMode = false;
 
     // Slash command state
     private slashCommands: SlashCommandDef[] = [];
@@ -150,6 +161,14 @@ export class GameUI {
     private inlineChoices: SelectRenderable | null = null;
     private inlineChoicesCard: BoxRenderable | null = null;
     private inlineChoicesActive = false;
+
+    // Mission modal overlay
+    private missionModalBox!: BoxRenderable;
+    private missionModalScroll!: ScrollBoxRenderable;
+    private missionModalVisible = false;
+    private prevObjectiveStep = -1;
+    private prevObjectivesComplete = false;
+    private lastStatus: GameStatus | null = null;
 
     // Layout root ref for screen swaps
     private layoutRoot!: BoxRenderable;
@@ -177,19 +196,41 @@ export class GameUI {
             },
         });
 
-        this.npcText = new TextRenderable(this.renderer, {
-            id: 'npc-text',
-            content: t`${fg(COLORS.textDim)('Contacts: none')}`,
+        // Sidebar panel text renderables
+        this.vitalsText = new TextRenderable(this.renderer, {
+            id: 'vitals-text',
+            content: t`${fg(COLORS.textDim)('...')}`,
+        });
+        this.locationText = new TextRenderable(this.renderer, {
+            id: 'location-text',
+            content: t`${fg(COLORS.textDim)('...')}`,
+        });
+        this.contactsText = new TextRenderable(this.renderer, {
+            id: 'contacts-text',
+            content: t`${fg(COLORS.textDim)('No contacts')}`,
+        });
+        this.inventoryText = new TextRenderable(this.renderer, {
+            id: 'inventory-text',
+            content: t`${fg(COLORS.textDim)('Empty')}`,
+        });
+        this.missionText = new TextRenderable(this.renderer, {
+            id: 'mission-text',
+            content: t`${fg(COLORS.textDim)('...')}`,
+        });
+        this.alertsText = new TextRenderable(this.renderer, {
+            id: 'alerts-text',
+            content: t`${fg(COLORS.textDim)('None')}`,
         });
 
-        this.statusText = new TextRenderable(this.renderer, {
-            id: 'status-text',
+        // Compact fallback status for narrow terminals
+        this.compactStatusText = new TextRenderable(this.renderer, {
+            id: 'compact-status-text',
             content: t`${fg(COLORS.textDim)('Initializing...')}`,
         });
 
         this.inputField = new InputRenderable(this.renderer, {
             id: 'input-field',
-            width: '100%' as unknown as number,
+            flexGrow: 1,
             placeholder: 'Enter your command...',
             backgroundColor: COLORS.inputBg,
             focusedBackgroundColor: COLORS.inputFocusBg,
@@ -206,6 +247,12 @@ export class GameUI {
             if (this.popupState !== 'idle') return;
 
             this.inputField.value = '';
+
+            // /mission opens the mission modal
+            if (trimmed.toLowerCase() === '/mission') {
+                this.showMissionModal();
+                return;
+            }
 
             // Dismiss inline choices when player types their own text
             if (this.inlineChoicesActive) this.dismissInlineChoices();
@@ -261,6 +308,12 @@ export class GameUI {
         // Intercept key presses on the input field for popup + inline choices navigation
         const origHandleKey = this.inputField.handleKeyPress.bind(this.inputField);
         this.inputField.handleKeyPress = (key: KeyEvent): boolean => {
+            // Mission modal takes top priority
+            if (this.missionModalVisible) {
+                if (key.name === 'escape') { this.dismissMissionModal(); return true; }
+                return true; // Block all input while modal is open
+            }
+
             // Inline attack choices navigation
             if (this.inlineChoicesActive && this.inlineChoices) {
                 if (key.name === 'up') { this.inlineChoices.moveUp(); return true; }
@@ -283,6 +336,12 @@ export class GameUI {
                 }
             }
 
+            // Tab opens mission modal when input is empty and no popup/choices active
+            if (key.name === 'tab' && !this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
+                this.showMissionModal();
+                return true;
+            }
+
             const result = origHandleKey(key);
             this.updatePopupFromInput();
             return result;
@@ -300,48 +359,55 @@ export class GameUI {
         this.buildGameplayLayout();
         this.renderer.root.add(this.layoutRoot);
         this.renderer.root.add(this.popupBox);
+
+        // Mission modal overlay
+        this.missionModalScroll = new ScrollBoxRenderable(this.renderer, {
+            id: 'mission-modal-scroll',
+            flexGrow: 1,
+            width: '100%',
+            scrollY: true,
+            stickyScroll: false,
+            contentOptions: { flexDirection: 'column', gap: 0 },
+        });
+
+        this.missionModalBox = new BoxRenderable(this.renderer, {
+            id: 'mission-modal-box',
+            position: 'absolute',
+            bottom: 3,
+            left: '20%',
+            width: '60%',
+            borderStyle: 'rounded',
+            borderColor: COLORS.title,
+            backgroundColor: '#0d1117',
+            zIndex: 11,
+            visible: false,
+            flexDirection: 'column',
+            paddingLeft: 1,
+            paddingRight: 1,
+            paddingTop: 1,
+            paddingBottom: 1,
+        });
+        this.missionModalBox.add(this.missionModalScroll);
+        this.renderer.root.add(this.missionModalBox);
+
         this.inputField.focus();
     }
 
     private buildGameplayLayout(): void {
+        this.isNarrowMode = process.stdout.columns < 90;
+
         // Main narrative panel
         const narrativePanel = Box(
             {
                 flexGrow: 1,
                 flexDirection: 'column',
-                borderStyle: 'rounded',
+                borderStyle: 'double',
                 borderColor: COLORS.border,
                 title: ' STATION OMEGA ',
                 titleAlignment: 'center',
                 backgroundColor: COLORS.panelBg,
             },
             this.narrativeScroll,
-        );
-
-        // NPC contacts bar
-        const npcBar = Box(
-            {
-                height: 1,
-                width: '100%',
-                flexDirection: 'row',
-                backgroundColor: COLORS.panelBg,
-                paddingLeft: 1,
-                paddingRight: 1,
-            },
-            this.npcText,
-        );
-
-        // Status bar
-        const statusBar = Box(
-            {
-                height: 1,
-                width: '100%',
-                flexDirection: 'row',
-                backgroundColor: COLORS.border,
-                paddingLeft: 1,
-                paddingRight: 1,
-            },
-            this.statusText,
         );
 
         // Input area
@@ -354,11 +420,149 @@ export class GameUI {
             },
             Text({ content: t`${fg(COLORS.title)('>')} ` }),
             this.inputField,
+            Text({ content: t` ${fg(COLORS.textDim)('Tab:Mission  /:Commands')} `, paddingRight: 1 }),
         );
 
-        this.layoutRoot.add(narrativePanel);
-        this.layoutRoot.add(npcBar);
-        this.layoutRoot.add(statusBar);
+        if (this.isNarrowMode) {
+            // Narrow terminal: no sidebar, compact status bar below narrative
+            const compactBar = Box(
+                {
+                    height: 1,
+                    width: '100%',
+                    flexDirection: 'row',
+                    backgroundColor: COLORS.border,
+                    paddingLeft: 1,
+                    paddingRight: 1,
+                },
+                this.compactStatusText,
+            );
+            this.layoutRoot.add(narrativePanel);
+            this.layoutRoot.add(compactBar);
+            this.layoutRoot.add(inputBar);
+            return;
+        }
+
+        // ── Sidebar panels ──────────────────────────────────────────────
+
+        const sidebarPanelBorder = COLORS.border;
+        const sidebarPanelBg = COLORS.panelBg;
+
+        const vitalsPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-vitals',
+            height: 6,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: sidebarPanelBorder,
+            title: ' VITALS ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+        });
+        vitalsPanel.add(this.vitalsText);
+
+        const locationPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-location',
+            height: 5,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: sidebarPanelBorder,
+            title: ' LOCATION ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+        });
+        locationPanel.add(this.locationText);
+
+        const contactsPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-contacts',
+            height: 5,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: sidebarPanelBorder,
+            title: ' CONTACTS ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+        });
+        contactsPanel.add(this.contactsText);
+
+        const inventoryPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-inventory',
+            flexGrow: 1,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: sidebarPanelBorder,
+            title: ' INVENTORY ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+        });
+        inventoryPanel.add(this.inventoryText);
+
+        const missionPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-mission',
+            height: 5,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: sidebarPanelBorder,
+            title: ' MISSION ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+        });
+        missionPanel.add(this.missionText);
+
+        this.alertsPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-alerts',
+            height: 4,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: sidebarPanelBorder,
+            title: ' ALERTS ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+            visible: false,
+        });
+        this.alertsPanel.add(this.alertsText);
+
+        // Sidebar container
+        this.sidebar = new BoxRenderable(this.renderer, {
+            id: 'sidebar',
+            width: 28,
+            flexDirection: 'column',
+            backgroundColor: COLORS.bg,
+        });
+        this.sidebar.add(vitalsPanel);
+        this.sidebar.add(locationPanel);
+        this.sidebar.add(contactsPanel);
+        this.sidebar.add(inventoryPanel);
+        this.sidebar.add(this.alertsPanel);
+        this.sidebar.add(missionPanel);
+
+        // Main row: narrative + sidebar
+        const mainRow = new BoxRenderable(this.renderer, {
+            id: 'main-row',
+            flexGrow: 1,
+            flexDirection: 'row',
+            width: '100%',
+        });
+        mainRow.add(narrativePanel);
+        mainRow.add(this.sidebar);
+
+        this.layoutRoot.add(mainRow);
         this.layoutRoot.add(inputBar);
     }
 
@@ -598,6 +802,10 @@ export class GameUI {
 
     showGameplayScreen(): void {
         this.clearLayout();
+        this.prevObjectiveStep = -1;
+        this.prevObjectivesComplete = false;
+        this.lastStatus = null;
+        this.dismissMissionModal();
         this.buildGameplayLayout();
         this.inputField.focus();
     }
@@ -884,9 +1092,32 @@ export class GameUI {
         this.renderer.removePostProcessFn(this.distortionFn);
     }
 
-    // ─── Status Bar ─────────────────────────────────────────────────────────
+    // ─── Sidebar Updates ──────────────────────────────────────────────────
 
     updateStatus(status: GameStatus): void {
+        this.detectObjectiveChanges(status);
+        this.lastStatus = status;
+        if (this.isNarrowMode) {
+            this.updateCompactStatus(status);
+            return;
+        }
+        this.updateVitals(status);
+        this.updateLocation(status);
+        this.updateContacts(status);
+        this.updateInventory(status);
+        this.updateMission(status);
+        this.updateAlerts(status);
+    }
+
+    private updateCompactStatus(status: GameStatus): void {
+        const hpPct = status.hp / status.maxHp;
+        const hpColor = hpPct >= 0.6 ? COLORS.hpGood : hpPct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
+        const inv = status.inventory.length > 0 ? status.inventory.join(', ') : 'empty';
+        const cls = classIcon(status.characterClass);
+        this.compactStatusText.content = t`${fg(hpColor)(`HP ${String(status.hp)}/${String(status.maxHp)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`${cls} ${status.roomName}`)} ${fg(COLORS.textDim)(`(${String(status.roomIndex)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.textDim)(`T${String(status.turnCount)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
+    }
+
+    private updateVitals(status: GameStatus): void {
         const hpPct = status.hp / status.maxHp;
         const hpColor = hpPct >= 0.6 ? COLORS.hpGood : hpPct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
         const hpLabel = hpPct >= 0.8 ? 'Healthy'
@@ -894,28 +1125,232 @@ export class GameUI {
             : hpPct >= 0.25 ? 'Critical'
             : 'Dying';
 
-        const inv = status.inventory.length > 0 ? status.inventory.join(', ') : 'empty';
-        const classLabel = classIcon(status.characterClass);
+        const barW = 14;
+        const filled = Math.round(hpPct * barW);
+        const hpBar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
 
-        this.statusText.content = t`${fg(hpColor)(`HP ${String(status.hp)}/${String(status.maxHp)} ${hpLabel}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`${classLabel} ${status.roomName}`)} ${fg(COLORS.textDim)(`(${String(status.roomIndex + 1)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.textDim)(`T${String(status.turnCount)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
+        const cls = classIcon(status.characterClass);
+        const dmg = `${String(status.damage[0])}-${String(status.damage[1])}`;
 
-        // Update NPC contacts bar — name with HP background, icon-only disposition
+        const buffs: string[] = [];
+        if (status.shieldActive) buffs.push('\u25C6SH');
+        if (status.plasmaBoost) buffs.push('\u25B2PL');
+        const buffStr = buffs.length > 0 ? `  ${buffs.join(' ')}` : '';
+
+        this.vitalsText.content = t`${fg(COLORS.text)(`${cls} ${hpLabel}`)}\n${fg(hpColor)(`HP ${hpBar} ${String(status.hp)}`)}\n${fg(COLORS.textDim)(`DMG ${dmg}`)}${fg(COLORS.hpMid)(buffStr)}`;
+    }
+
+    private updateLocation(status: GameStatus): void {
+        this.locationText.content = t`${fg(COLORS.text)(status.roomName)}\n${fg(COLORS.textDim)(`Room ${String(status.roomIndex)}/${String(status.totalRooms)}`)}\n${fg(COLORS.textDim)(`Turn ${String(status.turnCount)}`)}`;
+    }
+
+    private updateContacts(status: GameStatus): void {
         if (status.npcs.length === 0) {
-            this.npcText.content = t`${fg(COLORS.textDim)('Contacts: none')}`;
-        } else {
-            const npc = status.npcs[0];
+            this.contactsText.content = t`${fg(COLORS.textDim)('No contacts')}`;
+            return;
+        }
+
+        // Build each NPC as plain text lines — color the whole block uniformly
+        const maxNpcs = 3;
+        const npcLines: string[] = [];
+        for (let i = 0; i < Math.min(status.npcs.length, maxNpcs); i++) {
+            const npc = status.npcs[i];
             const icon = npc.disposition === 'hostile' ? '!'
                 : npc.disposition === 'friendly' ? '*'
                 : '?';
-            const npcHpColor = npc.hpPct >= 0.6 ? '#1a5c2a' : npc.hpPct >= 0.25 ? '#5c4a0a' : '#5c1a1a';
-            const emptyColor = '#1a1a2a';
-            const padded = ` ${npc.name} `;
-            const split = Math.round(npc.hpPct * padded.length);
-            const filledPart = padded.slice(0, split);
-            const emptyPart = padded.slice(split);
-
-            this.npcText.content = t`${fg(COLORS.textDim)(icon)} ${bg(npcHpColor)(fg('#ffffff')(filledPart))}${bg(emptyColor)(fg(COLORS.textDim)(emptyPart))}`;
+            const barW = 8;
+            const filled = Math.round(npc.hpPct * barW);
+            const npcBar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
+            const name = npc.name.length > 10 ? npc.name.slice(0, 10) : npc.name;
+            npcLines.push(`${icon} ${name}  ${npcBar} ${String(npc.currentHp)}`);
         }
+
+        this.contactsText.content = t`${fg(COLORS.text)(npcLines.join('\n'))}`;
+    }
+
+    private updateInventory(status: GameStatus): void {
+        if (status.inventory.length === 0) {
+            this.inventoryText.content = t`${fg(COLORS.textDim)('Empty')}\n${fg(COLORS.textDim)(`[0/${String(status.maxInventory)}]`)}`;
+            return;
+        }
+
+        const itemLines = status.inventory.map((name, i) => {
+            const isKey = status.inventoryKeyFlags[i];
+            const prefix = isKey ? '*' : String(i + 1);
+            return `${prefix} ${name}`;
+        });
+        const slotLabel = `[${String(status.inventory.length)}/${String(status.maxInventory)}]`;
+        this.inventoryText.content = t`${fg(COLORS.text)(itemLines.join('\n'))}\n${fg(COLORS.textDim)(slotLabel)}`;
+    }
+
+    private updateMission(status: GameStatus): void {
+        const title = status.objectiveTitle.length > 22
+            ? status.objectiveTitle.slice(0, 22) + '..'
+            : status.objectiveTitle;
+
+        if (status.objectivesComplete) {
+            this.missionText.content = t`${fg(COLORS.hpGood)('COMPLETE')}\n${fg(COLORS.textDim)(title)}`;
+            return;
+        }
+
+        const completed = status.objectiveSteps.filter(s => s.completed).length;
+        const total = status.objectiveTotal;
+        const barW = 10;
+        const filled = total > 0 ? Math.round((completed / total) * barW) : 0;
+        const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
+
+        this.missionText.content = t`${fg(COLORS.textDim)(title)}\n${fg(COLORS.title)(bar)} ${fg(COLORS.text)(`${String(completed)}/${String(total)}`)}\n${fg(COLORS.textDim)('Tab: details')}`;
+    }
+
+    private updateAlerts(status: GameStatus): void {
+        if (status.activeEvents.length === 0) {
+            this.alertsPanel.visible = false;
+            return;
+        }
+
+        this.alertsPanel.visible = true;
+        this.alertsPanel.borderColor = COLORS.hpLow;
+
+        const alertLines = status.activeEvents.map(e => {
+            const label = e.type.replace(/_/g, ' ').toUpperCase();
+            const name = label.length > 16 ? label.slice(0, 16) : label;
+            return `\u26A0 ${name} ${String(e.turnsRemaining)}T`;
+        });
+        this.alertsText.content = t`${fg(COLORS.hpLow)(alertLines.join('\n'))}`;
+    }
+
+    // ─── Mission Modal ─────────────────────────────────────────────────────
+
+    private showMissionModal(): void {
+        const status = this.lastStatus;
+        if (!status) return;
+
+        // Clear previous modal content
+        for (const child of this.missionModalScroll.getChildren()) {
+            this.missionModalScroll.remove(child.id);
+        }
+
+        // Title
+        const titleText = new TextRenderable(this.renderer, {
+            id: 'mission-modal-title',
+            content: t`${bold(fg(COLORS.title)(status.objectiveTitle))}`,
+        });
+        this.missionModalScroll.add(titleText);
+
+        // Spacer
+        this.missionModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'mission-modal-spacer',
+            content: ' ',
+        }));
+
+        // Steps
+        for (let i = 0; i < status.objectiveSteps.length; i++) {
+            const step = status.objectiveSteps[i];
+            let icon: string;
+            let color: string;
+            if (step.completed) {
+                icon = '\u2713'; // ✓
+                color = COLORS.hpGood;
+            } else if (i === status.objectiveStep) {
+                icon = '\u2192'; // →
+                color = COLORS.title;
+            } else {
+                icon = '\u00B7'; // ·
+                color = COLORS.textDim;
+            }
+            this.missionModalScroll.add(new TextRenderable(this.renderer, {
+                id: `mission-modal-step-${String(i)}`,
+                content: t`${fg(color)(`  ${icon} ${step.description}`)}`,
+            }));
+        }
+
+        // Progress summary
+        const completedCount = status.objectiveSteps.filter(s => s.completed).length;
+        this.missionModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'mission-modal-spacer2',
+            content: ' ',
+        }));
+        this.missionModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'mission-modal-progress',
+            content: t`${fg(COLORS.textDim)(`  Progress: ${String(completedCount)}/${String(status.objectiveSteps.length)}  |  Escape to close`)}`,
+        }));
+
+        this.missionModalBox.visible = true;
+        this.missionModalVisible = true;
+    }
+
+    private dismissMissionModal(): void {
+        this.missionModalBox.visible = false;
+        this.missionModalVisible = false;
+    }
+
+    // ─── Narrative Mission Cards ────────────────────────────────────────────
+
+    private detectObjectiveChanges(status: GameStatus): void {
+        // First call — initialize tracking
+        if (this.prevObjectiveStep === -1) {
+            this.prevObjectiveStep = status.objectiveStep;
+            this.prevObjectivesComplete = status.objectivesComplete;
+            return;
+        }
+
+        // Mission complete
+        if (status.objectivesComplete && !this.prevObjectivesComplete) {
+            this.injectMissionCard('complete', 'MISSION COMPLETE');
+            this.prevObjectivesComplete = true;
+            this.prevObjectiveStep = status.objectiveStep;
+            return;
+        }
+
+        // Objective advanced
+        if (status.objectiveStep > this.prevObjectiveStep) {
+            const prevDesc = status.objectiveSteps[this.prevObjectiveStep]?.description ?? '';
+            this.injectMissionCard('done', `OBJECTIVE COMPLETE: ${prevDesc}`);
+
+            const newDesc = status.objectiveSteps[status.objectiveStep]?.description ?? '';
+            if (newDesc) {
+                this.injectMissionCard('new', `NEW OBJECTIVE: ${newDesc}`);
+            }
+
+            this.prevObjectiveStep = status.objectiveStep;
+        }
+    }
+
+    private injectMissionCard(type: 'done' | 'new' | 'complete', text: string): void {
+        let icon: string;
+        let borderColor: string;
+        if (type === 'complete') {
+            icon = '\u2605'; // ★
+            borderColor = COLORS.hpGood;
+        } else if (type === 'done') {
+            icon = '\u2713'; // ✓
+            borderColor = COLORS.hpGood;
+        } else {
+            icon = '\u25B6'; // ▶
+            borderColor = COLORS.title;
+        }
+
+        const textColor = type === 'complete' ? COLORS.hpGood : type === 'done' ? COLORS.hpGood : COLORS.title;
+
+        const content = new TextRenderable(this.renderer, {
+            id: `mission-card-text-${String(Date.now())}-${String(Math.random()).slice(2, 6)}`,
+            content: t`${fg(textColor)(`${icon} ${text}`)}`,
+        });
+
+        const card = new BoxRenderable(this.renderer, {
+            id: `mission-card-${String(Date.now())}-${String(Math.random()).slice(2, 6)}`,
+            backgroundColor: '#1a2f1a',
+            marginLeft: 1,
+            marginRight: 1,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 0,
+            paddingBottom: 0,
+            borderStyle: 'single',
+            borderColor,
+        });
+        card.add(content);
+        this.narrativeScroll.add(card);
     }
 
     // ─── Input ──────────────────────────────────────────────────────────────

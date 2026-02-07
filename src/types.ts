@@ -398,9 +398,21 @@ export interface GameStatus {
     roomIndex: number;
     totalRooms: number;
     inventory: string[];
+    inventoryKeyFlags: boolean[];
     npcs: NPCDisplayInfo[];
     characterClass: CharacterClassId;
     turnCount: number;
+    damage: [number, number];
+    maxInventory: number;
+    shieldActive: boolean;
+    plasmaBoost: boolean;
+    activeEvents: Array<{ type: string; turnsRemaining: number }>;
+    objectiveTitle: string;
+    objectiveStep: number;
+    objectiveTotal: number;
+    objectiveCurrentDesc: string;
+    objectivesComplete: boolean;
+    objectiveSteps: Array<{ description: string; completed: boolean }>;
 }
 
 // ─── Slash Commands (for TUI) ───────────────────────────────────────────────

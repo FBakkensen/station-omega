@@ -955,67 +955,7 @@ export class GameUI {
         }));
     }
 
-    // ─── Inline Attack Choices ──────────────────────────────────────────────
-
-    showAttackChoices(approaches: { label: string; description: string }[]): void {
-        this.dismissInlineChoices();
-
-        const select = new SelectRenderable(this.renderer, {
-            id: `choices-${String(Date.now())}`,
-            options: approaches.map((a, i) => ({
-                name: `${String(i + 1)}. ${a.label}`,
-                description: a.description,
-                value: a.label,
-            })),
-            flexGrow: 1,
-            selectedBackgroundColor: '#1e3a5f',
-            selectedTextColor: '#00e5ff',
-            textColor: COLORS.text,
-            backgroundColor: '#0d1117',
-            wrapSelection: true,
-            showDescription: true,
-        });
-
-        select.on(SelectRenderableEvents.ITEM_SELECTED, () => {
-            this.selectInlineChoice();
-        });
-
-        const hint = new TextRenderable(this.renderer, {
-            id: `choices-hint-${String(Date.now())}`,
-            content: t`${fg(COLORS.textDim)('  Up/Down Navigate  Enter Select  Or type your own approach')}`,
-        });
-
-        // Each option with description ~2 lines + hint + padding + border
-        const cardHeight = approaches.length * 2 + 4;
-
-        const card = new BoxRenderable(this.renderer, {
-            id: `choices-card-${String(Date.now())}`,
-            backgroundColor: '#0d1117',
-            marginLeft: 1,
-            marginRight: 1,
-            paddingLeft: 2,
-            paddingRight: 2,
-            paddingTop: 1,
-            paddingBottom: 0,
-            height: cardHeight,
-            borderStyle: 'rounded',
-            borderColor: COLORS.border,
-            flexDirection: 'column',
-        });
-        card.add(select);
-        card.add(hint);
-        this.narrativeScroll.add(card);
-
-        this.inlineChoices = select;
-        this.inlineChoicesCard = card;
-        this.inlineChoicesActive = true;
-    }
-
-    showActionChoices(actions: { label: string; description: string }[]): void {
-        this.showAttackChoices(actions);
-    }
-
-    // ─── Generalized Choice Cards ───────────────────────────────────────────
+    // ─── Inline Choice Cards ───────────────────────────────────────────────
 
     showChoiceCards(title: string, choices: { label: string; description: string }[]): void {
         this.dismissInlineChoices();

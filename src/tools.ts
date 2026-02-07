@@ -58,8 +58,12 @@ function getItemName(itemId: string, station: GeneratedStation): string {
 // ─── Callbacks ──────────────────────────────────────────────────────────────
 
 export type CombatStartCallback = () => void;
-export type AttackChoicesCallback = (choices: { label: string; description: string }[]) => void;
-export type ActionChoicesCallback = (choices: { label: string; description: string }[]) => void;
+
+export interface ChoiceSet {
+    title: string;
+    choices: { label: string; description: string }[];
+}
+export type ChoicesCallback = (choiceSet: ChoiceSet) => void;
 
 // ─── Tool Factory ───────────────────────────────────────────────────────────
 
@@ -68,13 +72,43 @@ export interface ToolContext {
     station: GeneratedStation;
     build: CharacterBuild;
     onCombatStart: CombatStartCallback | null;
-    onAttackChoices: AttackChoicesCallback | null;
-    onActionChoices: ActionChoicesCallback | null;
+    onChoices: ChoicesCallback | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool array requires 'any' for variance compatibility with mixed parameter types
 export function createGameTools(ctx: ToolContext): Tool<any>[] {
     const { state, station, build } = ctx;
+
+    function defineSuggestTool(
+        name: string, description: string, title: string,
+        fieldName: string, fieldDesc: string, note: string,
+    ) {
+        return defineTool(name, {
+            description,
+            parameters: {
+                type: 'object',
+                properties: {
+                    [fieldName]: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                label: { type: 'string', description: 'Short punchy name (2-6 words)' },
+                                description: { type: 'string', description: 'One-sentence evocative description' },
+                            },
+                            required: ['label', 'description'],
+                        },
+                        description: fieldDesc,
+                    },
+                },
+                required: [fieldName],
+            },
+            handler: (args: Record<string, { label: string; description: string }[]>) => {
+                ctx.onChoices?.({ title, choices: args[fieldName] });
+                return { presented: true, note };
+            },
+        });
+    }
 
     const lookAround = defineTool('look_around', {
         description: 'Look around the current room. Returns details about the environment, items, threats, and exits.',
@@ -459,34 +493,14 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
         },
     });
 
-    const suggestAttacks = defineTool('suggest_attacks', {
-        description: 'Present the player with 3-5 contextual attack approaches to choose from. Call this BEFORE calling attack, when the player wants to fight but hasn\'t described a specific approach.',
-        parameters: {
-            type: 'object',
-            properties: {
-                approaches: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            label: { type: 'string', description: 'Short punchy action name (2-6 words)' },
-                            description: { type: 'string', description: 'One-sentence evocative description' },
-                        },
-                        required: ['label', 'description'],
-                    },
-                    description: '3-5 contextual attack approaches',
-                },
-            },
-            required: ['approaches'],
-        },
-        handler: (args: { approaches: { label: string; description: string }[] }) => {
-            ctx.onAttackChoices?.(args.approaches);
-            return {
-                presented: true,
-                note: 'Attack options displayed as interactive UI buttons. Do NOT list them in text. Write one atmospheric line, then STOP and wait.',
-            };
-        },
-    });
+    const suggestAttacks = defineSuggestTool(
+        'suggest_attacks',
+        'Present the player with 3-5 contextual attack approaches to choose from. Call this BEFORE calling attack, when the player wants to fight but hasn\'t described a specific approach.',
+        'Choose Your Attack',
+        'approaches',
+        '3-5 contextual attack approaches',
+        'Attack options displayed as interactive UI buttons. Do NOT list them in text. Write one atmospheric line, then STOP and wait.',
+    );
 
     // ─── New Tools ──────────────────────────────────────────────────────────
 
@@ -759,34 +773,23 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
         },
     });
 
-    const suggestActions = defineTool('suggest_actions', {
-        description: 'Present 3-5 contextual creative actions the player can attempt in the current situation. Use for non-combat situations. Actions are displayed as interactive UI buttons.',
-        parameters: {
-            type: 'object',
-            properties: {
-                actions: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            label: { type: 'string', description: 'Short action name (2-6 words)' },
-                            description: { type: 'string', description: 'One-sentence description of what could happen' },
-                        },
-                        required: ['label', 'description'],
-                    },
-                    description: '3-5 contextual creative actions',
-                },
-            },
-            required: ['actions'],
-        },
-        handler: (args: { actions: { label: string; description: string }[] }) => {
-            ctx.onActionChoices?.(args.actions);
-            return {
-                presented: true,
-                note: 'Action options displayed as interactive UI buttons. Do NOT list them in text.',
-            };
-        },
-    });
+    const suggestActions = defineSuggestTool(
+        'suggest_actions',
+        'Present 3-5 contextual creative actions the player can attempt in the current situation. Use for non-combat situations. Actions are displayed as interactive UI buttons.',
+        'What Do You Do?',
+        'actions',
+        '3-5 contextual creative actions',
+        'Action options displayed as interactive UI buttons. Do NOT list them in text.',
+    );
+
+    const suggestInteractions = defineSuggestTool(
+        'suggest_interactions',
+        'Present 3-5 contextual NPC interaction approaches. Call BEFORE interact_npc when player wants to interact but hasn\'t specified an approach.',
+        'How Do You Approach?',
+        'interactions',
+        '3-5 contextual NPC interaction approaches',
+        'Interaction options displayed as interactive UI buttons. Do NOT list them in text. Write one atmospheric line, then STOP and wait.',
+    );
 
     const completeObjective = defineTool('complete_objective', {
         description: 'Mark the current objective step as complete when the player performs the required action in the correct room.',
@@ -843,8 +846,8 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool array requires 'any' for variance compatibility with mixed parameter types
     const tools: Tool<any>[] = [
         lookAround, moveTo, pickUpItem, useItem, attackTool,
-        suggestAttacks, attemptAction, interactNPC, recordMoralChoice,
-        suggestActions, completeObjective,
+        suggestAttacks, attemptAction, interactNPC, suggestInteractions,
+        recordMoralChoice, suggestActions, completeObjective,
     ];
 
     if (build.id === 'soldier') {

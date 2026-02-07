@@ -7,7 +7,7 @@ import { generateCreativeContent } from './src/creative.js';
 import { assembleStation } from './src/assembly.js';
 import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/character.js';
 import { createGameTools } from './src/tools.js';
-import type { ToolContext } from './src/tools.js';
+import type { ToolContext, ChoiceSet } from './src/tools.js';
 import { buildSystemPrompt } from './src/prompt.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
@@ -141,7 +141,7 @@ function getSlashCommands(state: GameState, station: GeneratedStation): SlashCom
                     .filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead')
                     .map(n => ({ label: n.name, value: n.name }));
             },
-            toPrompt: (t) => t ? `interact with ${t}` : 'interact',
+            toPrompt: (t) => t ? `I want to interact with ${t}. Show me my options.` : 'interact with someone',
         },
         {
             name: 'attempt',
@@ -185,8 +185,7 @@ async function runGameplay(
     }
 
     // Pending choices state
-    let pendingAttackChoices: { label: string; description: string }[] | null = null;
-    let pendingActionChoices: { label: string; description: string }[] | null = null;
+    let pendingChoices: ChoiceSet | null = null;
 
     // Event tracker
     const eventTracker = new EventTracker();
@@ -197,8 +196,7 @@ async function runGameplay(
         station,
         build,
         onCombatStart: () => { ui.enableCombatGlitch(); },
-        onAttackChoices: (choices) => { pendingAttackChoices = choices; },
-        onActionChoices: (choices) => { pendingActionChoices = choices; },
+        onChoices: (cs) => { pendingChoices = cs; },
     };
 
     const tools = createGameTools(toolCtx);
@@ -297,13 +295,9 @@ async function runGameplay(
         ui.finalizeDelta();
         ui.updateStatus(getStatus(state, station));
 
-        if (pendingAttackChoices) {
-            ui.showAttackChoices(pendingAttackChoices);
-            pendingAttackChoices = null;
-        }
-        if (pendingActionChoices) {
-            ui.showActionChoices(pendingActionChoices);
-            pendingActionChoices = null;
+        if (pendingChoices) {
+            ui.showChoiceCards(pendingChoices.title, pendingChoices.choices);
+            pendingChoices = null;
         }
 
         if (state.gameOver) {

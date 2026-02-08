@@ -1,5 +1,6 @@
 node_modules/
 .claude/settings.local.json
+.claude/projects/
 .env.local
 debug.log
 run-history.json

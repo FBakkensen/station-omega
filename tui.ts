@@ -17,7 +17,7 @@ import {
     fg,
     DistortionEffect,
 } from '@opentui/core';
-import type { CliRenderer, KeyEvent } from '@opentui/core';
+import type { CliRenderer, KeyEvent, TextChunk } from '@opentui/core';
 import type {
     CharacterBuild,
     CharacterClassId,
@@ -29,7 +29,13 @@ import type {
     SlashCommandDef,
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
-import { flattenMarkdown, reconstructMarkdownPartial, type ContentRun } from './src/markdown-reveal.js';
+import type { DisplaySegment } from './src/schema.js';
+import {
+    segmentCardStyle,
+    truncateChunks,
+    countChunkChars,
+    chunksToStyledText,
+} from './src/segment-style.js';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
 
@@ -135,12 +141,22 @@ function classIcon(cls: CharacterClassId): string {
 
 // ─── GameUI ──────────────────────────────────────────────────────────────────
 
+// ─── Segment Card State ──────────────────────────────────────────────────────
+
+interface SegmentCardState {
+    chunks: TextChunk[];           // pre-styled, full content
+    textNode: TextRenderable;      // the renderable in the card
+    totalChars: number;            // total content char count
+    revealedChars: number;         // typewriter position (float)
+    revealAllowedChars: number;    // TTS-gated budget
+    revealRate: number;            // chars/sec from TTS duration
+    finalized: boolean;
+}
+
 export class GameUI {
     private renderer!: CliRenderer;
     private narrativeScroll!: ScrollBoxRenderable;
     private inputField!: InputRenderable;
-    private currentDelta = '';
-    private currentDeltaMd: MarkdownRenderable | null = null;
     private inputCallback: ((input: string) => void) | null = null;
     private inputEnabled = true;
     private distortion = new DistortionEffect({ glitchChancePerSecond: 0.3, maxGlitchLines: 2 });
@@ -183,15 +199,9 @@ export class GameUI {
     private prevObjectivesComplete = false;
     private lastStatus: GameStatus | null = null;
 
-    // Typing indicator + typewriter reveal state
-    private revealBuffer = '';
-    private revealedContent = 0;
-    private revealRuns: ContentRun[] = [];
-    private revealContentLength = 0;
-    private revealRunsDirty = false;
+    // Per-segment card reveal state
+    private segmentCards: SegmentCardState[] = [];
     private revealTimer: ReturnType<typeof setInterval> | null = null;
-    private revealRate = 60;
-    private ttsGated = false;
     private typingIndicatorCard: BoxRenderable | null = null;
     private revealFirstChunk = true;
     private debugLog: ((label: string, content: string) => void) | null = null;
@@ -1159,63 +1169,84 @@ export class GameUI {
         this.narrativeScroll.add(card);
     }
 
-    /**
-     * The MarkdownRenderable filters out blank-line "space" tokens, collapsing
-     * paragraph gaps. Insert an invisible Braille Pattern Blank (U+2800) on each
-     * blank line so the parser treats it as a content paragraph, preserving the
-     * visual spacing the AI intended.
-     */
-    private spaceParagraphs(md: string): string {
-        return md.replace(/\n\n/g, '\n\n\u2800\n\n');
-    }
-
     appendNarrative(text: string): void {
         const md = new MarkdownRenderable(this.renderer, {
             id: `narrative-${String(Date.now())}`,
-            content: this.spaceParagraphs(text),
+            content: text.replace(/\n\n/g, '\n\n\u2800\n\n'),
             syntaxStyle: mdTheme,
             streaming: false,
         });
         this.addCard(md, COLORS.cardBg);
     }
 
-    appendNarrativeDelta(delta: string): void {
-        this.currentDelta += delta;
-        const spaced = this.spaceParagraphs(this.currentDelta);
-        if (!this.currentDeltaMd) {
-            this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
-                id: `delta-${String(Date.now())}`,
-                content: spaced,
-                syntaxStyle: mdTheme,
-                streaming: true,
-            });
-            this.addCard(this.currentDeltaMd, COLORS.cardBg);
-        } else {
-            this.currentDeltaMd.content = spaced;
+    /**
+     * Create a per-segment card with typed header and pre-styled text.
+     * The card's text content starts empty and is revealed by revealChunk().
+     */
+    pushSegmentCard(seg: DisplaySegment, chunks: TextChunk[], headerChars = 0): void {
+        const style = segmentCardStyle(seg.type);
+        const totalChars = countChunkChars(chunks);
+
+        // Create content TextRenderable — show header immediately if present
+        const initialContent = headerChars > 0
+            ? chunksToStyledText(truncateChunks(chunks, headerChars))
+            : '';
+        const textNode = new TextRenderable(this.renderer, {
+            id: `seg-text-${String(Date.now())}-${String(seg.segmentIndex)}`,
+            content: initialContent,
+        });
+
+        // Build card box with segment-type styling
+        const cardOpts: ConstructorParameters<typeof BoxRenderable>[1] = {
+            id: `seg-card-${String(Date.now())}-${String(seg.segmentIndex)}`,
+            backgroundColor: style.bgColor,
+            marginLeft: 1,
+            marginRight: 1,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 1,
+            paddingBottom: 1,
+            flexDirection: 'column' as const,
+        };
+
+        if (style.borderColor) {
+            cardOpts.borderColor = style.borderColor;
+            cardOpts.borderStyle = style.borderStyle ?? 'single';
         }
+
+        const card = new BoxRenderable(this.renderer, cardOpts);
+        card.add(textNode);
+        this.narrativeScroll.add(card);
+
+        this.segmentCards.push({
+            chunks,
+            textNode,
+            totalChars,
+            revealedChars: headerChars,
+            revealAllowedChars: headerChars,
+            revealRate: 60,
+            finalized: false,
+        });
+
+        this.debugLog?.('UI-PUSH-CARD', `seg[${String(seg.segmentIndex)}] type=${seg.type} speaker=${seg.speakerName ?? 'none'} totalChars=${String(totalChars)} headerChars=${String(headerChars)}`);
     }
 
-    finalizeDelta(): void {
-        this.debugLog?.('UI-FINALIZE', `ttsGated=${String(this.ttsGated)}, revealed=${this.revealedContent.toFixed(0)}/${String(this.revealContentLength)}, totalDelta=${String(this.currentDelta.length)} chars`);
-        // Stop the reveal timer and flush all remaining text instantly
+    /** Instantly reveal all remaining text in all segment cards and reset state. */
+    finalizeAllCards(): void {
+        this.debugLog?.('UI-FINALIZE', `Finalizing ${String(this.segmentCards.length)} cards`);
         this.stopRevealTimer();
         this.hideTypingIndicator();
 
-        if (this.currentDeltaMd) {
-            this.currentDeltaMd.streaming = false;
-            this.currentDeltaMd.content = this.spaceParagraphs(this.currentDelta);
+        for (const card of this.segmentCards) {
+            if (!card.finalized) {
+                card.revealedChars = card.totalChars;
+                card.finalized = true;
+                card.textNode.content = chunksToStyledText(card.chunks);
+            }
         }
-        this.currentDelta = '';
-        this.currentDeltaMd = null;
 
-        // Reset reveal state
-        this.revealBuffer = '';
-        this.revealedContent = 0;
-        this.revealRuns = [];
-        this.revealContentLength = 0;
-        this.revealRunsDirty = false;
-        this.revealRate = 60;
-        this.ttsGated = false;
+        // Reset for next response
+        this.segmentCards = [];
         this.revealFirstChunk = true;
     }
 
@@ -1535,62 +1566,33 @@ export class GameUI {
         }
     }
 
-    // ─── TTS-Gated Typewriter Reveal ────────────────────────────────────
-
-    /**
-     * Buffer a streaming delta without displaying it.
-     * Creates the MarkdownRenderable container on first call so it exists
-     * in the scroll, but sets content to empty until revealChunk drives display.
-     */
-    bufferNarrativeDelta(delta: string): void {
-        this.ttsGated = true;
-        this.currentDelta += delta;
-        this.revealRunsDirty = true;
-        this.debugLog?.('UI-BUFFER', `+${String(delta.length)} chars, total buffered: ${String(this.currentDelta.length)}`);
-        if (!this.currentDeltaMd) {
-            this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
-                id: `delta-${String(Date.now())}`,
-                content: '',
-                syntaxStyle: mdTheme,
-                streaming: true,
-            });
-            this.addCard(this.currentDeltaMd, COLORS.cardBg);
-        }
-    }
+    // ─── TTS-Gated Typewriter Reveal (Per-Segment Card) ────────────────
 
     /**
      * Called by TTS playback pump when a chunk starts playing.
-     * Queues display text and starts the typewriter timer.
+     * Routes to the correct segment card's reveal state.
      */
-    revealChunk(displayText: string, durationSec: number): void {
+    revealChunk(segmentIndex: number, charBudget: number, durationSec: number): void {
         // On first chunk reveal, hide the typing indicator
         if (this.revealFirstChunk) {
             this.hideTypingIndicator();
             this.revealFirstChunk = false;
         }
 
-        if (!displayText) {
-            this.debugLog?.('UI-REVEAL', `Empty displayText, skipping (duration=${durationSec.toFixed(2)}s)`);
+        if (charBudget <= 0) return;
+        if (segmentIndex < 0 || segmentIndex >= this.segmentCards.length) {
+            this.debugLog?.('UI-REVEAL-WARN', `Out-of-range segmentIndex=${String(segmentIndex)}, cards=${String(this.segmentCards.length)}`);
             return;
         }
 
-        this.revealBuffer += displayText;
+        const card = this.segmentCards[segmentIndex];
+        if (card.finalized) return;
 
-        // Compute content length cap from TTS-released chunks.
-        // This determines how far the typewriter is ALLOWED to reveal.
-        const chunkCleaned = this.revealBuffer;
-        const { contentLength } = flattenMarkdown(chunkCleaned);
-        const prevContentLen = this.revealContentLength;
-        this.revealContentLength = contentLength;
+        // Compute how many additional characters this TTS chunk allows
+        card.revealAllowedChars = Math.min(card.revealAllowedChars + charBudget, card.totalChars);
+        card.revealRate = charBudget / Math.max(durationSec, 0.5);
 
-        // Mark dirty so revealTick re-parses formatting from currentDelta
-        // (which has the full AI response — better chance of complete formatting spans)
-        this.revealRunsDirty = true;
-
-        // Calculate reveal rate based on content chars in this chunk / audio duration
-        const contentCharsInChunk = contentLength - prevContentLen;
-        this.revealRate = contentCharsInChunk / Math.max(durationSec, 0.5);
-        this.debugLog?.('UI-REVEAL', `chunk +${String(displayText.length)} chars, contentChars=${String(contentCharsInChunk)} (total ${String(contentLength)}), audio=${durationSec.toFixed(2)}s, rate=${this.revealRate.toFixed(1)} content-chars/s, revealed=${this.revealedContent.toFixed(0)}/${String(this.revealContentLength)}`);
+        this.debugLog?.('UI-REVEAL', `seg[${String(segmentIndex)}] +${String(charBudget)} allowed (total ${String(card.revealAllowedChars)}/${String(card.totalChars)}), rate=${card.revealRate.toFixed(1)} chars/s`);
         this.ensureRevealTimer();
     }
 
@@ -1609,47 +1611,44 @@ export class GameUI {
     }
 
     private revealTick(): void {
-        if (!this.currentDeltaMd) return;
-
-        // Use wall-clock elapsed time instead of assuming consistent 33ms intervals.
-        // TTS generation blocks the event loop for seconds — this lets us catch up.
         const now = Date.now();
         const dtSec = (now - this.revealLastTickTime) / 1000;
         this.revealLastTickTime = now;
 
-        const prevContent = this.revealedContent;
-        this.revealedContent = Math.min(
-            this.revealedContent + this.revealRate * dtSec,
-            this.revealContentLength,
-        );
+        let anyActive = false;
 
-        // Re-parse formatting from the FULL AI response (currentDelta) when new
-        // streaming text has arrived. This gives correct formatting structure even
-        // when TTS chunks split mid-formatting-span (e.g. `**bold text` without
-        // closing `**` in the revealBuffer — currentDelta has the full text).
-        if (this.revealRunsDirty) {
-            const fullCleaned = this.currentDelta;
-            const { runs } = flattenMarkdown(fullCleaned);
-            this.revealRuns = runs;
-            this.revealRunsDirty = false;
-            this.debugLog?.('UI-REPARSE', `Re-parsed ${String(runs.length)} runs from ${String(fullCleaned.length)} chars of currentDelta`);
+        for (const card of this.segmentCards) {
+            if (card.finalized) continue;
+
+            // Advance reveal position toward the TTS-allowed budget
+            if (card.revealedChars < card.revealAllowedChars) {
+                card.revealedChars = Math.min(
+                    card.revealedChars + card.revealRate * dtSec,
+                    card.revealAllowedChars,
+                );
+
+                // Truncate pre-styled chunks and update the TextRenderable
+                const truncated = truncateChunks(card.chunks, Math.floor(card.revealedChars));
+                card.textNode.content = chunksToStyledText(truncated);
+                anyActive = true;
+            }
+
+            // Check if fully revealed
+            if (card.revealedChars >= card.totalChars) {
+                card.finalized = true;
+                card.textNode.content = chunksToStyledText(card.chunks);
+            }
         }
 
-        // Reconstruct markdown with only COMPLETE runs formatted.
-        // Partially-revealed runs get plain text (no delimiters) to avoid
-        // CommonMark flicker where `*text *` toggles between italic/literal.
-        const markdown = reconstructMarkdownPartial(this.revealRuns, Math.floor(this.revealedContent));
-        this.currentDeltaMd.content = this.spaceParagraphs(markdown);
-
-        // Log every ~1s (every 30 ticks)
+        // Log every ~1s
         this.revealTickCount++;
         if (this.revealTickCount % 30 === 0) {
-            this.debugLog?.('UI-TICK', `revealed=${this.revealedContent.toFixed(0)}/${String(this.revealContentLength)}, rate=${this.revealRate.toFixed(1)}, dt=${(dtSec * 1000).toFixed(0)}ms, delta=+${(this.revealedContent - prevContent).toFixed(1)} content-chars, runs=${String(this.revealRuns.length)}, md="${markdown.slice(0, 60)}..."`);
+            const active = this.segmentCards.filter(c => !c.finalized).length;
+            this.debugLog?.('UI-TICK', `${String(active)} active cards, dt=${(dtSec * 1000).toFixed(0)}ms`);
         }
 
-        // Stop timer when fully revealed and no more chunks expected
-        if (this.revealedContent >= this.revealContentLength) {
-            this.debugLog?.('UI-TIMER', `Reveal timer stopped — fully revealed ${String(this.revealContentLength)} content chars`);
+        // Stop timer when all cards are done
+        if (!anyActive) {
             this.stopRevealTimer();
         }
     }
@@ -1682,7 +1681,7 @@ export class GameUI {
     // ─── Game Over ──────────────────────────────────────────────────────────
 
     showGameOver(won: boolean): void {
-        this.finalizeDelta();
+        this.finalizeAllCards();
 
         const message = won
             ? t`${bold(fg('#00ff88')('MISSION COMPLETE'))}${fg(COLORS.textDim)(' -- Thanks for playing Station Omega!')}`

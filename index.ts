@@ -13,9 +13,10 @@ import { buildSystemPrompt } from './src/prompt.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
-import { GameResponseSchema, segmentToMarkdown } from './src/schema.js';
-import type { GameResponse } from './src/schema.js';
+import { GameResponseSchema } from './src/schema.js';
+import type { DisplaySegment, GameResponse } from './src/schema.js';
 import { StreamingSegmentParser } from './src/json-stream-parser.js';
+import { segmentToStyledChunks, countChunkChars, getHeaderCharCount } from './src/segment-style.js';
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -182,6 +183,23 @@ function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine
     ];
 }
 
+// ─── Segment Resolution ─────────────────────────────────────────────────────
+
+/** Enrich a GameSegment with display metadata (speaker name, index). */
+function resolveSegment(
+    seg: { type: string; text: string; npcId: string | null; crewName: string | null },
+    segmentIndex: number,
+    station: GeneratedStation,
+): DisplaySegment {
+    let speakerName: string | null = null;
+    if (seg.type === 'dialogue' && seg.npcId) {
+        speakerName = station.npcs.get(seg.npcId)?.name ?? seg.npcId;
+    } else if (seg.type === 'crew_echo') {
+        speakerName = seg.crewName ?? 'Unknown';
+    }
+    return { ...seg, type: seg.type as DisplaySegment['type'], speakerName, segmentIndex };
+}
+
 // ─── Dynamic Instructions ───────────────────────────────────────────────────
 
 function buildGameInstructions(runContext: RunContext<GameContext>): string {
@@ -277,9 +295,9 @@ async function runGameplay(
     const tools = createGameTools(classId);
 
     // Wire TTS reveal callback — syncs text display with audio playback
-    ttsEngine.onRevealChunk = (displayText, durationSec) => {
-        debugLog('TTS-REVEAL-CB', `displayText=${String(displayText.length)} chars, duration=${durationSec.toFixed(2)}s, text="${displayText.slice(0, 80)}..."`);
-        ui.revealChunk(displayText, durationSec);
+    ttsEngine.onRevealChunk = (segmentIndex, charBudget, durationSec) => {
+        debugLog('TTS-REVEAL-CB', `seg[${String(segmentIndex)}] charBudget=${String(charBudget)}, duration=${durationSec.toFixed(2)}s`);
+        ui.revealChunk(segmentIndex, charBudget, durationSec);
     };
 
     initDebugLog();
@@ -367,10 +385,13 @@ async function runGameplay(
                     // Extract complete segments from incremental JSON
                     const segments = segmentParser.push(data.delta);
                     for (const seg of segments) {
+                        const display = resolveSegment(seg, segmentsRendered, station);
+                        const chunks = segmentToStyledChunks(display);
+                        const headerChars = getHeaderCharCount(display);
+                        const bodyChars = countChunkChars(chunks) - headerChars;
+                        ui.pushSegmentCard(display, chunks, headerChars);
+                        ttsEngine.pushSegment(seg, bodyChars);
                         segmentsRendered++;
-                        const markdown = segmentToMarkdown(seg);
-                        ui.bufferNarrativeDelta(markdown + '\n\n');
-                        ttsEngine.pushSegment(seg);
                         debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
                     }
                 }
@@ -383,8 +404,13 @@ async function runGameplay(
             try {
                 const parsed = JSON.parse(rawJson) as GameResponse;
                 for (const seg of parsed.segments) {
-                    ui.bufferNarrativeDelta(segmentToMarkdown(seg) + '\n\n');
-                    ttsEngine.pushSegment(seg);
+                    const display = resolveSegment(seg, segmentsRendered, station);
+                    const chunks = segmentToStyledChunks(display);
+                    const headerChars = getHeaderCharCount(display);
+                    const bodyChars = countChunkChars(chunks) - headerChars;
+                    ui.pushSegmentCard(display, chunks, headerChars);
+                    ttsEngine.pushSegment(seg, bodyChars);
+                    segmentsRendered++;
                 }
             } catch {
                 // Strip JSON scaffolding and show whatever text we got
@@ -393,7 +419,7 @@ async function runGameplay(
                     const fallbackText = textMatches
                         .map(m => m.replace(/"text"\s*:\s*"/u, '').replace(/"$/u, ''))
                         .join('\n\n');
-                    ui.bufferNarrativeDelta(fallbackText + '\n\n');
+                    ui.appendNarrative(fallbackText);
                 }
                 debugLog('WARN', `Fallback parse failed. Raw: ${rawJson.slice(0, 200)}`);
             }
@@ -412,8 +438,8 @@ async function runGameplay(
         ui.updateStatus(getStatus(state, station));
 
         const afterStream = () => {
-            debugLog('SESSION', 'afterStream — calling finalizeDelta');
-            ui.finalizeDelta();
+            debugLog('SESSION', 'afterStream — calling finalizeAllCards');
+            ui.finalizeAllCards();
             if (pendingChoices) {
                 ui.showChoiceCards(pendingChoices.title, pendingChoices.choices);
                 pendingChoices = null;
@@ -463,7 +489,7 @@ async function runGameplay(
         debugLog('SESSION', `Opening prompt error: ${String(err)}`);
         ttsEngine.stop();
         ui.hideTypingIndicator();
-        ui.finalizeDelta();
+        ui.finalizeAllCards();
         ui.appendNarrative('*The station systems flicker. Connection unstable. Try entering a command.*');
     }
 
@@ -496,7 +522,7 @@ async function runGameplay(
             turnId++;
             // Stop any playing TTS audio and flush buffered text when player types
             ttsEngine.stop();
-            ui.finalizeDelta();
+            ui.finalizeAllCards();
 
             if (state.gameOver) {
                 // After game over, any input continues to score screen
@@ -530,7 +556,7 @@ async function runGameplay(
                 debugLog('SESSION', `sendPrompt error: ${String(err)}`);
                 ttsEngine.stop();
                 ui.hideTypingIndicator();
-                ui.finalizeDelta();
+                ui.finalizeAllCards();
                 ui.appendNarrative('*Static crackles through the comms. The station systems are unresponsive. Try again.*');
             });
         });

@@ -14,7 +14,15 @@ export const GameResponseSchema = z.object({
 export type GameSegment = z.infer<typeof GameSegmentSchema>;
 export type GameResponse = z.infer<typeof GameResponseSchema>;
 
-/** Convert a GameSegment to display-ready markdown for the TUI. */
+/** A GameSegment enriched with display metadata for the TUI card system. */
+export interface DisplaySegment extends GameSegment {
+    /** Resolved display name for the speaker (NPC name, crew name, etc.), or null for narration. */
+    speakerName: string | null;
+    /** Index of this segment within the current AI response (0-based). */
+    segmentIndex: number;
+}
+
+/** Convert a GameSegment to markdown text for TTS display-text tracking. */
 export function segmentToMarkdown(seg: GameSegment): string {
     switch (seg.type) {
         case 'narration':

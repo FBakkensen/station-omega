@@ -7,7 +7,6 @@ import OpenAI from 'openai';
 import type { NPC, CrewMember } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
 import type { GameSegment } from './schema.js';
-import { segmentToMarkdown } from './schema.js';
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -36,17 +35,19 @@ interface VoiceConfig {
 
 interface SpeechChunk {
     text: string;
-    displayText: string;
+    charBudget: number;
     voice: OpenAIVoice;
     instructions: string;
     index: number;
+    segmentIndex: number;
 }
 
 interface GeneratedWav {
     filePath: string;
     index: number;
-    displayText: string;
+    charBudget: number;
     audioDuration: number;
+    segmentIndex: number;
 }
 
 // ─── Voice Pool ────────────────────────────────────────────────────────────
@@ -163,6 +164,7 @@ export class TTSEngine {
     private chunkQueue: SpeechChunk[] = [];
     private wavQueue: GeneratedWav[] = [];
     private nextChunkIndex = { value: 0 };
+    private segmentCounter = 0;
     private nextPlayIndex = 0;
     private generationRunning = false;
     private playbackRunning = false;
@@ -173,7 +175,7 @@ export class TTSEngine {
     private streamActive = false;
 
     /** Called when a chunk should be revealed in the UI. Set by the game loop. */
-    onRevealChunk: ((displayText: string, durationSec: number) => void) | null = null;
+    onRevealChunk: ((segmentIndex: number, charBudget: number, durationSec: number) => void) | null = null;
 
     constructor(options: TTSEngineOptions = {}) {
         this.debugLog = options.debugLog ?? (() => { /* no-op */ });
@@ -240,7 +242,7 @@ export class TTSEngine {
             const audioDuration = parseWavDuration(buffer);
 
             this.abortController = null;
-            return { filePath, index: chunk.index, displayText: chunk.displayText, audioDuration };
+            return { filePath, index: chunk.index, charBudget: chunk.charBudget, audioDuration, segmentIndex: chunk.segmentIndex };
         } catch (err: unknown) {
             this.abortController = null;
             // Don't treat abort as an error
@@ -377,6 +379,7 @@ export class TTSEngine {
         this.chunkQueue = [];
         this.wavQueue = [];
         this.nextChunkIndex = { value: 0 };
+        this.segmentCounter = 0;
         this.nextPlayIndex = 0;
         this.generationPromise = null;
         this.playbackPromise = null;
@@ -386,39 +389,41 @@ export class TTSEngine {
     }
 
     /** Feed a complete GameSegment into the TTS pipeline. */
-    pushSegment(seg: GameSegment): void {
+    pushSegment(seg: GameSegment, bodyChars: number): void {
         if (this.streamAborted || !this.streamActive) return;
+
+        // Always increment counter to stay aligned with UI card indices
+        const segIdx = this.segmentCounter++;
 
         const clean = stripMarkdown(seg.text);
         if (!clean) return;
 
         const { voice, instructions } = this.getVoiceConfigForSegment(seg);
-        const displayText = segmentToMarkdown(seg);
 
         const parts = splitLongText(clean, 500);
         const validParts = parts.filter(p => p.trim() && (SENTENCE_END_RE.test(p) || p.length >= 20));
 
-        // Distribute display text proportionally across chunks
-        let displayOffset = 0;
+        // Distribute body char budget proportionally across chunks
+        let budgetUsed = 0;
         for (let i = 0; i < validParts.length; i++) {
             const part = validParts[i];
             const isLast = i === validParts.length - 1;
             const ratio = part.length / Math.max(clean.length, 1);
-            const displayLen = isLast
-                ? displayText.length - displayOffset
-                : Math.round(displayText.length * ratio);
-            const partDisplay = displayText.slice(displayOffset, displayOffset + displayLen);
-            displayOffset += partDisplay.length;
+            const chunkBudget = isLast
+                ? bodyChars - budgetUsed
+                : Math.round(bodyChars * ratio);
+            budgetUsed += chunkBudget;
             this.chunkQueue.push({
                 text: part,
-                displayText: partDisplay,
+                charBudget: chunkBudget,
                 voice,
                 instructions,
                 index: this.nextChunkIndex.value++,
+                segmentIndex: segIdx,
             });
         }
 
-        this.debugLog('TTS-STREAM', `Segment "${seg.type}" → ${String(validParts.length)} chunk(s), queue size: ${String(this.chunkQueue.length)}`);
+        this.debugLog('TTS-STREAM', `Segment "${seg.type}" [${String(segIdx)}] → ${String(validParts.length)} chunk(s), queue size: ${String(this.chunkQueue.length)}`);
         this.ensurePumpsRunning();
     }
 
@@ -473,7 +478,7 @@ export class TTSEngine {
                         } else {
                             // Silent typewriter mode: compute duration from text length
                             const audioDuration = chunk.text.length / DEFAULT_CHARS_PER_SEC;
-                            result = { filePath: '', index: chunk.index, displayText: chunk.displayText, audioDuration };
+                            result = { filePath: '', index: chunk.index, charBudget: chunk.charBudget, audioDuration, segmentIndex: chunk.segmentIndex };
                         }
 
                         // streamAborted may have been set during generation
@@ -521,8 +526,8 @@ export class TTSEngine {
                     const wav = this.wavQueue.splice(wavIdx, 1)[0];
                     try {
                         // Signal UI to reveal this chunk's text in sync with audio/pause
-                        if (wav.displayText && this.onRevealChunk) {
-                            this.onRevealChunk(wav.displayText, wav.audioDuration);
+                        if (wav.charBudget && this.onRevealChunk) {
+                            this.onRevealChunk(wav.segmentIndex, wav.charBudget, wav.audioDuration);
                         }
 
                         if (wav.filePath) {

@@ -1091,6 +1091,50 @@ export class GameUI {
         });
     }
 
+    /** Show a brief message with "Press Enter to continue..." */
+    showBriefMessage(message: string): Promise<void> {
+        this.clearLayout();
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'brief-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+        });
+
+        container.add(new TextRenderable(this.renderer, {
+            id: 'brief-msg',
+            content: t`${fg(COLORS.text)(message)}`,
+        }));
+        container.add(new TextRenderable(this.renderer, {
+            id: 'brief-hint',
+            content: t`${fg(COLORS.textDim)('Press Enter to continue...')}`,
+        }));
+
+        const tempInput = new InputRenderable(this.renderer, {
+            id: 'brief-input',
+            width: 0 as unknown as number,
+            backgroundColor: COLORS.bg,
+            textColor: COLORS.bg,
+            cursorColor: COLORS.bg,
+        });
+        container.add(tempInput);
+        this.layoutRoot.add(container);
+        tempInput.focus();
+
+        return new Promise((resolve) => {
+            tempInput.on(InputRenderableEvents.ENTER, () => {
+                resolve();
+            });
+        });
+    }
+
     // ─── Clear Screen ────────────────────────────────────────────────────────
 
     clearScreen(): void {

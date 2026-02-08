@@ -1,4 +1,4 @@
-import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -760,6 +760,35 @@ export class TTSEngine {
 
         this.audioEnabled = true;
         this.debugLog('TTS', 'API key set — audio TTS enabled');
+        await this.persistApiKey(key);
+    }
+
+    /** Write the API key to .env.local so Bun auto-loads it on next launch. */
+    private async persistApiKey(key: string): Promise<void> {
+        const envPath = join(process.cwd(), '.env.local');
+        try {
+            let content = '';
+            try {
+                content = await readFile(envPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet — start fresh
+            }
+
+            const line = `OPENAI_API_KEY=${key}`;
+            if (/^OPENAI_API_KEY=.*/m.test(content)) {
+                content = content.replace(/^OPENAI_API_KEY=.*/m, () => line);
+            } else {
+                content = content.length > 0 && !content.endsWith('\n')
+                    ? `${content}\n${line}\n`
+                    : `${content}${line}\n`;
+            }
+
+            await writeFile(envPath, content, { mode: 0o600 });
+            this.debugLog('TTS', 'API key persisted to .env.local');
+        } catch (err: unknown) {
+            // Persistence failure should never break the game
+            this.debugLog('TTS', `Failed to persist API key: ${String(err)}`);
+        }
     }
 
     async cleanup(): Promise<void> {

@@ -413,7 +413,7 @@ async function runGameplay(
                 }
                 awaitingApiKey = false;
                 void ttsEngine.setApiKey(input.trim()).then(() => {
-                    ui.appendNarrative('*Voice narration enabled.*');
+                    ui.appendNarrative('*Voice narration enabled. API key saved — voice will be enabled automatically next time.*');
                     ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
                 }).catch((err: unknown) => {
                     ui.appendNarrative(`*Voice setup failed: ${String(err)}*`);
@@ -511,6 +511,7 @@ async function main() {
             if (key) {
                 try {
                     await globalTTS.setApiKey(key);
+                    await ui.showBriefMessage('Voice narration enabled. API key saved — voice will be enabled automatically next time.');
                 } catch {
                     // setApiKey failed (e.g. no ffplay) — will stay in silent mode
                 }

@@ -1,10 +1,9 @@
-import { mkdtemp, rm, unlink } from 'node:fs/promises';
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { Worker } from 'node:worker_threads';
-import type { KokoroTTS } from 'kokoro-js';
+import OpenAI from 'openai';
 import type { NPC } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
 
@@ -25,12 +24,19 @@ export interface TTSSegment {
     npcId?: string;
 }
 
-type VoiceId = keyof KokoroTTS['voices'];
+type OpenAIVoice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable'
+    | 'nova' | 'onyx' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar';
+
+interface VoiceConfig {
+    voice: OpenAIVoice;
+    instructions: string;
+}
 
 interface SpeechChunk {
     text: string;
     displayText: string;
-    voice: VoiceId;
+    voice: OpenAIVoice;
+    instructions: string;
     index: number;
 }
 
@@ -43,14 +49,15 @@ interface GeneratedWav {
 
 // ─── Voice Pool ────────────────────────────────────────────────────────────
 
-const NARRATOR_VOICE: VoiceId = 'bm_george';
+const NARRATOR_VOICE: OpenAIVoice = 'cedar';
+const NARRATOR_INSTRUCTIONS = 'You are narrating a sci-fi horror text adventure set on an abandoned space station. Speak with a warm but measured tone, building tension through pacing. Use deliberate pauses before revealing dangers. Keep a steady, grounded delivery — authoritative but not theatrical.';
 
-const NPC_VOICE_POOL: VoiceId[] = [
-    'af_heart', 'af_bella', 'af_nicole', 'af_kore', 'af_alloy',
-    'af_aoede', 'af_sky', 'am_adam', 'am_michael', 'bm_lewis', 'af_jessica',
+const NPC_VOICE_POOL: OpenAIVoice[] = [
+    'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
+    'nova', 'sage', 'shimmer', 'verse', 'marin',
 ];
 
-const BOSS_VOICE: VoiceId = 'bm_lewis';
+const BOSS_VOICE: OpenAIVoice = 'onyx';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -107,6 +114,14 @@ function splitLongText(text: string, maxLen: number): string[] {
     return chunks;
 }
 
+/** Parse WAV header to compute audio duration in seconds. */
+function parseWavDuration(buffer: Buffer): number {
+    // Byte rate at offset 28 is always valid, even in streaming WAVs where
+    // the data-size field (offset 40) is 0xFFFFFFFF.
+    const byteRate = buffer.readUInt32LE(28);
+    return (buffer.byteLength - 44) / byteRate;
+}
+
 // ─── Segment Parser ────────────────────────────────────────────────────────
 
 const VOICE_MARKER_RE = /\[V:([^\]]+)\]"([^"]*?)"\[\/V\]/g;
@@ -140,12 +155,14 @@ const SENTENCE_END_RE = /[.!?](?:\s|$)/;
 
 class IncrementalParser {
     private buffer = '';
-    private currentVoice: VoiceId;
-    private getVoiceForNPC: (npcId: string) => VoiceId;
+    private currentVoice: OpenAIVoice;
+    private currentInstructions: string;
+    private getVoiceConfigForNPC: (npcId: string) => VoiceConfig;
 
-    constructor(defaultVoice: VoiceId, getVoiceForNPC: (npcId: string) => VoiceId) {
+    constructor(defaultVoice: OpenAIVoice, defaultInstructions: string, getVoiceConfigForNPC: (npcId: string) => VoiceConfig) {
         this.currentVoice = defaultVoice;
-        this.getVoiceForNPC = getVoiceForNPC;
+        this.currentInstructions = defaultInstructions;
+        this.getVoiceConfigForNPC = getVoiceConfigForNPC;
     }
 
     /**
@@ -236,9 +253,16 @@ class IncrementalParser {
                 ? `[V:${seg.npcId}]"${seg.text}"[/V]`
                 : seg.text;
 
-            const voice = seg.type === 'npc_dialogue' && seg.npcId
-                ? this.getVoiceForNPC(seg.npcId)
-                : this.currentVoice;
+            let voice: OpenAIVoice;
+            let instructions: string;
+            if (seg.type === 'npc_dialogue' && seg.npcId) {
+                const config = this.getVoiceConfigForNPC(seg.npcId);
+                voice = config.voice;
+                instructions = config.instructions;
+            } else {
+                voice = this.currentVoice;
+                instructions = this.currentInstructions;
+            }
 
             const parts = splitLongText(clean, 500);
             // Filter to parts that will actually produce chunks
@@ -255,7 +279,7 @@ class IncrementalParser {
                     : Math.round(rawDisplay.length * ratio);
                 const partDisplay = rawDisplay.slice(displayOffset, displayOffset + displayLen);
                 displayOffset += partDisplay.length;
-                chunks.push({ text: part, displayText: partDisplay, voice, index: nextIndex.value++ });
+                chunks.push({ text: part, displayText: partDisplay, voice, instructions, index: nextIndex.value++ });
             }
         }
 
@@ -263,54 +287,28 @@ class IncrementalParser {
     }
 }
 
-// ─── Worker Response Types ────────────────────────────────────────────────
-
-interface WorkerReadyMsg {
-    type: 'ready';
-    voices: string[];
-}
-
-interface WorkerGeneratedMsg {
-    type: 'generated';
-    filePath: string;
-    index: number;
-    streamId: number;
-    displayText: string;
-    audioDuration: number;
-    elapsed: number;
-}
-
-interface WorkerErrorMsg {
-    type: 'error';
-    index: number;
-    streamId: number;
-    displayText: string;
-    error: string;
-}
-
-type WorkerResponse = WorkerReadyMsg | WorkerGeneratedMsg | WorkerErrorMsg;
-
 // ─── TTS Engine ────────────────────────────────────────────────────────────
 
+const DEFAULT_CHARS_PER_SEC = 25;
+
 interface TTSEngineOptions {
-    enabled?: boolean;
     debugLog?: (label: string, content: string) => void;
 }
 
 export class TTSEngine {
-    private worker: Worker | null = null;
+    private openai: OpenAI | null = null;
     private streamId = 0;
-    private pendingGenerate = new Map<string, (result: GeneratedWav | null) => void>();
-    private enabled: boolean;
+    private audioEnabled = false;
     private debugLog: (label: string, content: string) => void;
-    private npcTierMap = new Map<string, number>();
+    private npcMap = new Map<string, NPC>();
     private tempDir: string | null = null;
     private currentProcess: ChildProcess | null = null;
-    private availableVoices = new Set<VoiceId>();
+    private abortController: AbortController | null = null;
+    private silentPauseTimer: ReturnType<typeof setTimeout> | null = null;
+    private silentPauseResolve: (() => void) | null = null;
 
     // ─── Error accumulation ────────────────────────────────────────────────
     private pipelineError: TTSError | null = null;
-    private lastWorkerError: string | null = null;
 
     // ─── Streaming pipeline state ─────────────────────────────────────────
     private parser: IncrementalParser | null = null;
@@ -329,7 +327,6 @@ export class TTSEngine {
     onRevealChunk: ((displayText: string, durationSec: number) => void) | null = null;
 
     constructor(options: TTSEngineOptions = {}) {
-        this.enabled = options.enabled ?? true;
         this.debugLog = options.debugLog ?? (() => { /* no-op */ });
     }
 
@@ -348,153 +345,124 @@ export class TTSEngine {
     }
 
     async init(): Promise<void> {
-        // Create temp directory for WAV files
+        // Always create temp directory (needed for audio WAV files when enabled)
         this.tempDir = await mkdtemp(join(tmpdir(), 'station-omega-tts-'));
 
-        // Spawn worker thread for ONNX inference (keeps main thread free for UI)
-        const workerPath = new URL('./tts-worker.ts', import.meta.url);
-        this.worker = new Worker(workerPath);
-
-        // Wait for the worker to load the model and report available voices
-        const voices = await new Promise<string[]>((resolve, reject) => {
-            const onMsg = (msg: WorkerResponse) => {
-                if (msg.type === 'ready') {
-                    this.worker?.off('message', onMsg);
-                    resolve(msg.voices);
-                } else if (msg.type === 'error' && msg.index === -1) {
-                    this.worker?.off('message', onMsg);
-                    reject(new TTSError(`TTS worker init failed: ${msg.error}`));
-                }
-            };
-            this.worker?.on('message', onMsg);
-            this.worker?.postMessage({ type: 'init' });
-        });
-
-        for (const v of voices) {
-            this.availableVoices.add(v as VoiceId);
+        // Try to set up audio — if anything fails, we stay in silent typewriter mode
+        if (!process.env['OPENAI_API_KEY']) {
+            this.debugLog('TTS', 'No OPENAI_API_KEY — running in silent typewriter mode');
+            return;
         }
 
-        // Validate required voices are available
-        const voiceList = () => [...this.availableVoices].join(', ');
-        if (!this.availableVoices.has(NARRATOR_VOICE)) {
-            throw new TTSError(`Required narrator voice "${NARRATOR_VOICE}" not available. Available: ${voiceList()}`);
-        }
-        if (!this.availableVoices.has(BOSS_VOICE)) {
-            throw new TTSError(`Required boss voice "${BOSS_VOICE}" not available. Available: ${voiceList()}`);
-        }
-
-        // Handle Worker-level errors (crash, unhandled exception in worker)
-        let workerDead = false;
-        this.worker.on('error', (err: Error) => {
-            this.debugLog('TTS-WORKER', `Worker error: ${err.message}`);
-            if (!workerDead) {
-                workerDead = true;
-                this.lastWorkerError = err.message;
-                this.pipelineError = new TTSError(`TTS worker crashed: ${err.message}`);
-                // Resolve all pending generation promises so pumps unblock
-                for (const [, resolve] of this.pendingGenerate) {
-                    resolve(null);
-                }
-                this.pendingGenerate.clear();
-            }
-        });
-        this.worker.on('exit', (code: number) => {
-            this.debugLog('TTS-WORKER', `Worker exited with code ${String(code)}`);
-            if (code !== 0 && !workerDead) {
-                workerDead = true;
-                this.lastWorkerError = `Worker exited with code ${String(code)}`;
-                this.pipelineError = new TTSError(`TTS worker exited unexpectedly (code ${String(code)})`);
-                // Resolve all pending generation promises so pumps unblock
-                for (const [, resolve] of this.pendingGenerate) {
-                    resolve(null);
-                }
-                this.pendingGenerate.clear();
-            }
-            this.worker = null;
-        });
-
-        // Permanent message handler for generation responses
-        this.worker.on('message', (msg: WorkerResponse) => {
-            this.onWorkerMessage(msg);
-        });
-
-        // Verify ffplay is available for audio playback
-        await this.checkFfplay();
-
-        this.debugLog('TTS', `Initialized worker. ${String(voices.length)} voices available. Temp dir: ${this.tempDir}`);
-    }
-
-    private onWorkerMessage(msg: WorkerResponse): void {
-        if (msg.type === 'generated') {
-            const key = `${String(msg.streamId)}:${String(msg.index)}`;
-            const resolve = this.pendingGenerate.get(key);
-            if (resolve) {
-                this.pendingGenerate.delete(key);
-                resolve({
-                    filePath: msg.filePath, index: msg.index,
-                    displayText: msg.displayText, audioDuration: msg.audioDuration,
-                });
-            } else {
-                // Stale response from a previous stream — clean up the WAV file
-                unlink(msg.filePath).catch(() => { /* ignore */ });
-            }
-        } else if (msg.type === 'error' && msg.index !== -1) {
-            const key = `${String(msg.streamId)}:${String(msg.index)}`;
-            const resolve = this.pendingGenerate.get(key);
-            if (resolve) {
-                this.pendingGenerate.delete(key);
-                this.debugLog('TTS-STREAM', `Worker error for chunk ${String(msg.index)}: ${msg.error}`);
-                resolve(null);
-            }
+        try {
+            this.openai = new OpenAI();
+            await this.checkFfplay();
+            this.audioEnabled = true;
+            this.debugLog('TTS', `Initialized OpenAI TTS client. Temp dir: ${this.tempDir}`);
+        } catch (err: unknown) {
+            this.openai = null;
+            this.audioEnabled = false;
+            this.debugLog('TTS', `Audio unavailable (${String(err)}) — running in silent typewriter mode`);
         }
     }
 
-    /** Send a chunk to the worker and return a promise that resolves with the generated WAV. */
-    private generateInWorker(chunk: SpeechChunk): Promise<GeneratedWav | null> {
-        return new Promise<GeneratedWav | null>((resolve) => {
-            const key = `${String(this.streamId)}:${String(chunk.index)}`;
-            this.pendingGenerate.set(key, resolve);
-            this.worker?.postMessage({
-                type: 'generate',
-                text: chunk.text,
-                voice: chunk.voice,
-                index: chunk.index,
-                streamId: this.streamId,
-                displayText: chunk.displayText,
-                tempDir: this.tempDir,
-            });
-        });
+    /** Generate speech via OpenAI gpt-4o-mini-tts and save to a WAV file. */
+    private async generateWithOpenAI(chunk: SpeechChunk): Promise<GeneratedWav | null> {
+        if (!this.openai || !this.tempDir) return null;
+
+        try {
+            this.abortController = new AbortController();
+            const response = await this.openai.audio.speech.create(
+                {
+                    model: 'gpt-4o-mini-tts',
+                    voice: chunk.voice,
+                    input: chunk.text,
+                    instructions: chunk.instructions,
+                    response_format: 'wav',
+                },
+                { signal: this.abortController.signal },
+            );
+
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const filePath = join(this.tempDir, `tts-${String(this.streamId)}-${String(chunk.index)}.wav`);
+            await writeFile(filePath, buffer);
+
+            const audioDuration = parseWavDuration(buffer);
+
+            this.abortController = null;
+            return { filePath, index: chunk.index, displayText: chunk.displayText, audioDuration };
+        } catch (err: unknown) {
+            this.abortController = null;
+            // Don't treat abort as an error
+            if (err instanceof Error && err.name === 'AbortError') return null;
+            throw err;
+        }
     }
 
     setNPCs(npcs: Map<string, NPC>): void {
-        this.npcTierMap.clear();
+        this.npcMap.clear();
         for (const [id, npc] of npcs) {
-            this.npcTierMap.set(id, npc.tier);
+            this.npcMap.set(id, npc);
         }
     }
 
-    private getVoiceForNPC(npcId: string): VoiceId {
+    private getVoiceConfigForNPC(npcId: string): VoiceConfig {
+        const npc = this.npcMap.get(npcId);
+
         // Tier-4 bosses always use the boss voice
-        const tier = this.npcTierMap.get(npcId);
-        if (tier === 4) return this.resolveVoice(BOSS_VOICE);
+        if (npc?.tier === 4) {
+            return {
+                voice: BOSS_VOICE,
+                instructions: this.buildNPCInstructions(npc),
+            };
+        }
 
         // Deterministic hash into the NPC voice pool
         const idx = hashString(npcId) % NPC_VOICE_POOL.length;
-        return this.resolveVoice(NPC_VOICE_POOL[idx]);
+        return {
+            voice: NPC_VOICE_POOL[idx],
+            instructions: npc ? this.buildNPCInstructions(npc) : 'Speak as a space station crew member in a sci-fi horror setting.',
+        };
     }
 
-    private resolveVoice(voice: VoiceId): VoiceId {
-        if (this.availableVoices.has(voice)) return voice;
-        throw new TTSError(`Voice "${voice}" not available. Available: ${[...this.availableVoices].join(', ')}`);
+    /** Build voice steering instructions from NPC personality and sound signature. */
+    private buildNPCInstructions(npc: NPC): string {
+        const parts: string[] = [];
+
+        // Tier-based delivery hints
+        switch (npc.tier) {
+            case 4:
+                parts.push('You are a powerful boss creature. Speak with deep menace, authority, and terrifying presence. Use slow, deliberate pacing.');
+                break;
+            case 3:
+                parts.push('You are an aggressive, dangerous creature. Speak with intensity and hostility. Your voice should convey threat and violence.');
+                break;
+            case 2:
+                parts.push('You are a threatening presence on an abandoned space station. Speak with tension and unease.');
+                break;
+            default:
+                parts.push('You are a creature or character on an abandoned space station. Speak with an unsettling quality.');
+                break;
+        }
+
+        if (npc.personality) {
+            parts.push(`Character: ${npc.personality}`);
+        }
+
+        if (npc.soundSignature) {
+            parts.push(`Voice quality: ${npc.soundSignature}`);
+        }
+
+        return parts.join(' ');
     }
 
     // ─── Streaming API ────────────────────────────────────────────────────
 
     /** Reset state and prepare for a new streaming response. */
     beginStream(): void {
-        if (!this.enabled) return;
-        if (!this.worker || !this.tempDir) {
-            throw new TTSError('beginStream() called but TTS engine is not initialized (worker or tempDir missing)');
+        if (!this.tempDir) {
+            throw new TTSError('beginStream() called but TTS engine is not initialized (call init() first)');
         }
 
         this.streamId++;
@@ -509,7 +477,8 @@ export class TTSEngine {
 
         this.parser = new IncrementalParser(
             NARRATOR_VOICE,
-            (npcId) => this.getVoiceForNPC(npcId),
+            NARRATOR_INSTRUCTIONS,
+            (npcId) => this.getVoiceConfigForNPC(npcId),
         );
 
         this.debugLog('TTS-STREAM', 'Stream started');
@@ -517,7 +486,7 @@ export class TTSEngine {
 
     /** Feed a streaming delta into the pipeline. */
     pushDelta(delta: string): void {
-        if (!this.enabled || this.streamAborted) return;
+        if (this.streamAborted) return;
         if (!this.parser) {
             throw new TTSError('pushDelta() called but no active stream (call beginStream() first)');
         }
@@ -532,7 +501,6 @@ export class TTSEngine {
 
     /** Flush remaining text and wait for all generation/playback to finish. */
     async flushStream(): Promise<void> {
-        if (!this.enabled) return;
         if (!this.parser) {
             throw new TTSError('flushStream() called but TTS pipeline is not initialized (no active stream)');
         }
@@ -581,19 +549,32 @@ export class TTSEngine {
                 const chunk = this.chunkQueue.shift();
                 if (chunk) {
                     const startTime = Date.now();
-                    const result = await this.generateInWorker(chunk);
+                    try {
+                        let result: GeneratedWav | null;
 
-                    // streamAborted may have been set during generation
-                    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-                    if (this.streamAborted) break;
+                        if (this.audioEnabled && this.openai && this.tempDir) {
+                            result = await this.generateWithOpenAI(chunk);
+                        } else {
+                            // Silent typewriter mode: compute duration from text length
+                            const audioDuration = chunk.text.length / DEFAULT_CHARS_PER_SEC;
+                            result = { filePath: '', index: chunk.index, displayText: chunk.displayText, audioDuration };
+                        }
 
-                    if (result) {
-                        this.wavQueue.push(result);
-                        const elapsed = Date.now() - startTime;
-                        this.debugLog('TTS-STREAM', `Generated chunk ${String(chunk.index)} in ${String(elapsed)}ms (${result.audioDuration.toFixed(1)}s audio): "${chunk.text.slice(0, 60)}..."`);
-                    } else {
-                        // Generation failed — set pipeline error, drain queue, and stop
-                        const detail = this.lastWorkerError ?? 'unknown worker error';
+                        // streamAborted may have been set during generation
+                        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+                        if (this.streamAborted) break;
+
+                        if (result) {
+                            this.wavQueue.push(result);
+                            const elapsed = Date.now() - startTime;
+                            this.debugLog('TTS-STREAM', `Generated chunk ${String(chunk.index)} in ${String(elapsed)}ms (${result.audioDuration.toFixed(1)}s audio): "${chunk.text.slice(0, 60)}..."`);
+                        } else {
+                            // Generation returned null (aborted) — stop
+                            break;
+                        }
+                    } catch (err: unknown) {
+                        // API error — set pipeline error, drain queue, and stop
+                        const detail = err instanceof Error ? err.message : String(err);
                         this.pipelineError = new TTSError(`TTS generation failed for chunk ${String(chunk.index)}: ${detail}`);
                         this.chunkQueue = [];
                         break;
@@ -623,18 +604,27 @@ export class TTSEngine {
                 if (wavIdx !== -1) {
                     const wav = this.wavQueue.splice(wavIdx, 1)[0];
                     try {
-                        // Signal UI to reveal this chunk's text in sync with audio
+                        // Signal UI to reveal this chunk's text in sync with audio/pause
                         if (wav.displayText && this.onRevealChunk) {
                             this.onRevealChunk(wav.displayText, wav.audioDuration);
                         }
-                        this.debugLog('TTS-STREAM', `Playing chunk ${String(wav.index)}`);
-                        await this.playWav(wav.filePath);
+
+                        if (wav.filePath) {
+                            // Audio mode: play the WAV file
+                            this.debugLog('TTS-STREAM', `Playing chunk ${String(wav.index)}`);
+                            await this.playWav(wav.filePath);
+                            await unlink(wav.filePath).catch(() => { /* ignore */ });
+                        } else {
+                            // Silent typewriter mode: pause for the computed duration
+                            this.debugLog('TTS-STREAM', `Silent pause for chunk ${String(wav.index)} (${wav.audioDuration.toFixed(1)}s)`);
+                            await this.silentPause(wav.audioDuration);
+                        }
                     } catch (err: unknown) {
                         this.pipelineError = err instanceof TTSError ? err : new TTSError(`Playback failed: ${String(err)}`);
-                        await unlink(wav.filePath).catch(() => { /* ignore */ });
+                        if (wav.filePath) {
+                            await unlink(wav.filePath).catch(() => { /* ignore */ });
+                        }
                         break;
-                    } finally {
-                        await unlink(wav.filePath).catch(() => { /* ignore */ });
                     }
                     this.nextPlayIndex++;
                     continue;
@@ -655,6 +645,18 @@ export class TTSEngine {
     }
 
     // ─── Playback ─────────────────────────────────────────────────────────
+
+    /** Wait for a duration (used for silent typewriter pacing). Cancellable via stop(). */
+    private silentPause(durationSec: number): Promise<void> {
+        return new Promise<void>((resolve) => {
+            this.silentPauseResolve = resolve;
+            this.silentPauseTimer = setTimeout(() => {
+                this.silentPauseTimer = null;
+                this.silentPauseResolve = null;
+                resolve();
+            }, durationSec * 1000);
+        });
+    }
 
     private async playWav(filePath: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
@@ -687,6 +689,16 @@ export class TTSEngine {
         this.streamComplete = true;
         this.pipelineError = null;
 
+        // Cancel any silent pause timer and resolve its pending promise
+        if (this.silentPauseTimer) {
+            clearTimeout(this.silentPauseTimer);
+            this.silentPauseTimer = null;
+        }
+        if (this.silentPauseResolve) {
+            this.silentPauseResolve();
+            this.silentPauseResolve = null;
+        }
+
         // Kill current playback
         if (this.currentProcess) {
             try {
@@ -695,17 +707,21 @@ export class TTSEngine {
             this.currentProcess = null;
         }
 
-        // Resolve pending worker requests so the generation pump can exit
-        for (const [, resolve] of this.pendingGenerate) {
-            resolve(null);
+        // Abort any in-flight API requests
+        if (this.abortController) {
+            try {
+                this.abortController.abort();
+            } catch { /* ignore */ }
+            this.abortController = null;
         }
-        this.pendingGenerate.clear();
 
         // Drain queues and clean up pending WAV files
         this.chunkQueue = [];
         const pendingWavs = this.wavQueue.splice(0);
         for (const wav of pendingWavs) {
-            unlink(wav.filePath).catch(() => { /* ignore */ });
+            if (wav.filePath) {
+                unlink(wav.filePath).catch(() => { /* ignore */ });
+            }
         }
 
         // Reset parser
@@ -715,12 +731,35 @@ export class TTSEngine {
         }
     }
 
-    setEnabled(value: boolean): void {
-        this.enabled = value;
+    hasApiKey(): boolean {
+        return this.openai !== null;
     }
 
-    isEnabled(): boolean {
-        return this.enabled;
+    isAudioEnabled(): boolean {
+        return this.audioEnabled;
+    }
+
+    setAudioEnabled(value: boolean): void {
+        // Can't enable audio without an API key
+        if (value && !this.openai) return;
+        this.audioEnabled = value;
+    }
+
+    /** Set the OpenAI API key at runtime, enabling audio TTS. */
+    async setApiKey(key: string): Promise<void> {
+        process.env['OPENAI_API_KEY'] = key;
+        this.openai = new OpenAI();
+
+        try {
+            await this.checkFfplay();
+        } catch {
+            this.openai = null;
+            this.audioEnabled = false;
+            throw new TTSError('ffplay not found. Install ffmpeg to enable TTS audio playback.');
+        }
+
+        this.audioEnabled = true;
+        this.debugLog('TTS', 'API key set — audio TTS enabled');
     }
 
     async cleanup(): Promise<void> {
@@ -728,11 +767,8 @@ export class TTSEngine {
         // Wait for pumps to finish after abort
         if (this.generationPromise) await this.generationPromise;
         if (this.playbackPromise) await this.playbackPromise;
-        // Terminate the worker thread
-        if (this.worker) {
-            await this.worker.terminate();
-            this.worker = null;
-        }
+        // Release the OpenAI client
+        this.openai = null;
         if (this.tempDir) {
             await rm(this.tempDir, { recursive: true, force: true }).catch(() => { /* ignore */ });
             this.tempDir = null;

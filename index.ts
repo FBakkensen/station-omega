@@ -80,7 +80,7 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
     };
 }
 
-function getSlashCommands(state: GameState, station: GeneratedStation): SlashCommandDef[] {
+function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine: TTSEngine): SlashCommandDef[] {
     return [
         {
             name: 'look',
@@ -165,6 +165,15 @@ function getSlashCommands(state: GameState, station: GeneratedStation): SlashCom
             needsTarget: false,
             getTargets: () => [],
             toPrompt: () => 'What can I do here? Show me my options.',
+        },
+        {
+            name: 'voice',
+            description: ttsEngine.hasApiKey()
+                ? (ttsEngine.isAudioEnabled() ? 'Disable voice narration' : 'Enable voice narration')
+                : 'Set up voice narration',
+            needsTarget: false,
+            getTargets: () => [],
+            toPrompt: () => '/voice',
         },
     ];
 }
@@ -314,27 +323,16 @@ async function runGameplay(
     session.on('assistant.message_delta', (event) => {
         const delta = event.data.deltaContent;
         currentResponse += delta;
-
-        if (ttsEngine.isEnabled()) {
-            // TTS-gated mode: buffer text, let TTS playback drive display
-            ui.bufferNarrativeDelta(delta);
-            if (!streamStarted) {
-                ttsEngine.beginStream();
-                streamStarted = true;
-            }
-            ttsEngine.pushDelta(delta);
-        } else {
-            // No TTS: hide typing indicator on first delta, display immediately
-            if (!streamStarted) {
-                ui.hideTypingIndicator();
-                streamStarted = true;
-            }
-            ui.appendNarrativeDelta(delta);
+        ui.bufferNarrativeDelta(delta);
+        if (!streamStarted) {
+            ttsEngine.beginStream();
+            streamStarted = true;
         }
+        ttsEngine.pushDelta(delta);
     });
 
     session.on('session.idle', () => {
-        debugLog('SESSION', `idle fired, ttsEnabled=${String(ttsEngine.isEnabled())}`);
+        debugLog('SESSION', `idle fired, audioEnabled=${String(ttsEngine.isAudioEnabled())}`);
         if (currentResponse) {
             debugLog('AI', currentResponse);
             currentResponse = '';
@@ -355,31 +353,32 @@ async function runGameplay(
             }
         };
 
-        if (ttsEngine.isEnabled()) {
-            // TTS-gated: wait for all audio to finish, then flush remaining text
-            const thisTurn = turnId;
-            debugLog('SESSION', 'Waiting for TTS flushStream...');
-            void ttsEngine.flushStream().then(() => {
-                if (turnId !== thisTurn) {
-                    debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
-                    return;
-                }
-                debugLog('SESSION', 'flushStream resolved');
-                afterStream();
-            }).catch((err: unknown) => {
-                debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
-                ttsEngine.stop();
-                ui.appendNarrative('*Voice system error — audio disabled for this response.*');
-                afterStream();
-            });
-        } else {
+        // Always flush through the pipeline (handles both audio and silent typewriter)
+        const thisTurn = turnId;
+        debugLog('SESSION', 'Waiting for TTS flushStream...');
+        void ttsEngine.flushStream().then(() => {
+            if (turnId !== thisTurn) {
+                debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
+                return;
+            }
+            debugLog('SESSION', 'flushStream resolved');
             afterStream();
-        }
+        }).catch((err: unknown) => {
+            debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
+            ttsEngine.stop();
+            ui.appendNarrative('*Voice system error — audio disabled for this response.*');
+            afterStream();
+        });
     });
 
     // Update UI
-    ui.setSlashCommands(getSlashCommands(state, station));
+    ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
     ui.updateStatus(getStatus(state, station));
+
+    // Show voice hint if no API key is set
+    if (!ttsEngine.hasApiKey()) {
+        ui.appendNarrative('*Type /voice to set up voice narration.*');
+    }
 
     // Kick off the game
     const openingPrompt = `I step through the airlock onto ${station.stationName}. What do I see?`;
@@ -398,8 +397,30 @@ async function runGameplay(
     }
 
     // Wire up player input
+    let awaitingApiKey = false;
     await new Promise<void>((resolve) => {
         ui.onInput((input: string) => {
+            // Handle API key entry (from /voice prompt)
+            if (awaitingApiKey) {
+                if (!input.trim() || input.toLowerCase() === '/cancel') {
+                    awaitingApiKey = false;
+                    ui.appendNarrative('*API key entry cancelled.*');
+                    return;
+                }
+                if (input.startsWith('/')) {
+                    ui.appendNarrative('*That looks like a command, not an API key. Enter your OpenAI API key or /cancel:*');
+                    return;
+                }
+                awaitingApiKey = false;
+                void ttsEngine.setApiKey(input.trim()).then(() => {
+                    ui.appendNarrative('*Voice narration enabled.*');
+                    ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
+                }).catch((err: unknown) => {
+                    ui.appendNarrative(`*Voice setup failed: ${String(err)}*`);
+                });
+                return;
+            }
+
             // Invalidate any pending flushStream callback from the previous turn
             turnId++;
             // Stop any playing TTS audio and flush buffered text when player types
@@ -417,11 +438,17 @@ async function runGameplay(
                 return;
             }
 
-            // /voice toggle command — intercepted client-side
+            // /voice command — key entry or toggle
             if (input.toLowerCase() === '/voice') {
-                const nowEnabled = !ttsEngine.isEnabled();
-                ttsEngine.setEnabled(nowEnabled);
-                ui.appendNarrative(nowEnabled ? '*Voice narration enabled.*' : '*Voice narration disabled.*');
+                if (!ttsEngine.hasApiKey()) {
+                    ui.appendNarrative('*Enter your OpenAI API key to enable voice narration (or /cancel):*');
+                    awaitingApiKey = true;
+                } else {
+                    const nowEnabled = !ttsEngine.isAudioEnabled();
+                    ttsEngine.setAudioEnabled(nowEnabled);
+                    ui.appendNarrative(nowEnabled ? '*Voice narration enabled.*' : '*Voice narration disabled.*');
+                    ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
+                }
                 return;
             }
 
@@ -461,21 +488,14 @@ async function main() {
     const ui = new GameUI();
     await ui.init();
 
-    // Initialize TTS model (downloads ~86MB on first run)
-    const globalTTS = new TTSEngine({ enabled: true, debugLog });
-    ui.showLoadingScreen('Loading voice model...');
-    try {
-        await globalTTS.init();
-    } catch (err: unknown) {
-        ui.destroy();
-        process.stderr.write(`TTS initialization failed: ${String(err)}\n`);
-        process.exit(1);
-    }
+    // Initialize TTS (OpenAI gpt-4o-mini-tts API) — never crashes, degrades to silent typewriter
+    const globalTTS = new TTSEngine({ debugLog });
+    await globalTTS.init();
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
     while (true) {
-        // TITLE screen
-        const choice = await ui.showTitleScreen();
+        // TITLE screen — show Voice Setup option when no API key is configured
+        const choice = await ui.showTitleScreen(!globalTTS.hasApiKey());
         if (choice === 'quit') {
             break;
         }
@@ -483,6 +503,18 @@ async function main() {
         if (choice === 'history') {
             const history = loadRunHistory();
             await ui.showRunHistory(history);
+            continue;
+        }
+
+        if (choice === 'voice_setup') {
+            const key = await ui.showApiKeyEntry();
+            if (key) {
+                try {
+                    await globalTTS.setApiKey(key);
+                } catch {
+                    // setApiKey failed (e.g. no ffplay) — will stay in silent mode
+                }
+            }
             continue;
         }
 

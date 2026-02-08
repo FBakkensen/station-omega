@@ -601,7 +601,7 @@ export class GameUI {
 
     // ─── Title Screen ───────────────────────────────────────────────────────
 
-    showTitleScreen(): Promise<'new_run' | 'history' | 'quit'> {
+    showTitleScreen(showVoiceSetup = false): Promise<'new_run' | 'history' | 'voice_setup' | 'quit'> {
         this.clearLayout();
 
         const artLines = TITLE_ART.map((line, i) =>
@@ -616,13 +616,20 @@ export class GameUI {
             content: t`${fg(COLORS.textDim)('A sci-fi survival text adventure powered by AI')}`,
         });
 
+        const menuOptions = [
+            { name: 'New Run', description: 'Begin a new expedition into Station Omega', value: 'new_run' },
+            { name: 'Run History', description: 'View past expedition logs', value: 'history' },
+        ];
+        if (showVoiceSetup) {
+            menuOptions.push({ name: 'Voice Setup', description: 'Enter OpenAI API key for voice narration', value: 'voice_setup' });
+        }
+        menuOptions.push({ name: 'Quit', description: 'Exit the game', value: 'quit' });
+
         const menu = new SelectRenderable(this.renderer, {
             id: 'title-menu',
-            options: [
-                { name: 'New Run', description: 'Begin a new expedition into Station Omega', value: 'new_run' },
-                { name: 'Run History', description: 'View past expedition logs', value: 'history' },
-                { name: 'Quit', description: 'Exit the game', value: 'quit' },
-            ],
+            options: menuOptions,
+            height: menuOptions.length * 2,
+            width: '60%',
             selectedBackgroundColor: '#1e3a5f',
             selectedTextColor: '#00e5ff',
             textColor: COLORS.text,
@@ -646,8 +653,9 @@ export class GameUI {
             flexDirection: 'column',
             alignItems: 'center',
             paddingTop: 2,
-            width: '50%',
-            marginLeft: 15,
+            width: '100%',
+            paddingLeft: 3,
+            paddingRight: 3,
         });
         menuBox.add(subtitle);
         menuBox.add(new TextRenderable(this.renderer, { id: 'title-spacer', content: ' ' }));
@@ -672,7 +680,59 @@ export class GameUI {
             menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
                 const selected = menu.getSelectedOption();
                 if (!selected) return;
-                resolve(selected.value as 'new_run' | 'history' | 'quit');
+                resolve(selected.value as 'new_run' | 'history' | 'voice_setup' | 'quit');
+            });
+        });
+    }
+
+    // ─── API Key Entry Screen ─────────────────────────────────────────────
+
+    showApiKeyEntry(): Promise<string | null> {
+        this.clearLayout();
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'apikey-header',
+            content: t`${bold(fg(COLORS.title)('VOICE SETUP'))}`,
+        });
+
+        const desc = new TextRenderable(this.renderer, {
+            id: 'apikey-desc',
+            content: t`${fg(COLORS.text)('Enter your OpenAI API key to enable voice narration.')}\n${fg(COLORS.textDim)('Leave blank and press Enter to skip.')}`,
+        });
+
+        const input = new InputRenderable(this.renderer, {
+            id: 'apikey-input',
+            width: 60,
+            backgroundColor: COLORS.inputBg,
+            focusedBackgroundColor: COLORS.inputFocusBg,
+            textColor: COLORS.inputText,
+            cursorColor: COLORS.cursor,
+            placeholder: 'sk-...',
+        });
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'apikey-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+        });
+        container.add(header);
+        container.add(desc);
+        container.add(input);
+
+        this.layoutRoot.add(container);
+        input.focus();
+
+        return new Promise((resolve) => {
+            input.on(InputRenderableEvents.ENTER, (value: string) => {
+                const trimmed = value.trim();
+                resolve(trimmed || null);
             });
         });
     }

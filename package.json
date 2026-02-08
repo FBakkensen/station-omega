@@ -14,7 +14,7 @@
   "dependencies": {
     "@github/copilot-sdk": "^0.1.22",
     "@opentui/core": "^0.1.77",
-    "kokoro-js": "^1.2.1",
+    "openai": "^4.90.0",
     "marked": "^17.0.1"
   },
   "devDependencies": {

@@ -19,7 +19,7 @@ export const EVENT_DEFINITIONS: EventDefinition[] = [
         cooldown: 8,
         minTurn: 5,
         duration: 3,
-        effect: 'lose 5 HP per turn until sealed',
+        effect: 'lose 5 HP per turn (decompression)',
     },
     {
         type: 'power_failure',

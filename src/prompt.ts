@@ -90,6 +90,19 @@ ${npcList}
 - Intelligent NPCs (\`is_intelligent\`) respond to context and remember player actions.
 - Always describe NPCs as living presences, not game entities. Their health persists between rounds.
 
+## NPC Voice Markup
+
+When an NPC speaks direct dialogue (actual words spoken aloud), wrap it:
+[V:npc_id]"Their spoken words."[/V]
+
+Example: The **Lurker** raises one twisted claw. [V:enemy_room2]"You... should not be here."[/V] *Its voice rattles like metal scraping bone.*
+
+Rules:
+- ONLY wrap direct spoken dialogue — never narration, descriptions, or thoughts.
+- Use the NPC's id (not display name).
+- Always include double quotes inside the markers.
+- Crew log blockquotes are NOT spoken dialogue — do not mark them.
+
 # Creative Action Resolution
 
 When the player attempts an action not covered by standard tools (e.g., "barricade the door", "hotwire the console", "intimidate the creature"), resolve it using the creative action system:
@@ -112,7 +125,7 @@ When the player faces a moral dilemma, present it naturally through the narrativ
 # Random Events
 
 The station is unstable. Random events may occur between turns:
-- **Hull breach**: Decompression damage (5 HP/turn) until sealed
+- **Hull breach**: Decompression damage (5 HP/turn) while active
 - **Power failure**: Limited visibility, look_around returns less detail
 - **Distress signal**: Reveals hidden room connections
 - **Radiation spike**: Combat damage reduced by 25%
@@ -195,6 +208,7 @@ You MUST separate narrative beats with blank lines (two newlines). Never write a
 When the player wants to attack, call \`suggest_attacks\` first to present contextual combat options — do NOT list approaches in your text.
 When the player wants to interact with an NPC, call \`suggest_interactions\` first to present contextual interaction options — do NOT list approaches in your text.
 The player is a **${build.name}** with proficiencies in ${build.proficiencies.join(' and ')}. Lean into their class identity in narration and combat descriptions.
+When an NPC speaks direct dialogue, wrap it: [V:npc_id]"dialogue"[/V]. Never mark narration or crew logs.
 
 Begin by welcoming the player and describing their entry into ${station.stationName} using the look_around tool.`;
 }

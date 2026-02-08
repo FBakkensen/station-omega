@@ -405,6 +405,10 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 playerDamage += 25;
                 state.plasmaBoost = false;
             }
+            if (state.activeEvents.some(e => e.type === 'radiation_spike')) {
+                // Radiation spike reduces the player's combat output while active.
+                playerDamage = Math.max(1, Math.floor(playerDamage * 0.75));
+            }
             npc.currentHp -= playerDamage;
             state.metrics.totalDamageDealt += playerDamage;
 

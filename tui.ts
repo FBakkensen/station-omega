@@ -30,6 +30,7 @@ import type {
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
 import { stripVoiceMarkers } from './src/tts.js';
+import { flattenMarkdown, reconstructMarkdownPartial, type ContentRun } from './src/markdown-reveal.js';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
 
@@ -185,7 +186,10 @@ export class GameUI {
 
     // Typing indicator + typewriter reveal state
     private revealBuffer = '';
-    private revealedLength = 0;
+    private revealedContent = 0;
+    private revealRuns: ContentRun[] = [];
+    private revealContentLength = 0;
+    private revealRunsDirty = false;
     private revealTimer: ReturnType<typeof setInterval> | null = null;
     private revealRate = 60;
     private ttsGated = false;
@@ -1090,7 +1094,7 @@ export class GameUI {
     }
 
     finalizeDelta(): void {
-        this.debugLog?.('UI-FINALIZE', `ttsGated=${String(this.ttsGated)}, revealed=${this.revealedLength.toFixed(0)}/${String(this.revealBuffer.length)}, totalDelta=${String(this.currentDelta.length)} chars`);
+        this.debugLog?.('UI-FINALIZE', `ttsGated=${String(this.ttsGated)}, revealed=${this.revealedContent.toFixed(0)}/${String(this.revealContentLength)}, totalDelta=${String(this.currentDelta.length)} chars`);
         // Stop the reveal timer and flush all remaining text instantly
         this.stopRevealTimer();
         this.hideTypingIndicator();
@@ -1105,7 +1109,10 @@ export class GameUI {
 
         // Reset reveal state
         this.revealBuffer = '';
-        this.revealedLength = 0;
+        this.revealedContent = 0;
+        this.revealRuns = [];
+        this.revealContentLength = 0;
+        this.revealRunsDirty = false;
         this.revealRate = 60;
         this.ttsGated = false;
         this.revealFirstChunk = true;
@@ -1437,6 +1444,7 @@ export class GameUI {
     bufferNarrativeDelta(delta: string): void {
         this.ttsGated = true;
         this.currentDelta += delta;
+        this.revealRunsDirty = true;
         this.debugLog?.('UI-BUFFER', `+${String(delta.length)} chars, total buffered: ${String(this.currentDelta.length)}`);
         if (!this.currentDeltaMd) {
             this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
@@ -1465,11 +1473,23 @@ export class GameUI {
             return;
         }
 
-        const prevLen = this.revealBuffer.length;
         this.revealBuffer += displayText;
-        // Calculate character reveal rate from audio duration
-        this.revealRate = displayText.length / Math.max(durationSec, 0.5);
-        this.debugLog?.('UI-REVEAL', `chunk +${String(displayText.length)} chars (buf ${String(prevLen)}->${String(this.revealBuffer.length)}), audio=${durationSec.toFixed(2)}s, rate=${this.revealRate.toFixed(1)} chars/s, revealed=${this.revealedLength.toFixed(0)}/${String(this.revealBuffer.length)}, text="${displayText.slice(0, 80)}..."`);
+
+        // Compute content length cap from TTS-released chunks.
+        // This determines how far the typewriter is ALLOWED to reveal.
+        const chunkCleaned = stripVoiceMarkers(this.revealBuffer);
+        const { contentLength } = flattenMarkdown(chunkCleaned);
+        const prevContentLen = this.revealContentLength;
+        this.revealContentLength = contentLength;
+
+        // Mark dirty so revealTick re-parses formatting from currentDelta
+        // (which has the full AI response — better chance of complete formatting spans)
+        this.revealRunsDirty = true;
+
+        // Calculate reveal rate based on content chars in this chunk / audio duration
+        const contentCharsInChunk = contentLength - prevContentLen;
+        this.revealRate = contentCharsInChunk / Math.max(durationSec, 0.5);
+        this.debugLog?.('UI-REVEAL', `chunk +${String(displayText.length)} chars, contentChars=${String(contentCharsInChunk)} (total ${String(contentLength)}), audio=${durationSec.toFixed(2)}s, rate=${this.revealRate.toFixed(1)} content-chars/s, revealed=${this.revealedContent.toFixed(0)}/${String(this.revealContentLength)}`);
         this.ensureRevealTimer();
     }
 
@@ -1496,25 +1516,39 @@ export class GameUI {
         const dtSec = (now - this.revealLastTickTime) / 1000;
         this.revealLastTickTime = now;
 
-        const prevLen = this.revealedLength;
-        this.revealedLength = Math.min(
-            this.revealedLength + this.revealRate * dtSec,
-            this.revealBuffer.length,
+        const prevContent = this.revealedContent;
+        this.revealedContent = Math.min(
+            this.revealedContent + this.revealRate * dtSec,
+            this.revealContentLength,
         );
 
-        const visible = this.revealBuffer.slice(0, Math.floor(this.revealedLength));
-        const cleaned = stripVoiceMarkers(visible);
-        this.currentDeltaMd.content = this.spaceParagraphs(cleaned);
+        // Re-parse formatting from the FULL AI response (currentDelta) when new
+        // streaming text has arrived. This gives correct formatting structure even
+        // when TTS chunks split mid-formatting-span (e.g. `**bold text` without
+        // closing `**` in the revealBuffer — currentDelta has the full text).
+        if (this.revealRunsDirty) {
+            const fullCleaned = stripVoiceMarkers(this.currentDelta);
+            const { runs } = flattenMarkdown(fullCleaned);
+            this.revealRuns = runs;
+            this.revealRunsDirty = false;
+            this.debugLog?.('UI-REPARSE', `Re-parsed ${String(runs.length)} runs from ${String(fullCleaned.length)} chars of currentDelta`);
+        }
+
+        // Reconstruct markdown with only COMPLETE runs formatted.
+        // Partially-revealed runs get plain text (no delimiters) to avoid
+        // CommonMark flicker where `*text *` toggles between italic/literal.
+        const markdown = reconstructMarkdownPartial(this.revealRuns, Math.floor(this.revealedContent));
+        this.currentDeltaMd.content = this.spaceParagraphs(markdown);
 
         // Log every ~1s (every 30 ticks)
         this.revealTickCount++;
         if (this.revealTickCount % 30 === 0) {
-            this.debugLog?.('UI-TICK', `revealed=${this.revealedLength.toFixed(0)}/${String(this.revealBuffer.length)}, rate=${this.revealRate.toFixed(1)}, dt=${(dtSec * 1000).toFixed(0)}ms, delta=+${(this.revealedLength - prevLen).toFixed(1)} chars`);
+            this.debugLog?.('UI-TICK', `revealed=${this.revealedContent.toFixed(0)}/${String(this.revealContentLength)}, rate=${this.revealRate.toFixed(1)}, dt=${(dtSec * 1000).toFixed(0)}ms, delta=+${(this.revealedContent - prevContent).toFixed(1)} content-chars, runs=${String(this.revealRuns.length)}, md="${markdown.slice(0, 60)}..."`);
         }
 
         // Stop timer when fully revealed and no more chunks expected
-        if (this.revealedLength >= this.revealBuffer.length) {
-            this.debugLog?.('UI-TIMER', `Reveal timer stopped — fully revealed ${String(this.revealBuffer.length)} chars`);
+        if (this.revealedContent >= this.revealContentLength) {
+            this.debugLog?.('UI-TIMER', `Reveal timer stopped — fully revealed ${String(this.revealContentLength)} content chars`);
             this.stopRevealTimer();
         }
     }

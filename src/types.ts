@@ -406,7 +406,7 @@ export interface GameStatus {
     maxInventory: number;
     shieldActive: boolean;
     plasmaBoost: boolean;
-    activeEvents: Array<{ type: string; turnsRemaining: number }>;
+    activeEvents: Array<{ type: string; turnsRemaining: number; effect: string }>;
     objectiveTitle: string;
     objectiveStep: number;
     objectiveTotal: number;

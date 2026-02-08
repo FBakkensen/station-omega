@@ -6,6 +6,7 @@ import type { ChildProcess } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import type { KokoroTTS } from 'kokoro-js';
 import type { NPC } from './types.js';
+import { extractCleanText } from './markdown-reveal.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -53,15 +54,11 @@ function hashString(s: string): number {
     return Math.abs(hash);
 }
 
-/** Remove markdown formatting characters so TTS reads clean text. */
+/** Remove markdown formatting so TTS reads clean text. Uses token-based extraction with safety fallback. */
 function stripMarkdown(text: string): string {
-    return text
-        .replace(/\*\*(.+?)\*\*/g, '$1')   // bold
-        .replace(/\*(.+?)\*/g, '$1')         // italic
-        .replace(/^>\s?/gm, '')               // blockquotes
-        .replace(/^---$/gm, '')               // horizontal rules
+    return extractCleanText(text)
         .replace(/\u2800/g, '')               // Braille Pattern Blank spacers
-        .replace(/#{1,6}\s/g, '')             // headings
+        .replace(/[*_~`]/g, '')               // safety: lone formatting chars from chunk splits
         .trim();
 }
 

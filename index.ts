@@ -13,6 +13,9 @@ import { buildSystemPrompt } from './src/prompt.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
+import { GameResponseSchema, segmentToMarkdown } from './src/schema.js';
+import type { GameResponse } from './src/schema.js';
+import { StreamingSegmentParser } from './src/json-stream-parser.js';
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -284,11 +287,12 @@ async function runGameplay(
     ui.setDebugLog(debugLog);
 
     // Create game agent with dynamic instructions
-    const gameAgent = new Agent<GameContext>({
+    const gameAgent = new Agent<GameContext, typeof GameResponseSchema>({
         name: 'GameMaster',
         model: 'gpt-5.2',
         instructions: buildGameInstructions,
         tools,
+        outputType: GameResponseSchema,
         modelSettings: {
             store: true,
             promptCacheRetention: '24h',
@@ -337,16 +341,16 @@ async function runGameplay(
             previousResponseId: lastResponseId,
         });
 
-        // Process streaming events
-        let currentResponse = '';
+        // Process streaming events with JSON segment parser
+        let rawJson = '';
         let streamStarted = false;
+        let segmentsRendered = 0;
+        const segmentParser = new StreamingSegmentParser();
         for await (const event of stream as AsyncIterable<RunStreamEvent>) {
             if (event.type === 'raw_model_stream_event') {
                 const data = event.data as { type: string; delta?: string };
                 if (data.type === 'output_text_delta' && data.delta) {
-                    const delta = data.delta;
-                    currentResponse += delta;
-                    ui.bufferNarrativeDelta(delta);
+                    rawJson += data.delta;
                     if (!streamStarted) {
                         // Set narrator context for dynamic mood steering
                         const room = station.rooms.get(state.currentRoom);
@@ -360,17 +364,47 @@ async function runGameplay(
                         ttsEngine.beginStream();
                         streamStarted = true;
                     }
-                    ttsEngine.pushDelta(delta);
+                    // Extract complete segments from incremental JSON
+                    const segments = segmentParser.push(data.delta);
+                    for (const seg of segments) {
+                        segmentsRendered++;
+                        const markdown = segmentToMarkdown(seg);
+                        ui.bufferNarrativeDelta(markdown + '\n\n');
+                        ttsEngine.pushSegment(seg);
+                        debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
+                    }
                 }
+            }
+        }
+
+        // Fallback: if streaming yielded no segments, try full parse of rawJson
+        if (rawJson && segmentsRendered === 0) {
+            debugLog('WARN', 'No segments extracted during stream — fallback parse');
+            try {
+                const parsed = JSON.parse(rawJson) as GameResponse;
+                for (const seg of parsed.segments) {
+                    ui.bufferNarrativeDelta(segmentToMarkdown(seg) + '\n\n');
+                    ttsEngine.pushSegment(seg);
+                }
+            } catch {
+                // Strip JSON scaffolding and show whatever text we got
+                const textMatches = rawJson.match(/"text"\s*:\s*"([^"]+)"/gu);
+                if (textMatches) {
+                    const fallbackText = textMatches
+                        .map(m => m.replace(/"text"\s*:\s*"/u, '').replace(/"$/u, ''))
+                        .join('\n\n');
+                    ui.bufferNarrativeDelta(fallbackText + '\n\n');
+                }
+                debugLog('WARN', `Fallback parse failed. Raw: ${rawJson.slice(0, 200)}`);
             }
         }
 
         // Capture response ID for next turn's chaining
         lastResponseId = stream.lastResponseId;
 
-        // Log the response
-        if (currentResponse) {
-            debugLog('AI', currentResponse);
+        // Log the raw JSON response
+        if (rawJson) {
+            debugLog('AI-RAW', rawJson);
         }
 
         // Post-stream finalization

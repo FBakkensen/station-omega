@@ -6,6 +6,8 @@ import type { ChildProcess } from 'node:child_process';
 import OpenAI from 'openai';
 import type { NPC, CrewMember } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
+import type { GameSegment } from './schema.js';
+import { segmentToMarkdown } from './schema.js';
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -17,13 +19,6 @@ export class TTSError extends Error {
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────
-
-export interface TTSSegment {
-    type: 'narration' | 'npc_dialogue' | 'inner_voice' | 'station_pa' | 'crew_echo';
-    text: string;
-    npcId?: string;
-    crewName?: string;
-}
 
 export interface NarratorContext {
     inCombat: boolean;
@@ -66,11 +61,13 @@ const NPC_VOICE_POOL: OpenAIVoice[] = [
 
 const BOSS_VOICE: OpenAIVoice = 'onyx';
 
-const INNER_VOICE: OpenAIVoice = 'ash';
-const INNER_VOICE_INSTRUCTIONS = 'You are the player\'s inner voice — intimate, whispered, thinking aloud. Convey instinct, doubt, resolve. Quiet and close, as if speaking directly into the listener\'s mind.';
+const INNER_VOICE: OpenAIVoice = 'shimmer';
+const INNER_VOICE_INSTRUCTIONS = 'You are the player\'s inner voice. Soft, ethereal, almost dreamlike. A breathy near-whisper, slow cadence, pause between phrases. Maximum contrast with the grounded narrator.';
 
 const STATION_PA_VOICE: OpenAIVoice = 'echo';
-const STATION_PA_INSTRUCTIONS = 'You are a cold synthetic station PA system. Clipped, monotone, no emotion. Mechanical precision. Each word is clean and detached — an automated warning from a dying machine.';
+const STATION_PA_INSTRUCTIONS = 'Station public address system. Flat monotone, micro-pauses between words, zero inflection. A machine reading an obituary.';
+
+const CREW_ECHO_INSTRUCTIONS = 'You are a recorded crew log, played through a crackling speaker. Audio is compressed and distant, with faint static. Speak with the tired resignation of someone who knew the end was near.';
 
 const NARRATOR_MOODS: Record<string, string> = {
     combat: 'Urgent, intense narration. Short punchy delivery. Breathless pacing. Every beat lands like a blow.',
@@ -96,30 +93,6 @@ function stripMarkdown(text: string): string {
         .replace(/\u2800/g, '')               // Braille Pattern Blank spacers
         .replace(/[*_~`]/g, '')               // safety: lone formatting chars from chunk splits
         .trim();
-}
-
-/**
- * Remove [V:id]"..."[/V] markers but keep the quoted dialogue text.
- * Used by the TUI to clean display output.
- * @deprecated Use stripAllMarkers() instead
- */
-export function stripVoiceMarkers(text: string): string {
-    return text.replace(/\[V:[^\]]*\]"([^"]*?)"\[\/V\]/g, '"$1"');
-}
-
-/**
- * Strip all narrative layer markers and convert to display-ready markdown:
- * - [V:id]"text"[/V] → "text"
- * - [T]text[/T] → *➤ text*
- * - [PA]text[/PA] → `⚠ text`
- * - [CL:name]"text"[/CL] → > "text"
- */
-export function stripAllMarkers(text: string): string {
-    return text
-        .replace(/\[V:[^\]]*\]"([^"]*?)"\[\/V\]/g, '"$1"')
-        .replace(/\[T\]([\s\S]*?)\[\/T\]/g, (_m, inner: string) => `*➤ ${inner.trim()}*`)
-        .replace(/\[PA\]([\s\S]*?)\[\/PA\]/g, (_m, inner: string) => `\`⚠ ${inner.trim()}\``)
-        .replace(/\[CL:[^\]]*\]"([^"]*?)"\[\/CL\]/g, '> "$1"');
 }
 
 /** Split text into chunks of roughly `maxLen` characters at sentence boundaries. */
@@ -158,253 +131,8 @@ function parseWavDuration(buffer: Buffer): number {
     return (buffer.byteLength - 44) / byteRate;
 }
 
-// ─── Segment Parser ────────────────────────────────────────────────────────
-
-/**
- * Unified regex capturing all 4 narrative marker types:
- * 1: [V:id]"text"[/V]  — NPC dialogue (groups 1=id, 2=text)
- * 3: [T]text[/T]       — Inner voice (group 3=text)
- * 4: [PA]text[/PA]     — Station PA (group 4=text)
- * 5: [CL:name]"text"[/CL] — Crew echo (groups 5=name, 6=text)
- */
-const UNIFIED_MARKER_RE = /\[V:([^\]]+)\]"([^"]*?)"\[\/V\]|\[T\]([\s\S]*?)\[\/T\]|\[PA\]([\s\S]*?)\[\/PA\]|\[CL:([^\]]+)\]"([^"]*?)"\[\/CL\]/g;
-
-/** Parse AI response into ordered segments by narrative layer. */
-export function parseSegments(rawText: string): TTSSegment[] {
-    const segments: TTSSegment[] = [];
-    let lastIndex = 0;
-
-    for (const match of rawText.matchAll(UNIFIED_MARKER_RE)) {
-        const before = rawText.slice(lastIndex, match.index);
-        if (before.trim()) {
-            segments.push({ type: 'narration', text: before.trim() });
-        }
-
-        const matched = match[0];
-        if (matched.startsWith('[V:')) {
-            // [V:id]"text"[/V] — NPC dialogue
-            segments.push({ type: 'npc_dialogue', text: match[2], npcId: match[1] });
-        } else if (matched.startsWith('[T]')) {
-            // [T]text[/T] — Inner voice
-            segments.push({ type: 'inner_voice', text: match[3].trim() });
-        } else if (matched.startsWith('[PA]')) {
-            // [PA]text[/PA] — Station PA
-            segments.push({ type: 'station_pa', text: match[4].trim() });
-        } else if (matched.startsWith('[CL:')) {
-            // [CL:name]"text"[/CL] — Crew echo
-            segments.push({ type: 'crew_echo', text: match[6], crewName: match[5] });
-        }
-
-        lastIndex = match.index + match[0].length;
-    }
-
-    const after = rawText.slice(lastIndex);
-    if (after.trim()) {
-        segments.push({ type: 'narration', text: after.trim() });
-    }
-
-    return segments;
-}
-
-// ─── Incremental Parser ───────────────────────────────────────────────────
-
 /** Sentence-end boundary: punctuation followed by whitespace or end-of-string. */
 const SENTENCE_END_RE = /[.!?](?:\s|$)/;
-
-class IncrementalParser {
-    private buffer = '';
-    private currentVoice: OpenAIVoice;
-    private currentInstructions: string;
-    private getVoiceConfigForNPC: (npcId: string) => VoiceConfig;
-    private getCrewEchoConfig: (crewName: string) => VoiceConfig;
-    private narratorContext: NarratorContext = { inCombat: false, hpPercent: 100, isNewRoom: false };
-
-    constructor(
-        defaultVoice: OpenAIVoice,
-        defaultInstructions: string,
-        getVoiceConfigForNPC: (npcId: string) => VoiceConfig,
-        getCrewEchoConfig: (crewName: string) => VoiceConfig,
-    ) {
-        this.currentVoice = defaultVoice;
-        this.currentInstructions = defaultInstructions;
-        this.getVoiceConfigForNPC = getVoiceConfigForNPC;
-        this.getCrewEchoConfig = getCrewEchoConfig;
-    }
-
-    setNarratorContext(ctx: NarratorContext): void {
-        this.narratorContext = ctx;
-    }
-
-    /**
-     * Find the safe boundary in the buffer — the position up to which we can
-     * safely parse without risking an incomplete marker of any type.
-     * Returns -1 if no safe boundary exists yet.
-     */
-    private findSafeBoundary(): number {
-        // Check last ~50 chars for an unmatched `[` which could be an incomplete marker
-        const tail = this.buffer.slice(-50);
-        const lastOpen = tail.lastIndexOf('[');
-        if (lastOpen !== -1) {
-            // There's a `[` in the tail — check if it's part of a closed marker
-            const fromPos = Math.max(0, this.buffer.length - 50) + lastOpen;
-            const afterOpen = this.buffer.slice(fromPos);
-            // Check all marker types for completeness
-            if (
-                /^\[V:[^\]]*\]"[^"]*"\[\/V\]/.test(afterOpen) ||
-                /^\[T\][\s\S]*?\[\/T\]/.test(afterOpen) ||
-                /^\[PA\][\s\S]*?\[\/PA\]/.test(afterOpen) ||
-                /^\[CL:[^\]]*\]"[^"]*"\[\/CL\]/.test(afterOpen)
-            ) {
-                // Marker is complete — safe up to end of buffer
-            } else {
-                // Incomplete marker — safe boundary is just before the `[`
-                return fromPos;
-            }
-        }
-        return this.buffer.length;
-    }
-
-    /**
-     * Find the last sentence boundary (`.!?` followed by whitespace) within `text`.
-     * Returns the index after the punctuation, or -1 if none found.
-     */
-    private findLastSentenceBoundary(text: string): number {
-        let lastPos = -1;
-        for (const match of text.matchAll(/[.!?]\s/g)) {
-            lastPos = match.index + 1; // include the punctuation
-        }
-        return lastPos;
-    }
-
-    /**
-     * Push a streaming delta into the parser. Returns any complete SpeechChunks
-     * that can be emitted.
-     */
-    push(delta: string, nextIndex: { value: number }): SpeechChunk[] {
-        this.buffer += delta;
-
-        const safeBoundary = this.findSafeBoundary();
-        if (safeBoundary <= 0) return [];
-
-        const safeText = this.buffer.slice(0, safeBoundary);
-
-        // Only emit up to the last sentence boundary within the safe region
-        const sentenceEnd = this.findLastSentenceBoundary(safeText);
-        if (sentenceEnd <= 0) return [];
-
-        const emitText = this.buffer.slice(0, sentenceEnd);
-        this.buffer = this.buffer.slice(sentenceEnd);
-
-        return this.textToChunks(emitText, nextIndex);
-    }
-
-    /** Flush remaining buffer content (called when response is complete). */
-    flush(nextIndex: { value: number }): SpeechChunk[] {
-        if (!this.buffer.trim()) {
-            this.buffer = '';
-            return [];
-        }
-        const text = this.buffer;
-        this.buffer = '';
-        return this.textToChunks(text, nextIndex);
-    }
-
-    /** Reset parser state for next response. */
-    reset(): void {
-        this.buffer = '';
-    }
-
-    /** Select the narrator mood based on current game context. */
-    private getNarratorMood(): string {
-        if (this.narratorContext.inCombat) return NARRATOR_MOODS['combat'];
-        if (this.narratorContext.hpPercent < 25) return NARRATOR_MOODS['wounded'];
-        if (this.narratorContext.isNewRoom) return NARRATOR_MOODS['discovery'];
-        return NARRATOR_MOODS['default'];
-    }
-
-    /** Reconstruct the raw marker text for a segment (used for display text). */
-    private static rawDisplayForSegment(seg: TTSSegment): string {
-        switch (seg.type) {
-            case 'npc_dialogue':
-                return seg.npcId ? `[V:${seg.npcId}]"${seg.text}"[/V]` : seg.text;
-            case 'inner_voice':
-                return `[T]${seg.text}[/T]`;
-            case 'station_pa':
-                return `[PA]${seg.text}[/PA]`;
-            case 'crew_echo':
-                return seg.crewName ? `[CL:${seg.crewName}]"${seg.text}"[/CL]` : seg.text;
-            default:
-                return seg.text;
-        }
-    }
-
-    /** Convert a block of text into SpeechChunks via parseSegments + splitLongText + stripMarkdown. */
-    private textToChunks(text: string, nextIndex: { value: number }): SpeechChunk[] {
-        const segments = parseSegments(text);
-        const chunks: SpeechChunk[] = [];
-
-        for (const seg of segments) {
-            const clean = stripMarkdown(seg.text);
-            if (!clean) continue;
-
-            // Preserve raw text for UI display (with markers intact)
-            const rawDisplay = IncrementalParser.rawDisplayForSegment(seg);
-
-            let voice: OpenAIVoice;
-            let instructions: string;
-            switch (seg.type) {
-                case 'npc_dialogue': {
-                    const config = seg.npcId
-                        ? this.getVoiceConfigForNPC(seg.npcId)
-                        : { voice: this.currentVoice, instructions: this.currentInstructions };
-                    voice = config.voice;
-                    instructions = config.instructions;
-                    break;
-                }
-                case 'inner_voice':
-                    voice = INNER_VOICE;
-                    instructions = INNER_VOICE_INSTRUCTIONS;
-                    break;
-                case 'station_pa':
-                    voice = STATION_PA_VOICE;
-                    instructions = STATION_PA_INSTRUCTIONS;
-                    break;
-                case 'crew_echo': {
-                    const crewConfig = seg.crewName
-                        ? this.getCrewEchoConfig(seg.crewName)
-                        : { voice: this.currentVoice, instructions: 'Speak as a recorded crew log, slightly degraded audio quality.' };
-                    voice = crewConfig.voice;
-                    instructions = crewConfig.instructions;
-                    break;
-                }
-                default:
-                    voice = this.currentVoice;
-                    instructions = this.getNarratorMood();
-                    break;
-            }
-
-            const parts = splitLongText(clean, 500);
-            // Filter to parts that will actually produce chunks
-            const validParts = parts.filter(p => p.trim() && (SENTENCE_END_RE.test(p) || p.length >= 20));
-            // Distribute display text proportionally across chunks so each
-            // chunk's reveal is paced by its own audio duration.
-            let displayOffset = 0;
-            for (let i = 0; i < validParts.length; i++) {
-                const part = validParts[i];
-                const isLast = i === validParts.length - 1;
-                const ratio = part.length / Math.max(clean.length, 1);
-                const displayLen = isLast
-                    ? rawDisplay.length - displayOffset
-                    : Math.round(rawDisplay.length * ratio);
-                const partDisplay = rawDisplay.slice(displayOffset, displayOffset + displayLen);
-                displayOffset += partDisplay.length;
-                chunks.push({ text: part, displayText: partDisplay, voice, instructions, index: nextIndex.value++ });
-            }
-        }
-
-        return chunks;
-    }
-}
 
 // ─── TTS Engine ────────────────────────────────────────────────────────────
 
@@ -432,7 +160,6 @@ export class TTSEngine {
     private pipelineError: TTSError | null = null;
 
     // ─── Streaming pipeline state ─────────────────────────────────────────
-    private parser: IncrementalParser | null = null;
     private chunkQueue: SpeechChunk[] = [];
     private wavQueue: GeneratedWav[] = [];
     private nextChunkIndex = { value: 0 };
@@ -443,6 +170,7 @@ export class TTSEngine {
     private streamComplete = false;
     private generationPromise: Promise<void> | null = null;
     private playbackPromise: Promise<void> | null = null;
+    private streamActive = false;
 
     /** Called when a chunk should be revealed in the UI. Set by the game loop. */
     onRevealChunk: ((displayText: string, durationSec: number) => void) | null = null;
@@ -593,18 +321,46 @@ export class TTSEngine {
 
         // Find crew member info for steering
         const member = this.crewRoster.find(c => c.name === crewName);
-        const parts: string[] = [
-            'You are a recorded crew log entry, played back from a damaged medium.',
-            'The audio quality is slightly degraded — faint static, minor distortion.',
-        ];
+        const parts: string[] = [CREW_ECHO_INSTRUCTIONS];
         if (member) {
             parts.push(`You are ${member.name}, ${member.role}. Your fate: ${member.fate}.`);
-            parts.push('Speak as you would have when recording this log — your voice carries the weight of what you knew.');
         } else {
-            parts.push(`You are ${crewName}, a crew member of this station. Speak with the weariness of someone who knew something was wrong.`);
+            parts.push(`You are ${crewName}, a crew member of this station.`);
         }
 
         return { voice, instructions: parts.join(' ') };
+    }
+
+    /** Select the narrator mood based on current game context. */
+    private getNarratorMood(): string {
+        if (this.narratorContext.inCombat) return NARRATOR_MOODS['combat'];
+        if (this.narratorContext.hpPercent < 25) return NARRATOR_MOODS['wounded'];
+        if (this.narratorContext.isNewRoom) return NARRATOR_MOODS['discovery'];
+        return NARRATOR_MOODS['default'];
+    }
+
+    /** Get voice config for a GameSegment. */
+    private getVoiceConfigForSegment(seg: GameSegment): VoiceConfig {
+        switch (seg.type) {
+            case 'dialogue': {
+                if (seg.npcId) {
+                    return this.getVoiceConfigForNPC(seg.npcId);
+                }
+                return { voice: NARRATOR_VOICE, instructions: this.getNarratorMood() };
+            }
+            case 'thought':
+                return { voice: INNER_VOICE, instructions: INNER_VOICE_INSTRUCTIONS };
+            case 'station_pa':
+                return { voice: STATION_PA_VOICE, instructions: STATION_PA_INSTRUCTIONS };
+            case 'crew_echo': {
+                if (seg.crewName) {
+                    return this.getCrewEchoConfig(seg.crewName);
+                }
+                return { voice: NARRATOR_VOICE, instructions: CREW_ECHO_INSTRUCTIONS };
+            }
+            default:
+                return { voice: NARRATOR_VOICE, instructions: this.getNarratorMood() };
+        }
     }
 
     // ─── Streaming API ────────────────────────────────────────────────────
@@ -624,44 +380,52 @@ export class TTSEngine {
         this.nextPlayIndex = 0;
         this.generationPromise = null;
         this.playbackPromise = null;
-
-        this.parser = new IncrementalParser(
-            NARRATOR_VOICE,
-            NARRATOR_INSTRUCTIONS,
-            (npcId) => this.getVoiceConfigForNPC(npcId),
-            (crewName) => this.getCrewEchoConfig(crewName),
-        );
-        this.parser.setNarratorContext(this.narratorContext);
+        this.streamActive = true;
 
         this.debugLog('TTS-STREAM', 'Stream started');
     }
 
-    /** Feed a streaming delta into the pipeline. */
-    pushDelta(delta: string): void {
-        if (this.streamAborted) return;
-        if (!this.parser) {
-            throw new TTSError('pushDelta() called but no active stream (call beginStream() first)');
+    /** Feed a complete GameSegment into the TTS pipeline. */
+    pushSegment(seg: GameSegment): void {
+        if (this.streamAborted || !this.streamActive) return;
+
+        const clean = stripMarkdown(seg.text);
+        if (!clean) return;
+
+        const { voice, instructions } = this.getVoiceConfigForSegment(seg);
+        const displayText = segmentToMarkdown(seg);
+
+        const parts = splitLongText(clean, 500);
+        const validParts = parts.filter(p => p.trim() && (SENTENCE_END_RE.test(p) || p.length >= 20));
+
+        // Distribute display text proportionally across chunks
+        let displayOffset = 0;
+        for (let i = 0; i < validParts.length; i++) {
+            const part = validParts[i];
+            const isLast = i === validParts.length - 1;
+            const ratio = part.length / Math.max(clean.length, 1);
+            const displayLen = isLast
+                ? displayText.length - displayOffset
+                : Math.round(displayText.length * ratio);
+            const partDisplay = displayText.slice(displayOffset, displayOffset + displayLen);
+            displayOffset += partDisplay.length;
+            this.chunkQueue.push({
+                text: part,
+                displayText: partDisplay,
+                voice,
+                instructions,
+                index: this.nextChunkIndex.value++,
+            });
         }
 
-        const chunks = this.parser.push(delta, this.nextChunkIndex);
-        if (chunks.length > 0) {
-            this.chunkQueue.push(...chunks);
-            this.debugLog('TTS-STREAM', `Parsed ${String(chunks.length)} chunk(s), queue size: ${String(this.chunkQueue.length)}`);
-            this.ensurePumpsRunning();
-        }
+        this.debugLog('TTS-STREAM', `Segment "${seg.type}" → ${String(validParts.length)} chunk(s), queue size: ${String(this.chunkQueue.length)}`);
+        this.ensurePumpsRunning();
     }
 
-    /** Flush remaining text and wait for all generation/playback to finish. */
+    /** Signal end of segments and wait for all generation/playback to finish. */
     async flushStream(): Promise<void> {
-        if (!this.parser) {
+        if (!this.streamActive) {
             throw new TTSError('flushStream() called but TTS pipeline is not initialized (no active stream)');
-        }
-
-        // Flush any remaining text from the parser
-        const remaining = this.parser.flush(this.nextChunkIndex);
-        if (remaining.length > 0) {
-            this.chunkQueue.push(...remaining);
-            this.debugLog('TTS-STREAM', `Flushed ${String(remaining.length)} remaining chunk(s)`);
         }
 
         this.streamComplete = true;
@@ -839,6 +603,7 @@ export class TTSEngine {
     stop(): void {
         this.streamAborted = true;
         this.streamComplete = true;
+        this.streamActive = false;
         this.pipelineError = null;
 
         // Cancel any silent pause timer and resolve its pending promise
@@ -874,12 +639,6 @@ export class TTSEngine {
             if (wav.filePath) {
                 unlink(wav.filePath).catch(() => { /* ignore */ });
             }
-        }
-
-        // Reset parser
-        if (this.parser) {
-            this.parser.reset();
-            this.parser = null;
         }
     }
 

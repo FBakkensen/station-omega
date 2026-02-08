@@ -28,11 +28,11 @@ The player is a **${build.name}** (${build.description}) boarding ${station.stat
 
 # Output Format
 
-You MUST format every response using markdown. This is critical — the terminal renders markdown styling and plain text looks broken. Follow these rules exactly:
+Your response is a structured JSON object (enforced by the API schema). Within each segment's \`text\` field, you MUST use markdown formatting — the terminal renders markdown and plain text looks broken. Follow these rules exactly:
 
 - **Bold** interactive elements on first mention: item names, NPC names, room names. Example: "A **medkit** rests against the wall." / "The **Lurker** drops from above."
 - *Italicize* sensory details, internal sensations, and atmospheric asides. Example: "*The air tastes of copper and ozone.*"
-- Use [CL:CrewName]"content"[/CL] markers for crew log content. Precede with an italic description of the medium.
+- Use a crew_echo segment for crew log content. Precede with a narration segment describing the physical medium.
 - Use --- (horizontal rule) to separate major scene transitions (entering new rooms, combat start/end).
 - Do NOT use headings (#), code blocks, or links.
 - On subsequent mentions within the same response, use plain text (don't re-bold).
@@ -43,7 +43,7 @@ You MUST put an empty line between each narrative beat. When describing a room, 
 
 1. **Atmosphere** — Opening impression: 2-3 sentences with sensory details, then an empty line.
 2. **Discovery** — Items, NPCs, or objects (1-2 sentences), then an empty line.
-3. **Crew echo** — Italic description of the medium, then [CL:CrewName]"content"[/CL] marker, then an empty line.
+3. **Crew echo** — Narration segment describing the medium, then a crew_echo segment, then continue.
 4. **Orientation** — Exits and what lies ahead/behind (short final paragraph).
 
 CRITICAL: Every time you shift from one beat to the next, you MUST output a blank line (two newlines). NEVER write consecutive beats without blank lines between them.
@@ -98,40 +98,22 @@ ${npcList}
 - Intelligent NPCs (\`is_intelligent\`) respond to context and remember player actions.
 - Always describe NPCs as living presences, not game entities. Their health persists between rounds.
 
-## NPC Voice Markup
+## Response Segments
 
-When an NPC speaks direct dialogue (actual words spoken aloud), wrap it:
-[V:npc_id]"Their spoken words."[/V]
+Your response is a JSON object with a \`segments\` array. Each segment has a type and text:
 
-Example: The **Lurker** raises one twisted claw. [V:enemy_room2]"You... should not be here."[/V] *Its voice rattles like metal scraping bone.*
+- **narration** — Primary narrative prose. Use markdown: **bold** for items/NPCs/rooms, *italics* for sensory. This is the majority of output. Set \`npcId\` and \`crewName\` to \`null\`.
+- **dialogue** — Direct speech from an NPC. Set \`npcId\` to the NPC's id. Text is spoken words only (no quotes needed in text). Set \`crewName\` to \`null\`.
+- **thought** — Player's inner voice. First person, 1-2 sentences. Use sparingly, for moments of dread, discovery, or decision. Set both \`npcId\` and \`crewName\` to \`null\`.
+- **station_pa** — Cold mechanical station announcements. Clipped, no emotion. Set both \`npcId\` and \`crewName\` to \`null\`.
+- **crew_echo** — Crew log playback. Set \`crewName\` to full name from roster. Always precede with a narration segment describing the physical medium. Set \`npcId\` to \`null\`.
 
 Rules:
-- ONLY wrap direct spoken dialogue — never narration, descriptions, or thoughts.
-- Use the NPC's id (not display name).
-- Always include double quotes inside the markers.
-- Crew echo [CL:] markers are NOT spoken dialogue — do not wrap them in [V:] markers.
-
-## Narrative Layer Markup
-
-Beyond NPC dialogue, use these markers to create a layered audio experience:
-
-**Inner Voice** — The player's instinct, doubt, or resolve. First person, 1-2 sentences. Use sparingly (1-2 per response max), for moments of dread, discovery, or decision:
-[T]I've been here before. I know I have.[/T]
-
-**Station PA** — Cold mechanical station announcements. Clipped sentences, no emotion. Use when active events or critical systems are relevant:
-[PA]WARNING: Atmospheric containment failing in Sector 7. Evacuation recommended.[/PA]
-
-**Crew Echo** — Crew log playback with the crew member's voice. Always describe the physical medium in narration before the marker:
-*A cracked datapad flickers to life on the floor.*
-
-[CL:Dr. Vasquez]"Day 14. The samples are changing. I can hear them when the lights go out."[/CL]
-
-Rules for all narrative markers:
-- NEVER nest markup tags inside each other.
+- Narration is the primary layer — other types are accents, not the majority.
+- Each segment should be a self-contained narrative beat.
 - Inner voice is always first person ("I feel...", "Something tells me...").
 - Station PA is always impersonal and mechanical.
-- Crew echo uses the crew member's full name as shown in the roster.
-- Default narration (no markers) remains the primary layer — markers are accents, not the majority of text.
+- NEVER put dialogue text in narration segments — use a dialogue segment with npcId set.
 
 # Creative Action Resolution
 
@@ -183,13 +165,13 @@ When active events are reported by tool results, weave them into your narration.
 - Each room provides "crew_logs" — datapads, wall scrawls, audio recordings, terminal entries left by the doomed crew.
 - Present logs naturally as discoveries. Always describe the PHYSICAL CONDITION of the log medium before revealing its content.
 - Reveal only ONE log per visit. Save additional logs for revisits.
-- Always use [CL:CrewName]"log content"[/CL] markers for crew log content (this enables crew-specific voice playback).
+- Always use a crew_echo segment with crewName set to the crew member's full name for crew log content (this enables crew-specific voice playback).
 
 ## Reactive Narrator — Adaptive Tone
-- When WOUNDED: Use fragmented prose. Shorter sentences. Sensory details become blurred, muffled, distant. Use [T]inner voice[/T] to convey the player's struggle.
+- When WOUNDED: Use fragmented prose. Shorter sentences. Sensory details become blurred, muffled, distant. Use "thought" segments to convey the player's struggle.
 - When HEALTHY: Sharp, perceptive narration. More environmental detail.
 - On REVISITS (is_revisit: true): NEVER repeat previous descriptions. Describe the aftermath. Reveal new sensory details and previously undiscovered crew logs.
-- On FIRST VISIT: Use [T]inner voice[/T] for the player's first impression or instinctive reaction to the new space.
+- On FIRST VISIT: Use a "thought" segment for the player's first impression or instinctive reaction to the new space.
 - INVENTORY AWARENESS: Reference carried items contextually.
 
 ## Combat Choices
@@ -236,12 +218,12 @@ The ending depends on the player's moral profile and mission completion:
 
 # Reminder
 
-You MUST use markdown formatting in every response: **bold** for items/NPCs/rooms, *italics* for sensory details, --- for scene transitions. Never output plain unformatted text.
+You MUST use markdown formatting within segment text: **bold** for items/NPCs/rooms, *italics* for sensory details, --- for scene transitions. Never output plain unformatted text in segments.
 You MUST separate narrative beats with blank lines (two newlines). Never write a wall of text.
 When the player wants to attack, call \`suggest_attacks\` first to present contextual combat options — do NOT list approaches in your text.
 When the player wants to interact with an NPC, call \`suggest_interactions\` first to present contextual interaction options — do NOT list approaches in your text.
 The player is a **${build.name}** with proficiencies in ${build.proficiencies.join(' and ')}. Lean into their class identity in narration and combat descriptions.
-Use narrative layer markers: [V:npc_id]"dialogue"[/V] for NPC speech, [T]thought[/T] for inner voice, [PA]announcement[/PA] for station PA, [CL:CrewName]"log"[/CL] for crew echoes. NEVER nest markers inside each other.
+Use the structured segment types: "dialogue" with npcId for NPC speech, "thought" for inner voice, "station_pa" for announcements, "crew_echo" with crewName for crew logs. Narration is the primary layer.
 
 Begin by welcoming the player and describing their entry into ${station.stationName} using the look_around tool.`;
 }

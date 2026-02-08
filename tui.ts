@@ -29,7 +29,6 @@ import type {
     SlashCommandDef,
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
-import { stripAllMarkers } from './src/tts.js';
 import { flattenMarkdown, reconstructMarkdownPartial, type ContentRun } from './src/markdown-reveal.js';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
@@ -66,8 +65,8 @@ const mdTheme = SyntaxStyle.fromStyles({
     'markup.heading':     { fg: RGBA.fromHex('#00e5ff'), bold: true },
     'markup.bold':        { fg: RGBA.fromHex('#e0e8f0'), bold: true },
     'markup.italic':      { fg: RGBA.fromHex('#8abfff'), italic: true },
-    'markup.quote':       { fg: RGBA.fromHex('#7a8a9a'), italic: true },
-    'markup.code':        { fg: RGBA.fromHex('#ffcc00') },
+    'markup.quote':       { fg: RGBA.fromHex('#6aad8a'), italic: true },
+    'markup.code':        { fg: RGBA.fromHex('#ff8844') },
     'markup.list.marker': { fg: RGBA.fromHex('#00e5ff') },
 });
 
@@ -1182,8 +1181,7 @@ export class GameUI {
 
     appendNarrativeDelta(delta: string): void {
         this.currentDelta += delta;
-        const cleaned = stripAllMarkers(this.currentDelta);
-        const spaced = this.spaceParagraphs(cleaned);
+        const spaced = this.spaceParagraphs(this.currentDelta);
         if (!this.currentDeltaMd) {
             this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
                 id: `delta-${String(Date.now())}`,
@@ -1205,8 +1203,7 @@ export class GameUI {
 
         if (this.currentDeltaMd) {
             this.currentDeltaMd.streaming = false;
-            const cleaned = stripAllMarkers(this.currentDelta);
-            this.currentDeltaMd.content = this.spaceParagraphs(cleaned);
+            this.currentDeltaMd.content = this.spaceParagraphs(this.currentDelta);
         }
         this.currentDelta = '';
         this.currentDeltaMd = null;
@@ -1581,7 +1578,7 @@ export class GameUI {
 
         // Compute content length cap from TTS-released chunks.
         // This determines how far the typewriter is ALLOWED to reveal.
-        const chunkCleaned = stripAllMarkers(this.revealBuffer);
+        const chunkCleaned = this.revealBuffer;
         const { contentLength } = flattenMarkdown(chunkCleaned);
         const prevContentLen = this.revealContentLength;
         this.revealContentLength = contentLength;
@@ -1631,7 +1628,7 @@ export class GameUI {
         // when TTS chunks split mid-formatting-span (e.g. `**bold text` without
         // closing `**` in the revealBuffer — currentDelta has the full text).
         if (this.revealRunsDirty) {
-            const fullCleaned = stripAllMarkers(this.currentDelta);
+            const fullCleaned = this.currentDelta;
             const { runs } = flattenMarkdown(fullCleaned);
             this.revealRuns = runs;
             this.revealRunsDirty = false;

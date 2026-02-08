@@ -60,9 +60,9 @@ interface CreativeSchema {
 // Module-level creative agent (reusable, stateless)
 const creativeAgent = new Agent({
     name: 'CreativeGenerator',
-    model: 'gpt-4.1',
+    model: 'gpt-5-mini',
     instructions: CREATIVE_PROMPT,
-    modelSettings: { store: false },
+    modelSettings: { store: false, reasoning: { effort: 'low' } },
 });
 
 function buildSkeletonSummary(skeleton: StationSkeleton): string {

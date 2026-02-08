@@ -285,12 +285,13 @@ async function runGameplay(
     // Create game agent with dynamic instructions
     const gameAgent = new Agent<GameContext>({
         name: 'GameMaster',
-        model: 'gpt-4.1',
+        model: 'gpt-5.2',
         instructions: buildGameInstructions,
         tools,
         modelSettings: {
             store: true,
             promptCacheRetention: '24h',
+            reasoning: { effort: 'none' },
         },
     });
 

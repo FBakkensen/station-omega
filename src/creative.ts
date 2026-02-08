@@ -1,4 +1,5 @@
 import { Agent, run } from '@openai/agents';
+import { z } from 'zod';
 import type {
     StationSkeleton,
     CreativeContent,
@@ -8,18 +9,70 @@ import type {
     CrewMember,
 } from './types.js';
 
-const CREATIVE_PROMPT = `You are a JSON content generator for a sci-fi survival horror game set on a derelict space station. Output ONLY valid JSON — no markdown, no code fences, no commentary.
+const CREATIVE_PROMPT = `# Identity
 
-Generate atmospheric, horror-themed creative content for the station described below. Style: Alien meets Dead Space. Crew logs should tell a coherent story of the station's downfall matching the story arc.
+You are a creative content generator for a sci-fi survival horror game set on a derelict space station.
 
-RULES:
-- Every roomId/enemyId/itemId in your output MUST match an ID from the skeleton
+# Style
+
+Atmospheric, horror-themed content. Style: Alien meets Dead Space. Crew logs should tell a coherent story of the station's downfall matching the story arc.
+
+# Rules
+
+- Every roomId/enemyId/itemId in your output MUST match an ID from the skeleton provided
 - Crew log authors must come from the crew roster you generate
 - Room names must be evocative and unique (never generic like "Room 1")
 - Enemy names should reflect their tier and nature
-- Keep descriptions concise but atmospheric`;
+- Keep descriptions concise but atmospheric
+- Generate 3-5 crew roster members
+- Each room should have 1-2 crew logs
+- Provide 3 sounds, 2 smells, and 3 visuals per room`;
 
-interface CreativeSchema {
+/** Zod schema for structured output — guarantees valid JSON from gpt-5-mini. */
+const CreativeOutputSchema = z.object({
+    stationName: z.string(),
+    briefing: z.string(),
+    backstory: z.string(),
+    crewRoster: z.array(z.object({
+        name: z.string(),
+        role: z.string(),
+        fate: z.string(),
+    })),
+    rooms: z.array(z.object({
+        roomId: z.string(),
+        name: z.string(),
+        descriptionSeed: z.string(),
+        sensory: z.object({
+            sounds: z.array(z.string()),
+            smells: z.array(z.string()),
+            visuals: z.array(z.string()),
+            tactile: z.string(),
+        }),
+        crewLogs: z.array(z.object({
+            type: z.string(),
+            author: z.string(),
+            content: z.string(),
+            condition: z.string(),
+        })),
+    })),
+    enemies: z.array(z.object({
+        enemyId: z.string(),
+        name: z.string(),
+        appearance: z.string(),
+        personality: z.string(),
+        deathDescription: z.string(),
+        soundSignature: z.string(),
+    })),
+    items: z.array(z.object({
+        itemId: z.string(),
+        name: z.string(),
+        description: z.string(),
+        useNarration: z.string(),
+    })),
+});
+
+/** Partial shape accepted by validateCreative for fallback paths. */
+interface CreativeSchemaPartial {
     stationName?: string;
     briefing?: string;
     backstory?: string;
@@ -63,6 +116,7 @@ const creativeAgent = new Agent({
     model: 'gpt-5-mini',
     instructions: CREATIVE_PROMPT,
     modelSettings: { store: false, reasoning: { effort: 'low' } },
+    outputType: CreativeOutputSchema,
 });
 
 function buildSkeletonSummary(skeleton: StationSkeleton): string {
@@ -101,7 +155,7 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
     }, null, 2);
 }
 
-function validateCreative(content: CreativeSchema, skeleton: StationSkeleton): CreativeContent {
+function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkeleton): CreativeContent {
     const roomIds = new Set(skeleton.rooms.map(r => r.id));
     const enemyIds = new Set(skeleton.enemies.map(e => e.id));
     const itemIds = new Set(skeleton.items.map(i => i.id));
@@ -233,52 +287,13 @@ export async function generateCreativeContent(
 ): Promise<CreativeContent> {
     const summary = buildSkeletonSummary(skeleton);
 
-    const jsonSchema = JSON.stringify({
-        stationName: "string",
-        briefing: "string (1-2 sentences mission briefing)",
-        backstory: "string (2-3 sentences about what happened)",
-        crewRoster: [{ name: "string", role: "string", fate: "string" }],
-        rooms: [{
-            roomId: "string (must match skeleton)",
-            name: "string (evocative name)",
-            descriptionSeed: "string (2-3 sentences)",
-            sensory: {
-                sounds: ["string (3 items)"],
-                smells: ["string (2 items)"],
-                visuals: ["string (3 items)"],
-                tactile: "string",
-            },
-            crewLogs: [{
-                type: "datapad|wall_scrawl|audio_recording|terminal_entry",
-                author: "string (from crew roster)",
-                content: "string",
-                condition: "string (physical description of the log medium)",
-            }],
-        }],
-        enemies: [{
-            enemyId: "string (must match skeleton)",
-            name: "string",
-            appearance: "string (1-2 sentences)",
-            personality: "string",
-            deathDescription: "string",
-            soundSignature: "string",
-        }],
-        items: [{
-            itemId: "string (must match skeleton)",
-            name: "string",
-            description: "string",
-            useNarration: "string",
-        }],
-    }, null, 2);
-
     const userPrompt = `Generate creative content for this station skeleton:
 
+<station_skeleton>
 ${summary}
+</station_skeleton>
 
-Your output MUST be valid JSON matching this schema:
-${jsonSchema}
-
-Generate 3-5 crew roster members. Each room should have 1-2 crew logs. Output ONLY the JSON object.`;
+Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each. Enemy appearances: 1-2 sentences each. Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry.`;
 
     try {
         const stream = await run(creativeAgent, userPrompt, {
@@ -304,16 +319,11 @@ Generate 3-5 crew roster members. Each room should have 1-2 crew logs. Output ON
             }
         }
 
-        const raw = stream.finalOutput ?? '{}';
-
-        // Extract JSON from potential markdown code fences
-        let jsonStr = raw.trim();
-        const fenceMatch = /```(?:json)?\s*([\s\S]*?)```/.exec(jsonStr);
-        if (fenceMatch) {
-            jsonStr = fenceMatch[1].trim();
+        // Structured output: finalOutput is already parsed and validated by Zod
+        const parsed = stream.finalOutput;
+        if (!parsed) {
+            throw new Error('Creative agent produced no output');
         }
-
-        const parsed = JSON.parse(jsonStr) as CreativeSchema;
         return validateCreative(parsed, skeleton);
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

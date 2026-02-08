@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import OpenAI from 'openai';
-import type { NPC } from './types.js';
+import type { NPC, CrewMember } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
 
 // ─── Errors ────────────────────────────────────────────────────────────────
@@ -19,9 +19,16 @@ export class TTSError extends Error {
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface TTSSegment {
-    type: 'narration' | 'npc_dialogue';
+    type: 'narration' | 'npc_dialogue' | 'inner_voice' | 'station_pa' | 'crew_echo';
     text: string;
     npcId?: string;
+    crewName?: string;
+}
+
+export interface NarratorContext {
+    inCombat: boolean;
+    hpPercent: number;
+    isNewRoom: boolean;
 }
 
 type OpenAIVoice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable'
@@ -59,6 +66,19 @@ const NPC_VOICE_POOL: OpenAIVoice[] = [
 
 const BOSS_VOICE: OpenAIVoice = 'onyx';
 
+const INNER_VOICE: OpenAIVoice = 'ash';
+const INNER_VOICE_INSTRUCTIONS = 'You are the player\'s inner voice — intimate, whispered, thinking aloud. Convey instinct, doubt, resolve. Quiet and close, as if speaking directly into the listener\'s mind.';
+
+const STATION_PA_VOICE: OpenAIVoice = 'echo';
+const STATION_PA_INSTRUCTIONS = 'You are a cold synthetic station PA system. Clipped, monotone, no emotion. Mechanical precision. Each word is clean and detached — an automated warning from a dying machine.';
+
+const NARRATOR_MOODS: Record<string, string> = {
+    combat: 'Urgent, intense narration. Short punchy delivery. Breathless pacing. Every beat lands like a blow.',
+    wounded: 'Strained, fragile narration. Words come with effort. Quiet, intimate. The narrator sounds hurt.',
+    discovery: 'Quiet wonder in the narration. Careful observation. A hint of awe at something new and unknown.',
+    default: NARRATOR_INSTRUCTIONS,
+};
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /** Simple deterministic hash of a string to a positive integer. */
@@ -81,9 +101,25 @@ function stripMarkdown(text: string): string {
 /**
  * Remove [V:id]"..."[/V] markers but keep the quoted dialogue text.
  * Used by the TUI to clean display output.
+ * @deprecated Use stripAllMarkers() instead
  */
 export function stripVoiceMarkers(text: string): string {
     return text.replace(/\[V:[^\]]*\]"([^"]*?)"\[\/V\]/g, '"$1"');
+}
+
+/**
+ * Strip all narrative layer markers and convert to display-ready markdown:
+ * - [V:id]"text"[/V] → "text"
+ * - [T]text[/T] → *➤ text*
+ * - [PA]text[/PA] → `⚠ text`
+ * - [CL:name]"text"[/CL] → > "text"
+ */
+export function stripAllMarkers(text: string): string {
+    return text
+        .replace(/\[V:[^\]]*\]"([^"]*?)"\[\/V\]/g, '"$1"')
+        .replace(/\[T\]([\s\S]*?)\[\/T\]/g, (_m, inner: string) => `*➤ ${inner.trim()}*`)
+        .replace(/\[PA\]([\s\S]*?)\[\/PA\]/g, (_m, inner: string) => `\`⚠ ${inner.trim()}\``)
+        .replace(/\[CL:[^\]]*\]"([^"]*?)"\[\/CL\]/g, '> "$1"');
 }
 
 /** Split text into chunks of roughly `maxLen` characters at sentence boundaries. */
@@ -124,19 +160,41 @@ function parseWavDuration(buffer: Buffer): number {
 
 // ─── Segment Parser ────────────────────────────────────────────────────────
 
-const VOICE_MARKER_RE = /\[V:([^\]]+)\]"([^"]*?)"\[\/V\]/g;
+/**
+ * Unified regex capturing all 4 narrative marker types:
+ * 1: [V:id]"text"[/V]  — NPC dialogue (groups 1=id, 2=text)
+ * 3: [T]text[/T]       — Inner voice (group 3=text)
+ * 4: [PA]text[/PA]     — Station PA (group 4=text)
+ * 5: [CL:name]"text"[/CL] — Crew echo (groups 5=name, 6=text)
+ */
+const UNIFIED_MARKER_RE = /\[V:([^\]]+)\]"([^"]*?)"\[\/V\]|\[T\]([\s\S]*?)\[\/T\]|\[PA\]([\s\S]*?)\[\/PA\]|\[CL:([^\]]+)\]"([^"]*?)"\[\/CL\]/g;
 
-/** Parse AI response into ordered narration/dialogue segments. */
+/** Parse AI response into ordered segments by narrative layer. */
 export function parseSegments(rawText: string): TTSSegment[] {
     const segments: TTSSegment[] = [];
     let lastIndex = 0;
 
-    for (const match of rawText.matchAll(VOICE_MARKER_RE)) {
+    for (const match of rawText.matchAll(UNIFIED_MARKER_RE)) {
         const before = rawText.slice(lastIndex, match.index);
         if (before.trim()) {
             segments.push({ type: 'narration', text: before.trim() });
         }
-        segments.push({ type: 'npc_dialogue', text: match[2], npcId: match[1] });
+
+        const matched = match[0];
+        if (matched.startsWith('[V:')) {
+            // [V:id]"text"[/V] — NPC dialogue
+            segments.push({ type: 'npc_dialogue', text: match[2], npcId: match[1] });
+        } else if (matched.startsWith('[T]')) {
+            // [T]text[/T] — Inner voice
+            segments.push({ type: 'inner_voice', text: match[3].trim() });
+        } else if (matched.startsWith('[PA]')) {
+            // [PA]text[/PA] — Station PA
+            segments.push({ type: 'station_pa', text: match[4].trim() });
+        } else if (matched.startsWith('[CL:')) {
+            // [CL:name]"text"[/CL] — Crew echo
+            segments.push({ type: 'crew_echo', text: match[6], crewName: match[5] });
+        }
+
         lastIndex = match.index + match[0].length;
     }
 
@@ -158,16 +216,28 @@ class IncrementalParser {
     private currentVoice: OpenAIVoice;
     private currentInstructions: string;
     private getVoiceConfigForNPC: (npcId: string) => VoiceConfig;
+    private getCrewEchoConfig: (crewName: string) => VoiceConfig;
+    private narratorContext: NarratorContext = { inCombat: false, hpPercent: 100, isNewRoom: false };
 
-    constructor(defaultVoice: OpenAIVoice, defaultInstructions: string, getVoiceConfigForNPC: (npcId: string) => VoiceConfig) {
+    constructor(
+        defaultVoice: OpenAIVoice,
+        defaultInstructions: string,
+        getVoiceConfigForNPC: (npcId: string) => VoiceConfig,
+        getCrewEchoConfig: (crewName: string) => VoiceConfig,
+    ) {
         this.currentVoice = defaultVoice;
         this.currentInstructions = defaultInstructions;
         this.getVoiceConfigForNPC = getVoiceConfigForNPC;
+        this.getCrewEchoConfig = getCrewEchoConfig;
+    }
+
+    setNarratorContext(ctx: NarratorContext): void {
+        this.narratorContext = ctx;
     }
 
     /**
      * Find the safe boundary in the buffer — the position up to which we can
-     * safely parse without risking an incomplete `[V:...]"..."[/V]` marker.
+     * safely parse without risking an incomplete marker of any type.
      * Returns -1 if no safe boundary exists yet.
      */
     private findSafeBoundary(): number {
@@ -178,8 +248,13 @@ class IncrementalParser {
             // There's a `[` in the tail — check if it's part of a closed marker
             const fromPos = Math.max(0, this.buffer.length - 50) + lastOpen;
             const afterOpen = this.buffer.slice(fromPos);
-            // If we find a complete [V:id]"text"[/V] starting here, it's safe
-            if (/^\[V:[^\]]*\]"[^"]*"\[\/V\]/.test(afterOpen)) {
+            // Check all marker types for completeness
+            if (
+                /^\[V:[^\]]*\]"[^"]*"\[\/V\]/.test(afterOpen) ||
+                /^\[T\][\s\S]*?\[\/T\]/.test(afterOpen) ||
+                /^\[PA\][\s\S]*?\[\/PA\]/.test(afterOpen) ||
+                /^\[CL:[^\]]*\]"[^"]*"\[\/CL\]/.test(afterOpen)
+            ) {
                 // Marker is complete — safe up to end of buffer
             } else {
                 // Incomplete marker — safe boundary is just before the `[`
@@ -239,6 +314,30 @@ class IncrementalParser {
         this.buffer = '';
     }
 
+    /** Select the narrator mood based on current game context. */
+    private getNarratorMood(): string {
+        if (this.narratorContext.inCombat) return NARRATOR_MOODS['combat'];
+        if (this.narratorContext.hpPercent < 25) return NARRATOR_MOODS['wounded'];
+        if (this.narratorContext.isNewRoom) return NARRATOR_MOODS['discovery'];
+        return NARRATOR_MOODS['default'];
+    }
+
+    /** Reconstruct the raw marker text for a segment (used for display text). */
+    private static rawDisplayForSegment(seg: TTSSegment): string {
+        switch (seg.type) {
+            case 'npc_dialogue':
+                return seg.npcId ? `[V:${seg.npcId}]"${seg.text}"[/V]` : seg.text;
+            case 'inner_voice':
+                return `[T]${seg.text}[/T]`;
+            case 'station_pa':
+                return `[PA]${seg.text}[/PA]`;
+            case 'crew_echo':
+                return seg.crewName ? `[CL:${seg.crewName}]"${seg.text}"[/CL]` : seg.text;
+            default:
+                return seg.text;
+        }
+    }
+
     /** Convert a block of text into SpeechChunks via parseSegments + splitLongText + stripMarkdown. */
     private textToChunks(text: string, nextIndex: { value: number }): SpeechChunk[] {
         const segments = parseSegments(text);
@@ -248,20 +347,40 @@ class IncrementalParser {
             const clean = stripMarkdown(seg.text);
             if (!clean) continue;
 
-            // Preserve raw text for UI display (with markdown/voice markers intact)
-            const rawDisplay = seg.type === 'npc_dialogue' && seg.npcId
-                ? `[V:${seg.npcId}]"${seg.text}"[/V]`
-                : seg.text;
+            // Preserve raw text for UI display (with markers intact)
+            const rawDisplay = IncrementalParser.rawDisplayForSegment(seg);
 
             let voice: OpenAIVoice;
             let instructions: string;
-            if (seg.type === 'npc_dialogue' && seg.npcId) {
-                const config = this.getVoiceConfigForNPC(seg.npcId);
-                voice = config.voice;
-                instructions = config.instructions;
-            } else {
-                voice = this.currentVoice;
-                instructions = this.currentInstructions;
+            switch (seg.type) {
+                case 'npc_dialogue': {
+                    const config = seg.npcId
+                        ? this.getVoiceConfigForNPC(seg.npcId)
+                        : { voice: this.currentVoice, instructions: this.currentInstructions };
+                    voice = config.voice;
+                    instructions = config.instructions;
+                    break;
+                }
+                case 'inner_voice':
+                    voice = INNER_VOICE;
+                    instructions = INNER_VOICE_INSTRUCTIONS;
+                    break;
+                case 'station_pa':
+                    voice = STATION_PA_VOICE;
+                    instructions = STATION_PA_INSTRUCTIONS;
+                    break;
+                case 'crew_echo': {
+                    const crewConfig = seg.crewName
+                        ? this.getCrewEchoConfig(seg.crewName)
+                        : { voice: this.currentVoice, instructions: 'Speak as a recorded crew log, slightly degraded audio quality.' };
+                    voice = crewConfig.voice;
+                    instructions = crewConfig.instructions;
+                    break;
+                }
+                default:
+                    voice = this.currentVoice;
+                    instructions = this.getNarratorMood();
+                    break;
             }
 
             const parts = splitLongText(clean, 500);
@@ -301,6 +420,8 @@ export class TTSEngine {
     private audioEnabled = false;
     private debugLog: (label: string, content: string) => void;
     private npcMap = new Map<string, NPC>();
+    private crewRoster: CrewMember[] = [];
+    private narratorContext: NarratorContext = { inCombat: false, hpPercent: 100, isNewRoom: false };
     private tempDir: string | null = null;
     private currentProcess: ChildProcess | null = null;
     private abortController: AbortController | null = null;
@@ -457,6 +578,35 @@ export class TTSEngine {
         return parts.join(' ');
     }
 
+    setCrewRoster(roster: CrewMember[]): void {
+        this.crewRoster = roster;
+    }
+
+    setNarratorContext(ctx: NarratorContext): void {
+        this.narratorContext = ctx;
+    }
+
+    private getCrewEchoConfig(crewName: string): VoiceConfig {
+        // Deterministic hash into the NPC voice pool (same pool, different base string)
+        const idx = hashString(`crew_${crewName}`) % NPC_VOICE_POOL.length;
+        const voice = NPC_VOICE_POOL[idx];
+
+        // Find crew member info for steering
+        const member = this.crewRoster.find(c => c.name === crewName);
+        const parts: string[] = [
+            'You are a recorded crew log entry, played back from a damaged medium.',
+            'The audio quality is slightly degraded — faint static, minor distortion.',
+        ];
+        if (member) {
+            parts.push(`You are ${member.name}, ${member.role}. Your fate: ${member.fate}.`);
+            parts.push('Speak as you would have when recording this log — your voice carries the weight of what you knew.');
+        } else {
+            parts.push(`You are ${crewName}, a crew member of this station. Speak with the weariness of someone who knew something was wrong.`);
+        }
+
+        return { voice, instructions: parts.join(' ') };
+    }
+
     // ─── Streaming API ────────────────────────────────────────────────────
 
     /** Reset state and prepare for a new streaming response. */
@@ -479,7 +629,9 @@ export class TTSEngine {
             NARRATOR_VOICE,
             NARRATOR_INSTRUCTIONS,
             (npcId) => this.getVoiceConfigForNPC(npcId),
+            (crewName) => this.getCrewEchoConfig(crewName),
         );
+        this.parser.setNarratorContext(this.narratorContext);
 
         this.debugLog('TTS-STREAM', 'Stream started');
     }

@@ -18,7 +18,7 @@ Station Omega is an AI-powered text adventure game using the OpenAI Agents SDK (
 
 - **`index.ts`** — Main game loop: creates an `Agent<GameContext>` with dynamic instructions, `previousResponseId` chaining, and streaming via `run()`. Manages TTS, UI, event tracking, and player input.
 - **`src/tools.ts`** — All 16 game tools defined via `tool()` from `@openai/agents` with Zod schemas. Tools access shared state through `RunContext<GameContext>` dependency injection.
-- **`src/creative.ts`** — Creative content generation using a separate `Agent` + `run()` for one-shot station theming.
+- **`src/creative.ts`** — Creative content generation using a separate `Agent` with `outputType` (Zod structured output) + `run()` for one-shot station theming.
 - **`src/prompt.ts`** — Builds the system prompt (static prefix for prompt caching + dynamic state suffix).
 - **`tui.ts`** — Terminal UI built with `@opentui/core`. Exports `GameUI` class with a scrollable narrative panel, status bar, and input field.
 
@@ -40,13 +40,15 @@ Station Omega is an AI-powered text adventure game using the OpenAI Agents SDK (
 - **TypeScript**: `strict: true`, `noEmit: true`, target ES2022, bundler module resolution
 - **ESLint**: Flat config with `typescript-eslint` `strictTypeChecked` rules
 
-### GPT-4.1 Prompting (System Prompt in src/prompt.ts)
+### GPT-5.2 Prompting (System Prompt in src/prompt.ts)
 
-GPT-4.1 follows instructions **literally** — it will not infer formatting or behavior you don't explicitly request. Key rules when editing the system prompt:
+The Game Master uses `gpt-5.2` with `reasoning: { effort: 'none' }` — a reasoning model running without chain-of-thought, making it fast and highly steerable. Key rules when editing the system prompt:
 
-- **Use markdown headers** (`#`, `##`) to structure the system prompt. This signals to the model that markdown is the expected output language.
-- **Dedicated `# Output Format` section** near the top for any response formatting rules (bold, italics, blockquotes). GPT-4.1 treats this as a first-class instruction.
-- **Sandwich method**: Repeat critical instructions (especially formatting) at both the beginning and end of the prompt. GPT-4.1 prioritizes instructions near the end when there are conflicts.
-- **Be explicit, not implicit**: A single firm sentence ("You MUST use markdown") is more effective than lengthy examples. Don't assume the model will infer what you want.
+- **Use markdown headers** (`#`, `##`) to structure the system prompt, and **XML tags** (`<station_rooms>`, `<npc_list>`) to delineate data sections from instructions.
+- **Dedicated `# Output Format` section** near the top for response formatting rules. GPT-5.2 with `effort: none` relies heavily on explicit prompting.
+- **Sandwich method**: Repeat critical instructions at both the beginning and end of the prompt via a `# Reminder` section.
+- **Think-before-act**: Since `reasoning: none` disables internal chain-of-thought, the prompt should encourage the model to consider game state before resolving actions.
+- **Preambles**: Instruct the model to write a brief atmospheric line before tool calls — this improves tool-calling accuracy and fits the narrative style.
 - **Prompt caching**: Structure dynamic instructions as static prefix (>1024 tokens, rules/format) + variable suffix (game state). Set `promptCacheRetention: '24h'` for extended caching.
-- **Prompt migration risk**: Prompts written for GPT-4o may underperform on GPT-4.1 because GPT-4o inferred intent and filled gaps; GPT-4.1 does not.
+- **Verbosity**: The `text: { verbosity: 'low' }` API parameter enforces concise output at the model level, complementing the prompt's "2-4 sentences" instruction.
+- **Compaction**: For long game sessions, consider using the Responses API `/responses/compact` endpoint to compress conversation history when approaching context limits.

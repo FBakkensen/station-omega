@@ -260,6 +260,7 @@ async function runGameplay(
 
     // Configure TTS for this run
     ttsEngine.setNPCs(station.npcs);
+    ttsEngine.setCrewRoster(station.crewRoster);
 
     // Game context (injected into tools and instructions via RunContext)
     const gameCtx: GameContext = {
@@ -292,6 +293,7 @@ async function runGameplay(
             store: true,
             promptCacheRetention: '24h',
             reasoning: { effort: 'none' },
+            text: { verbosity: 'low' },
         },
     });
 
@@ -346,6 +348,15 @@ async function runGameplay(
                     currentResponse += delta;
                     ui.bufferNarrativeDelta(delta);
                     if (!streamStarted) {
+                        // Set narrator context for dynamic mood steering
+                        const room = station.rooms.get(state.currentRoom);
+                        const inCombat = room?.threat != null && station.npcs.get(room.threat)?.disposition !== 'dead';
+                        const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
+                        ttsEngine.setNarratorContext({
+                            inCombat,
+                            hpPercent: (state.hp / state.maxHp) * 100,
+                            isNewRoom: visitCount <= 1,
+                        });
                         ttsEngine.beginStream();
                         streamStarted = true;
                     }

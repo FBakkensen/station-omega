@@ -29,7 +29,7 @@ import type {
     SlashCommandDef,
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
-import { stripVoiceMarkers } from './src/tts.js';
+import { stripAllMarkers } from './src/tts.js';
 import { flattenMarkdown, reconstructMarkdownPartial, type ContentRun } from './src/markdown-reveal.js';
 
 // ─── Color Palette ───────────────────────────────────────────────────────────
@@ -1182,7 +1182,7 @@ export class GameUI {
 
     appendNarrativeDelta(delta: string): void {
         this.currentDelta += delta;
-        const cleaned = stripVoiceMarkers(this.currentDelta);
+        const cleaned = stripAllMarkers(this.currentDelta);
         const spaced = this.spaceParagraphs(cleaned);
         if (!this.currentDeltaMd) {
             this.currentDeltaMd = new MarkdownRenderable(this.renderer, {
@@ -1205,7 +1205,7 @@ export class GameUI {
 
         if (this.currentDeltaMd) {
             this.currentDeltaMd.streaming = false;
-            const cleaned = stripVoiceMarkers(this.currentDelta);
+            const cleaned = stripAllMarkers(this.currentDelta);
             this.currentDeltaMd.content = this.spaceParagraphs(cleaned);
         }
         this.currentDelta = '';
@@ -1581,7 +1581,7 @@ export class GameUI {
 
         // Compute content length cap from TTS-released chunks.
         // This determines how far the typewriter is ALLOWED to reveal.
-        const chunkCleaned = stripVoiceMarkers(this.revealBuffer);
+        const chunkCleaned = stripAllMarkers(this.revealBuffer);
         const { contentLength } = flattenMarkdown(chunkCleaned);
         const prevContentLen = this.revealContentLength;
         this.revealContentLength = contentLength;
@@ -1631,7 +1631,7 @@ export class GameUI {
         // when TTS chunks split mid-formatting-span (e.g. `**bold text` without
         // closing `**` in the revealBuffer — currentDelta has the full text).
         if (this.revealRunsDirty) {
-            const fullCleaned = stripVoiceMarkers(this.currentDelta);
+            const fullCleaned = stripAllMarkers(this.currentDelta);
             const { runs } = flattenMarkdown(fullCleaned);
             this.revealRuns = runs;
             this.revealRunsDirty = false;

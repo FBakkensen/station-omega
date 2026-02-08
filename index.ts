@@ -366,6 +366,11 @@ async function runGameplay(
                 }
                 debugLog('SESSION', 'flushStream resolved');
                 afterStream();
+            }).catch((err: unknown) => {
+                debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
+                ttsEngine.stop();
+                ui.appendNarrative('*Voice system error — audio disabled for this response.*');
+                afterStream();
             });
         } else {
             afterStream();
@@ -459,7 +464,13 @@ async function main() {
     // Initialize TTS model (downloads ~86MB on first run)
     const globalTTS = new TTSEngine({ enabled: true, debugLog });
     ui.showLoadingScreen('Loading voice model...');
-    await globalTTS.init();
+    try {
+        await globalTTS.init();
+    } catch (err: unknown) {
+        ui.destroy();
+        process.stderr.write(`TTS initialization failed: ${String(err)}\n`);
+        process.exit(1);
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
     while (true) {

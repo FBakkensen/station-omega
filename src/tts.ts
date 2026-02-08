@@ -8,6 +8,15 @@ import type { KokoroTTS } from 'kokoro-js';
 import type { NPC } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
 
+// ─── Errors ────────────────────────────────────────────────────────────────
+
+export class TTSError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'TTSError';
+    }
+}
+
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface TTSSegment {
@@ -299,6 +308,10 @@ export class TTSEngine {
     private currentProcess: ChildProcess | null = null;
     private availableVoices = new Set<VoiceId>();
 
+    // ─── Error accumulation ────────────────────────────────────────────────
+    private pipelineError: TTSError | null = null;
+    private lastWorkerError: string | null = null;
+
     // ─── Streaming pipeline state ─────────────────────────────────────────
     private parser: IncrementalParser | null = null;
     private chunkQueue: SpeechChunk[] = [];
@@ -320,56 +333,95 @@ export class TTSEngine {
         this.debugLog = options.debugLog ?? (() => { /* no-op */ });
     }
 
+    /** Verify ffplay is installed and accessible. */
+    private async checkFfplay(): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+            const proc = spawn('ffplay', ['-version'], { stdio: 'ignore' });
+            proc.on('close', (code) => {
+                if (code === 0) resolve();
+                else reject(new TTSError(`ffplay exited with code ${String(code)}. Install ffmpeg to enable TTS audio.`));
+            });
+            proc.on('error', () => {
+                reject(new TTSError('ffplay not found. Install ffmpeg to enable TTS audio.'));
+            });
+        });
+    }
+
     async init(): Promise<void> {
-        try {
-            // Create temp directory for WAV files
-            this.tempDir = await mkdtemp(join(tmpdir(), 'station-omega-tts-'));
+        // Create temp directory for WAV files
+        this.tempDir = await mkdtemp(join(tmpdir(), 'station-omega-tts-'));
 
-            // Spawn worker thread for ONNX inference (keeps main thread free for UI)
-            const workerPath = new URL('./tts-worker.ts', import.meta.url);
-            this.worker = new Worker(workerPath);
+        // Spawn worker thread for ONNX inference (keeps main thread free for UI)
+        const workerPath = new URL('./tts-worker.ts', import.meta.url);
+        this.worker = new Worker(workerPath);
 
-            // Wait for the worker to load the model and report available voices
-            const voices = await new Promise<string[]>((resolve, reject) => {
-                const onMsg = (msg: WorkerResponse) => {
-                    if (msg.type === 'ready') {
-                        this.worker?.off('message', onMsg);
-                        resolve(msg.voices);
-                    } else if (msg.type === 'error' && msg.index === -1) {
-                        this.worker?.off('message', onMsg);
-                        reject(new Error(msg.error));
-                    }
-                };
-                this.worker?.on('message', onMsg);
-                this.worker?.postMessage({ type: 'init' });
-            });
-
-            for (const v of voices) {
-                this.availableVoices.add(v as VoiceId);
-            }
-
-            // Handle Worker-level errors (crash, unhandled exception in worker)
-            this.worker.on('error', (err: Error) => {
-                this.debugLog('TTS-WORKER', `Worker error: ${err.message}`);
-            });
-            this.worker.on('exit', (code: number) => {
-                this.debugLog('TTS-WORKER', `Worker exited with code ${String(code)}`);
-                if (code !== 0) {
-                    this.enabled = false;
-                    this.worker = null;
+        // Wait for the worker to load the model and report available voices
+        const voices = await new Promise<string[]>((resolve, reject) => {
+            const onMsg = (msg: WorkerResponse) => {
+                if (msg.type === 'ready') {
+                    this.worker?.off('message', onMsg);
+                    resolve(msg.voices);
+                } else if (msg.type === 'error' && msg.index === -1) {
+                    this.worker?.off('message', onMsg);
+                    reject(new TTSError(`TTS worker init failed: ${msg.error}`));
                 }
-            });
+            };
+            this.worker?.on('message', onMsg);
+            this.worker?.postMessage({ type: 'init' });
+        });
 
-            // Permanent message handler for generation responses
-            this.worker.on('message', (msg: WorkerResponse) => {
-                this.onWorkerMessage(msg);
-            });
-
-            this.debugLog('TTS', `Initialized worker. ${String(voices.length)} voices available. Temp dir: ${this.tempDir}`);
-        } catch (err: unknown) {
-            this.enabled = false;
-            this.debugLog('TTS', `Init failed (TTS disabled): ${String(err)}`);
+        for (const v of voices) {
+            this.availableVoices.add(v as VoiceId);
         }
+
+        // Validate required voices are available
+        const voiceList = () => [...this.availableVoices].join(', ');
+        if (!this.availableVoices.has(NARRATOR_VOICE)) {
+            throw new TTSError(`Required narrator voice "${NARRATOR_VOICE}" not available. Available: ${voiceList()}`);
+        }
+        if (!this.availableVoices.has(BOSS_VOICE)) {
+            throw new TTSError(`Required boss voice "${BOSS_VOICE}" not available. Available: ${voiceList()}`);
+        }
+
+        // Handle Worker-level errors (crash, unhandled exception in worker)
+        let workerDead = false;
+        this.worker.on('error', (err: Error) => {
+            this.debugLog('TTS-WORKER', `Worker error: ${err.message}`);
+            if (!workerDead) {
+                workerDead = true;
+                this.lastWorkerError = err.message;
+                this.pipelineError = new TTSError(`TTS worker crashed: ${err.message}`);
+                // Resolve all pending generation promises so pumps unblock
+                for (const [, resolve] of this.pendingGenerate) {
+                    resolve(null);
+                }
+                this.pendingGenerate.clear();
+            }
+        });
+        this.worker.on('exit', (code: number) => {
+            this.debugLog('TTS-WORKER', `Worker exited with code ${String(code)}`);
+            if (code !== 0 && !workerDead) {
+                workerDead = true;
+                this.lastWorkerError = `Worker exited with code ${String(code)}`;
+                this.pipelineError = new TTSError(`TTS worker exited unexpectedly (code ${String(code)})`);
+                // Resolve all pending generation promises so pumps unblock
+                for (const [, resolve] of this.pendingGenerate) {
+                    resolve(null);
+                }
+                this.pendingGenerate.clear();
+            }
+            this.worker = null;
+        });
+
+        // Permanent message handler for generation responses
+        this.worker.on('message', (msg: WorkerResponse) => {
+            this.onWorkerMessage(msg);
+        });
+
+        // Verify ffplay is available for audio playback
+        await this.checkFfplay();
+
+        this.debugLog('TTS', `Initialized worker. ${String(voices.length)} voices available. Temp dir: ${this.tempDir}`);
     }
 
     private onWorkerMessage(msg: WorkerResponse): void {
@@ -433,17 +485,17 @@ export class TTSEngine {
 
     private resolveVoice(voice: VoiceId): VoiceId {
         if (this.availableVoices.has(voice)) return voice;
-        // Fallback to narrator if the requested voice isn't available
-        if (this.availableVoices.has(NARRATOR_VOICE)) return NARRATOR_VOICE;
-        // Last resort: return the requested voice anyway (generate will use default)
-        return voice;
+        throw new TTSError(`Voice "${voice}" not available. Available: ${[...this.availableVoices].join(', ')}`);
     }
 
     // ─── Streaming API ────────────────────────────────────────────────────
 
     /** Reset state and prepare for a new streaming response. */
     beginStream(): void {
-        if (!this.enabled || !this.worker || !this.tempDir) return;
+        if (!this.enabled) return;
+        if (!this.worker || !this.tempDir) {
+            throw new TTSError('beginStream() called but TTS engine is not initialized (worker or tempDir missing)');
+        }
 
         this.streamId++;
         this.streamAborted = false;
@@ -465,7 +517,10 @@ export class TTSEngine {
 
     /** Feed a streaming delta into the pipeline. */
     pushDelta(delta: string): void {
-        if (!this.enabled || !this.parser || this.streamAborted) return;
+        if (!this.enabled || this.streamAborted) return;
+        if (!this.parser) {
+            throw new TTSError('pushDelta() called but no active stream (call beginStream() first)');
+        }
 
         const chunks = this.parser.push(delta, this.nextChunkIndex);
         if (chunks.length > 0) {
@@ -477,7 +532,10 @@ export class TTSEngine {
 
     /** Flush remaining text and wait for all generation/playback to finish. */
     async flushStream(): Promise<void> {
-        if (!this.enabled || !this.parser) return;
+        if (!this.enabled) return;
+        if (!this.parser) {
+            throw new TTSError('flushStream() called but TTS pipeline is not initialized (no active stream)');
+        }
 
         // Flush any remaining text from the parser
         const remaining = this.parser.flush(this.nextChunkIndex);
@@ -492,6 +550,13 @@ export class TTSEngine {
         // Wait for both pumps to finish
         if (this.generationPromise) await this.generationPromise;
         if (this.playbackPromise) await this.playbackPromise;
+
+        // Surface any accumulated pipeline error
+        if (this.pipelineError) {
+            const err = this.pipelineError;
+            this.pipelineError = null;
+            throw err;
+        }
 
         this.debugLog('TTS-STREAM', 'Stream finished');
     }
@@ -527,14 +592,11 @@ export class TTSEngine {
                         const elapsed = Date.now() - startTime;
                         this.debugLog('TTS-STREAM', `Generated chunk ${String(chunk.index)} in ${String(elapsed)}ms (${result.audioDuration.toFixed(1)}s audio): "${chunk.text.slice(0, 60)}..."`);
                     } else {
-                        // Generation failed — reveal display text immediately so UI isn't blocked
-                        if (chunk.displayText && this.onRevealChunk) {
-                            this.onRevealChunk(chunk.displayText, 0);
-                        }
-                        // Skip this chunk to prevent playback deadlock
-                        if (this.nextPlayIndex === chunk.index) {
-                            this.nextPlayIndex++;
-                        }
+                        // Generation failed — set pipeline error, drain queue, and stop
+                        const detail = this.lastWorkerError ?? 'unknown worker error';
+                        this.pipelineError = new TTSError(`TTS generation failed for chunk ${String(chunk.index)}: ${detail}`);
+                        this.chunkQueue = [];
+                        break;
                     }
                     continue;
                 }
@@ -567,6 +629,10 @@ export class TTSEngine {
                         }
                         this.debugLog('TTS-STREAM', `Playing chunk ${String(wav.index)}`);
                         await this.playWav(wav.filePath);
+                    } catch (err: unknown) {
+                        this.pipelineError = err instanceof TTSError ? err : new TTSError(`Playback failed: ${String(err)}`);
+                        await unlink(wav.filePath).catch(() => { /* ignore */ });
+                        break;
                     } finally {
                         await unlink(wav.filePath).catch(() => { /* ignore */ });
                     }
@@ -574,7 +640,8 @@ export class TTSEngine {
                     continue;
                 }
 
-                // No WAV ready — check if generation is done and nothing left
+                // No WAV ready — check if generation is done and nothing left, or if a pipeline error occurred
+                if (this.pipelineError) break;
                 if (!this.generationRunning && this.wavQueue.length === 0 && this.chunkQueue.length === 0 && this.streamComplete) {
                     break;
                 }
@@ -590,7 +657,7 @@ export class TTSEngine {
     // ─── Playback ─────────────────────────────────────────────────────────
 
     private async playWav(filePath: string): Promise<void> {
-        return new Promise<void>((resolve) => {
+        return new Promise<void>((resolve, reject) => {
             try {
                 const proc = spawn('ffplay', ['-nodisp', '-autoexit', '-loglevel', 'quiet', filePath], {
                     stdio: 'ignore',
@@ -603,14 +670,12 @@ export class TTSEngine {
                 });
 
                 proc.on('error', (err: Error) => {
-                    this.debugLog('TTS', `Playback error: ${err.message}`);
                     this.currentProcess = null;
-                    resolve();
+                    reject(new TTSError(`Playback error: ${err.message}`));
                 });
             } catch (err: unknown) {
-                this.debugLog('TTS', `Playback spawn error: ${String(err)}`);
                 this.currentProcess = null;
-                resolve();
+                reject(new TTSError(`Playback spawn error: ${String(err)}`));
             }
         });
     }
@@ -620,6 +685,7 @@ export class TTSEngine {
     stop(): void {
         this.streamAborted = true;
         this.streamComplete = true;
+        this.pipelineError = null;
 
         // Kill current playback
         if (this.currentProcess) {

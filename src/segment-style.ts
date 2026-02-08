@@ -23,6 +23,7 @@ const SEGMENT_COLORS = {
 
 /** Per-segment-type header colors. */
 const HEADER_COLORS = {
+    narration: '#7a8a9a',
     dialogue: '#4a9acc',
     thought: '#b08adf',
     station_pa: '#3a8a3a',
@@ -41,7 +42,7 @@ export interface CardStyle {
 export function segmentCardStyle(type: DisplaySegment['type']): CardStyle {
     switch (type) {
         case 'narration':
-            return { bgColor: '#243348' };
+            return { bgColor: '#243348', borderColor: '#3a5068', borderStyle: 'rounded' };
         case 'dialogue':
             return { bgColor: '#2a3040', borderColor: '#4a7aaa', borderStyle: 'single' };
         case 'thought':
@@ -88,7 +89,7 @@ function runToChunk(run: ContentRun, baseColor: string): TextChunk {
 function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
     switch (seg.type) {
         case 'narration':
-            return [];
+            return [dim(fg(HEADER_COLORS.narration)('\u2726 Narrator')), fg('#5a6a7a')('\n')];
         case 'dialogue': {
             const name = seg.speakerName ?? 'Unknown';
             return [bold(fg(HEADER_COLORS.dialogue)(name)), fg('#5a6a7a')('\n')];

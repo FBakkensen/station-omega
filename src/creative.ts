@@ -190,8 +190,46 @@ function validateCreative(content: CreativeSchema, skeleton: StationSkeleton): C
     };
 }
 
+/** Room-generation milestone messages shown as individual rooms stream in. */
+const ROOM_MILESTONES = [
+    'Detailing the environment...',
+    'Scanning for biosignatures...',
+    'Recovering crew logs...',
+    'Analyzing environmental hazards...',
+    'Charting the deepest corridors...',
+];
+
+/** Build progress phases dynamically, using unique room IDs as milestones. */
+function buildProgressPhases(skeleton: StationSkeleton): Array<{ pattern: string; message: string }> {
+    const phases: Array<{ pattern: string; message: string }> = [
+        { pattern: '"stationName"', message: 'Naming the station...' },
+        { pattern: '"briefing"', message: 'Writing mission briefing...' },
+        { pattern: '"backstory"', message: 'Uncovering what happened...' },
+        { pattern: '"crewRoster"', message: 'Assembling the crew manifest...' },
+        { pattern: '"rooms"', message: 'Mapping station corridors...' },
+    ];
+
+    // Room generation is the longest phase. Spread milestones across individual
+    // rooms using their unique IDs for fine-grained progress updates.
+    const rooms = skeleton.rooms;
+    const count = Math.min(ROOM_MILESTONES.length, Math.max(0, rooms.length - 1));
+    for (let i = 0; i < count; i++) {
+        const idx = Math.round(((i + 1) * rooms.length) / (count + 1));
+        phases.push({ pattern: `"${rooms[idx].id}"`, message: ROOM_MILESTONES[i] });
+    }
+
+    phases.push(
+        { pattern: '"enemies"', message: 'Spawning threats...' },
+        { pattern: '"items"', message: 'Placing equipment...' },
+    );
+
+    return phases;
+}
+
 export async function generateCreativeContent(
     skeleton: StationSkeleton,
+    onProgress?: (message: string) => void,
+    debugLog?: (label: string, content: string) => void,
 ): Promise<CreativeContent> {
     const summary = buildSkeletonSummary(skeleton);
 
@@ -243,11 +281,30 @@ ${jsonSchema}
 Generate 3-5 crew roster members. Each room should have 1-2 crew logs. Output ONLY the JSON object.`;
 
     try {
-        const result = await run(creativeAgent, userPrompt, {
+        const stream = await run(creativeAgent, userPrompt, {
             maxTurns: 1,
+            stream: true,
         });
 
-        const raw = result.finalOutput ?? '{}';
+        const phases = buildProgressPhases(skeleton);
+        let accumulated = '';
+        let phaseIndex = 0;
+        for await (const event of stream) {
+            if (onProgress && event.type === 'raw_model_stream_event') {
+                const data = event.data as { type: string; delta?: string };
+                if (data.type === 'output_text_delta' && data.delta) {
+                    accumulated += data.delta;
+                    // Check if we've reached the next JSON section
+                    while (phaseIndex < phases.length
+                        && accumulated.includes(phases[phaseIndex].pattern)) {
+                        onProgress(phases[phaseIndex].message);
+                        phaseIndex++;
+                    }
+                }
+            }
+        }
+
+        const raw = stream.finalOutput ?? '{}';
 
         // Extract JSON from potential markdown code fences
         let jsonStr = raw.trim();
@@ -258,8 +315,10 @@ Generate 3-5 crew roster members. Each room should have 1-2 crew logs. Output ON
 
         const parsed = JSON.parse(jsonStr) as CreativeSchema;
         return validateCreative(parsed, skeleton);
-    } catch {
-        // Return fallback defaults
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        debugLog?.('CREATIVE', `Creative generation failed: ${message}`);
+        onProgress?.('Generation failed — using fallback content...');
         return validateCreative({
             stationName: 'Station Omega',
             briefing: 'Board the station. Complete the mission. Escape alive.',

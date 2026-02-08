@@ -552,7 +552,9 @@ async function main() {
         ui.showGenerating();
 
         const skeleton = generateSkeleton({ seed, difficulty: 'normal', storyArc: arc });
-        const creative = await generateCreativeContent(skeleton);
+        const creative = await generateCreativeContent(skeleton, (message) => {
+            ui.updateLoadingMessage(message);
+        }, debugLog);
         const station = assembleStation(skeleton, creative);
 
         // GAMEPLAY

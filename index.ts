@@ -1,4 +1,5 @@
-import { CopilotClient } from '@github/copilot-sdk';
+import { Agent, run } from '@openai/agents';
+import type { RunContext, RunStreamEvent } from '@openai/agents';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
 import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, NPCDisplayInfo, GameStatus, StoryArc } from './src/types.js';
@@ -7,7 +8,7 @@ import { generateCreativeContent } from './src/creative.js';
 import { assembleStation } from './src/assembly.js';
 import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/character.js';
 import { createGameTools } from './src/tools.js';
-import type { ToolContext, ChoiceSet } from './src/tools.js';
+import type { GameContext, ChoiceSet } from './src/tools.js';
 import { buildSystemPrompt } from './src/prompt.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
@@ -178,10 +179,51 @@ function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine
     ];
 }
 
+// ─── Dynamic Instructions ───────────────────────────────────────────────────
+
+function buildGameInstructions(runContext: RunContext<GameContext>): string {
+    const { state, station, build } = runContext.context;
+
+    // STATIC prefix (cached by OpenAI — must come first, >1024 tokens)
+    const staticRules = buildSystemPrompt(station, build);
+
+    // VARIABLE suffix (game state that changes each turn)
+    const parts: string[] = [];
+
+    // Active events
+    if (state.activeEvents.length > 0) {
+        parts.push(getEventContext(state.activeEvents));
+    }
+
+    // NPC behavior hints
+    const roomNpcs = [...station.npcs.values()].filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+    for (const npc of roomNpcs) {
+        if (npc.behaviors.has('can_flee') && npc.currentHp < npc.maxHp * npc.fleeThreshold) {
+            parts.push(`NPC HINT: ${npc.name} looks ready to flee.`);
+        }
+        if (npc.behaviors.has('can_beg') && npc.currentHp < npc.maxHp * 0.3) {
+            parts.push(`NPC HINT: ${npc.name} is whimpering, seeming to beg for mercy.`);
+        }
+        if (npc.isAlly) {
+            parts.push(`ALLY: ${npc.name} is fighting alongside you.`);
+        }
+    }
+
+    // Moral profile hint
+    const { mercy, sacrifice, pragmatic } = state.moralProfile.tendencies;
+    if (mercy + sacrifice + pragmatic > 0) {
+        const dominant = mercy >= sacrifice && mercy >= pragmatic ? 'merciful'
+            : sacrifice >= pragmatic ? 'self-sacrificing' : 'pragmatic';
+        parts.push(`MORAL PROFILE: The player has shown ${dominant} tendencies.`);
+    }
+
+    const dynamicState = parts.join('\n\n');
+    return dynamicState ? `${staticRules}\n\n# Current State\n${dynamicState}` : staticRules;
+}
+
 // ─── Run Gameplay ───────────────────────────────────────────────────────────
 
 async function runGameplay(
-    client: CopilotClient,
     ui: GameUI,
     station: GeneratedStation,
     classId: CharacterClassId,
@@ -219,8 +261,8 @@ async function runGameplay(
     // Configure TTS for this run
     ttsEngine.setNPCs(station.npcs);
 
-    // Tool context
-    const toolCtx: ToolContext = {
+    // Game context (injected into tools and instructions via RunContext)
+    const gameCtx: GameContext = {
         state,
         station,
         build,
@@ -228,8 +270,7 @@ async function runGameplay(
         onChoices: (cs) => { pendingChoices = cs; },
     };
 
-    const tools = createGameTools(toolCtx);
-    const systemMessage = buildSystemPrompt(station, build);
+    const tools = createGameTools(classId);
 
     // Wire TTS reveal callback — syncs text display with audio playback
     ttsEngine.onRevealChunk = (displayText, durationSec) => {
@@ -238,106 +279,89 @@ async function runGameplay(
     };
 
     initDebugLog();
-    debugLog('SYSTEM', systemMessage);
+    debugLog('SYSTEM', buildSystemPrompt(station, build));
     ui.setDebugLog(debugLog);
 
-    // Create gameplay session
-    debugLog('SESSION', 'Creating session...');
-    const session = await client.createSession({
+    // Create game agent with dynamic instructions
+    const gameAgent = new Agent<GameContext>({
+        name: 'GameMaster',
         model: 'gpt-4.1',
-        streaming: true,
+        instructions: buildGameInstructions,
         tools,
-        systemMessage: { content: systemMessage },
-        hooks: {
-            onUserPromptSubmitted: () => {
-                state.turnCount++;
-                state.metrics.turnCount++;
-
-                // Tick active events
-                const eventContext = eventTracker.tickActiveEvents(state);
-
-                // Check for new random event
-                const newEvent = eventTracker.checkRandomEvent(state);
-                if (newEvent) {
-                    state.activeEvents.push(newEvent);
-                    eventContext.push(`NEW EVENT: ${newEvent.type.replace(/_/g, ' ').toUpperCase()} — ${newEvent.effect}`);
-                }
-
-                // Build context injection
-                const parts: string[] = [];
-                if (eventContext.length > 0) parts.push(eventContext.join('\n'));
-                if (state.activeEvents.length > 0) parts.push(getEventContext(state.activeEvents));
-
-                // NPC behavior hints
-                const roomNpcs = [...station.npcs.values()].filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
-                for (const npc of roomNpcs) {
-                    if (npc.behaviors.has('can_flee') && npc.currentHp < npc.maxHp * npc.fleeThreshold) {
-                        parts.push(`NPC HINT: ${npc.name} looks ready to flee.`);
-                    }
-                    if (npc.behaviors.has('can_beg') && npc.currentHp < npc.maxHp * 0.3) {
-                        parts.push(`NPC HINT: ${npc.name} is whimpering, seeming to beg for mercy.`);
-                    }
-                    if (npc.isAlly) {
-                        parts.push(`ALLY: ${npc.name} is fighting alongside you.`);
-                    }
-                }
-
-                // Moral profile hint
-                const { mercy, sacrifice, pragmatic } = state.moralProfile.tendencies;
-                if (mercy + sacrifice + pragmatic > 0) {
-                    const dominant = mercy >= sacrifice && mercy >= pragmatic ? 'merciful'
-                        : sacrifice >= pragmatic ? 'self-sacrificing' : 'pragmatic';
-                    parts.push(`MORAL PROFILE: The player has shown ${dominant} tendencies.`);
-                }
-
-                if (parts.length > 0) {
-                    return { additionalContext: parts.join('\n\n') };
-                }
-                return undefined;
-            },
-            onPostToolUse: (input) => {
-                // After move_to: check NPC flee behavior
-                if (input.toolName === 'move_to') {
-                    const prevRoom = state.currentRoom;
-                    for (const npc of station.npcs.values()) {
-                        if (npc.roomId === prevRoom && npc.behaviors.has('can_flee') && npc.memory.hasFled) {
-                            // Already handled in attack tool
-                        }
-                    }
-                }
-
-                // After attack: check HP for game over
-                if (input.toolName === 'attack' && state.hp <= 0) {
-                    state.gameOver = true;
-                }
-
-                return undefined;
-            },
+        modelSettings: {
+            store: true,
+            promptCacheRetention: '24h',
         },
     });
 
-    // Wire up streaming
-    let currentResponse = '';
-    let streamStarted = false;
-    let turnId = 0;
-    session.on('assistant.message_delta', (event) => {
-        const delta = event.data.deltaContent;
-        currentResponse += delta;
-        ui.bufferNarrativeDelta(delta);
-        if (!streamStarted) {
-            ttsEngine.beginStream();
-            streamStarted = true;
+    // Post-tool-use hook: check for game over after attack
+    gameAgent.on('agent_tool_end', (_ctx, toolDef) => {
+        if (toolDef.name === 'attack' && state.hp <= 0) {
+            state.gameOver = true;
         }
-        ttsEngine.pushDelta(delta);
     });
 
-    session.on('session.idle', () => {
-        debugLog('SESSION', `idle fired, audioEnabled=${String(ttsEngine.isAudioEnabled())}`);
+    let lastResponseId: string | undefined;
+    let turnId = 0;
+
+    function tickTurn(): void {
+        state.turnCount++;
+        state.metrics.turnCount++;
+
+        // Tick active events
+        const eventContext = eventTracker.tickActiveEvents(state);
+
+        // Check for new random event
+        const newEvent = eventTracker.checkRandomEvent(state);
+        if (newEvent) {
+            state.activeEvents.push(newEvent);
+            eventContext.push(`NEW EVENT: ${newEvent.type.replace(/_/g, ' ').toUpperCase()} — ${newEvent.effect}`);
+        }
+
+        // Log event context for debugging
+        if (eventContext.length > 0) {
+            debugLog('EVENTS', eventContext.join('\n'));
+        }
+    }
+
+    async function sendPrompt(prompt: string): Promise<void> {
+        tickTurn();
+
+        const stream = await run(gameAgent, prompt, {
+            stream: true,
+            context: gameCtx,
+            maxTurns: 10,
+            previousResponseId: lastResponseId,
+        });
+
+        // Process streaming events
+        let currentResponse = '';
+        let streamStarted = false;
+        for await (const event of stream as AsyncIterable<RunStreamEvent>) {
+            if (event.type === 'raw_model_stream_event') {
+                const data = event.data as { type: string; delta?: string };
+                if (data.type === 'output_text_delta' && data.delta) {
+                    const delta = data.delta;
+                    currentResponse += delta;
+                    ui.bufferNarrativeDelta(delta);
+                    if (!streamStarted) {
+                        ttsEngine.beginStream();
+                        streamStarted = true;
+                    }
+                    ttsEngine.pushDelta(delta);
+                }
+            }
+        }
+
+        // Capture response ID for next turn's chaining
+        lastResponseId = stream.lastResponseId;
+
+        // Log the response
         if (currentResponse) {
             debugLog('AI', currentResponse);
-            currentResponse = '';
         }
-        streamStarted = false;
+
+        // Post-stream finalization
         ui.disableCombatGlitch();
         ui.updateStatus(getStatus(state, station));
 
@@ -353,23 +377,24 @@ async function runGameplay(
             }
         };
 
-        // Always flush through the pipeline (handles both audio and silent typewriter)
+        // Flush TTS pipeline and finalize UI
         const thisTurn = turnId;
         debugLog('SESSION', 'Waiting for TTS flushStream...');
-        void ttsEngine.flushStream().then(() => {
+        try {
+            await ttsEngine.flushStream();
             if (turnId !== thisTurn) {
                 debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
                 return;
             }
             debugLog('SESSION', 'flushStream resolved');
             afterStream();
-        }).catch((err: unknown) => {
+        } catch (err: unknown) {
             debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
             ttsEngine.stop();
             ui.appendNarrative('*Voice system error — audio disabled for this response.*');
             afterStream();
-        });
-    });
+        }
+    }
 
     // Update UI
     ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
@@ -383,13 +408,13 @@ async function runGameplay(
     // Kick off the game
     const openingPrompt = `I step through the airlock onto ${station.stationName}. What do I see?`;
     debugLog('PLAYER', openingPrompt);
-    debugLog('SESSION', 'Calling sendAndWait for opening prompt...');
+    debugLog('SESSION', 'Sending opening prompt...');
     ui.showTypingIndicator();
     try {
-        await session.sendAndWait({ prompt: openingPrompt });
-        debugLog('SESSION', 'Opening sendAndWait completed.');
+        await sendPrompt(openingPrompt);
+        debugLog('SESSION', 'Opening prompt completed.');
     } catch (err: unknown) {
-        debugLog('SESSION', `Opening sendAndWait error: ${String(err)}`);
+        debugLog('SESSION', `Opening prompt error: ${String(err)}`);
         ttsEngine.stop();
         ui.hideTypingIndicator();
         ui.finalizeDelta();
@@ -455,8 +480,8 @@ async function runGameplay(
             debugLog('PLAYER', input);
             ui.appendPlayerCommand(input);
             ui.showTypingIndicator();
-            session.sendAndWait({ prompt: input }).catch((err: unknown) => {
-                debugLog('SESSION', `sendAndWait error: ${String(err)}`);
+            sendPrompt(input).catch((err: unknown) => {
+                debugLog('SESSION', `sendPrompt error: ${String(err)}`);
                 ttsEngine.stop();
                 ui.hideTypingIndicator();
                 ui.finalizeDelta();
@@ -476,15 +501,13 @@ async function runGameplay(
     // Show run summary
     await ui.showRunSummary(score, state.metrics);
 
-    // Stop any playing TTS and clean up session
+    // Stop any playing TTS
     ttsEngine.stop();
-    await session.destroy();
 }
 
 // ─── Main Loop ──────────────────────────────────────────────────────────────
 
 async function main() {
-    const client = new CopilotClient();
     const ui = new GameUI();
     await ui.init();
 
@@ -528,17 +551,16 @@ async function main() {
         ui.showGenerating();
 
         const skeleton = generateSkeleton({ seed, difficulty: 'normal', storyArc: arc });
-        const creative = await generateCreativeContent(client, skeleton);
+        const creative = await generateCreativeContent(skeleton);
         const station = assembleStation(skeleton, creative);
 
         // GAMEPLAY
         ui.showGameplayScreen();
-        await runGameplay(client, ui, station, classId, globalTTS);
+        await runGameplay(ui, station, classId, globalTTS);
     }
 
     await globalTTS.cleanup();
     ui.destroy();
-    await client.stop();
     process.exit(0);
 }
 

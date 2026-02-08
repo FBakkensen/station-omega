@@ -1,4 +1,4 @@
-import { CopilotClient } from '@github/copilot-sdk';
+import { Agent, run } from '@openai/agents';
 import type {
     StationSkeleton,
     CreativeContent,
@@ -56,6 +56,14 @@ interface CreativeSchema {
         useNarration?: string;
     }>;
 }
+
+// Module-level creative agent (reusable, stateless)
+const creativeAgent = new Agent({
+    name: 'CreativeGenerator',
+    model: 'gpt-4.1',
+    instructions: CREATIVE_PROMPT,
+    modelSettings: { store: false },
+});
 
 function buildSkeletonSummary(skeleton: StationSkeleton): string {
     const roomSummaries = skeleton.rooms.map(r => ({
@@ -183,7 +191,6 @@ function validateCreative(content: CreativeSchema, skeleton: StationSkeleton): C
 }
 
 export async function generateCreativeContent(
-    client: CopilotClient,
     skeleton: StationSkeleton,
 ): Promise<CreativeContent> {
     const summary = buildSkeletonSummary(skeleton);
@@ -235,19 +242,12 @@ ${jsonSchema}
 
 Generate 3-5 crew roster members. Each room should have 1-2 crew logs. Output ONLY the JSON object.`;
 
-    const session = await client.createSession({
-        model: 'gpt-4.1',
-        streaming: false,
-        systemMessage: { content: CREATIVE_PROMPT },
-    });
-
     try {
-        const response = await session.sendAndWait(
-            { prompt: userPrompt },
-            120000,
-        );
+        const result = await run(creativeAgent, userPrompt, {
+            maxTurns: 1,
+        });
 
-        const raw = response?.data.content ?? '{}';
+        const raw = result.finalOutput ?? '{}';
 
         // Extract JSON from potential markdown code fences
         let jsonStr = raw.trim();
@@ -269,7 +269,5 @@ Generate 3-5 crew roster members. Each room should have 1-2 crew logs. Output ON
             enemies: [],
             items: [],
         }, skeleton);
-    } finally {
-        await session.destroy();
     }
 }

@@ -1,5 +1,6 @@
-import { defineTool } from '@github/copilot-sdk';
-import type { Tool } from '@github/copilot-sdk';
+import { tool } from '@openai/agents';
+import type { RunContext, Tool } from '@openai/agents';
+import { z } from 'zod';
 import type {
     GameState,
     GeneratedStation,
@@ -65,57 +66,59 @@ export interface ChoiceSet {
 }
 export type ChoicesCallback = (choiceSet: ChoiceSet) => void;
 
-// ─── Tool Factory ───────────────────────────────────────────────────────────
+// ─── Game Context (injected via RunContext) ─────────────────────────────────
 
-export interface ToolContext {
+export interface GameContext {
     state: GameState;
     station: GeneratedStation;
     build: CharacterBuild;
-    onCombatStart: CombatStartCallback | null;
-    onChoices: ChoicesCallback | null;
+    onCombatStart: CombatStartCallback;
+    onChoices: ChoicesCallback;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool array requires 'any' for variance compatibility with mixed parameter types
-export function createGameTools(ctx: ToolContext): Tool<any>[] {
-    const { state, station, build } = ctx;
+function getCtx(ctx: RunContext<GameContext> | undefined): GameContext {
+    if (!ctx) throw new Error('RunContext missing — tool called outside of agent run');
+    return ctx.context;
+}
 
-    function defineSuggestTool(
-        name: string, description: string, title: string,
-        fieldName: string, fieldDesc: string, note: string,
-    ) {
-        return defineTool(name, {
-            description,
-            parameters: {
-                type: 'object',
-                properties: {
-                    [fieldName]: {
-                        type: 'array',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                label: { type: 'string', description: 'Short punchy name (2-6 words)' },
-                                description: { type: 'string', description: 'One-sentence evocative description' },
-                            },
-                            required: ['label', 'description'],
-                        },
-                        description: fieldDesc,
-                    },
-                },
-                required: [fieldName],
-            },
-            handler: (args: Record<string, { label: string; description: string }[]>) => {
-                ctx.onChoices?.({ title, choices: args[fieldName] });
-                return { presented: true, note };
-            },
-        });
-    }
+// ─── Suggest Tool Helper ────────────────────────────────────────────────────
 
-    const lookAround = defineTool('look_around', {
+function defineSuggestTool(
+    name: string, description: string, title: string,
+    fieldName: string, fieldDesc: string, note: string,
+): Tool<GameContext> {
+    // Zod schema for suggestion tools: an array of {label, description} under a dynamic key
+    const schema = z.object({
+        [fieldName]: z.array(z.object({
+            label: z.string().describe('Short punchy name (2-6 words)'),
+            description: z.string().describe('One-sentence evocative description'),
+        })).describe(fieldDesc),
+    });
+
+    return tool({
+        name,
+        description,
+        parameters: schema,
+        execute: (args: z.infer<typeof schema>, ctx?: RunContext<GameContext>) => {
+            const choices = (args as Record<string, { label: string; description: string }[]>)[fieldName];
+            ctx?.context.onChoices({ title, choices });
+            return JSON.stringify({ presented: true, note });
+        },
+    });
+}
+
+// ─── Tool Factory ───────────────────────────────────────────────────────────
+
+export function createGameTools(classId: string): Tool<GameContext>[] {
+
+    const lookAround = tool({
+        name: 'look_around',
         description: 'Look around the current room. Returns details about the environment, items, threats, and exits.',
-        parameters: { type: 'object', properties: {}, required: [] },
-        handler: () => {
+        parameters: z.object({}),
+        execute: (_args, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
             const room = station.rooms.get(state.currentRoom);
-            if (!room) return { error: 'Invalid room.' };
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
             const drop = state.roomDrops.get(state.currentRoom) ?? null;
@@ -129,7 +132,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
             const currentStep = objectives.steps[objectives.currentStepIndex] as typeof objectives.steps[number] | undefined;
             const isObjectiveHere = currentStep !== undefined && currentStep.roomId === state.currentRoom && !currentStep.completed;
 
-            return {
+            return JSON.stringify({
                 room_name: room.name,
                 room_index: `${String([...station.rooms.keys()].indexOf(state.currentRoom) + 1)} of ${String(station.rooms.size)}`,
                 description: room.descriptionSeed,
@@ -155,21 +158,19 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 },
                 objective_hint: isObjectiveHere ? currentStep.description : null,
                 active_events: state.activeEvents.map(e => ({ type: e.type, effect: e.effect, turns_remaining: e.turnsRemaining })),
-            };
+            });
         },
     });
 
-    const moveTo = defineTool('move_to', {
+    const moveTo = tool({
+        name: 'move_to',
         description: 'Move to an adjacent room by name. Use the room names from look_around exits.',
-        parameters: {
-            type: 'object',
-            properties: {
-                room: { type: 'string', description: 'Name of the room to move to' },
-            },
-            required: ['room'],
-        },
-        handler: (args: { room: string }) => {
-            if (state.gameOver) return { error: 'The game is over.' };
+        parameters: z.object({
+            room: z.string().describe('Name of the room to move to'),
+        }),
+        execute: (args: { room: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             // Find room by name
             let targetId: string | null = null;
@@ -179,12 +180,12 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     break;
                 }
             }
-            if (!targetId) return { error: `Unknown room: "${args.room}".` };
+            if (!targetId) return JSON.stringify({ error: `Unknown room: "${args.room}".` });
 
             const adjacent = getAdjacentRooms(state, station);
             if (!adjacent.includes(targetId)) {
                 const targetRoom = station.rooms.get(targetId);
-                return { error: `You can't reach ${targetRoom?.name ?? args.room} from here. Check available exits.` };
+                return JSON.stringify({ error: `You can't reach ${targetRoom?.name ?? args.room} from here. Check available exits.` });
             }
 
             // Lock check
@@ -193,7 +194,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 const hasKey = state.inventory.includes(targetRoom.lockedBy);
                 if (!hasKey) {
                     const keyName = getItemName(targetRoom.lockedBy, station);
-                    return { error: `The door is locked. You need: ${keyName}.` };
+                    return JSON.stringify({ error: `The door is locked. You need: ${keyName}.` });
                 }
             }
 
@@ -203,13 +204,13 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 state.won = true;
                 state.currentRoom = targetId;
                 state.metrics.won = true;
-                return {
+                return JSON.stringify({
                     success: true,
                     room_name: targetRoom?.name ?? 'Escape',
                     event: 'VICTORY! You made it to the escape point. Mission complete.',
                     game_over: true,
                     won: true,
-                };
+                });
             }
 
             state.currentRoom = targetId;
@@ -221,7 +222,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
             const room = station.rooms.get(targetId);
             const threat = getRoomThreat(targetId, station);
 
-            return {
+            return JSON.stringify({
                 success: true,
                 room_name: room?.name ?? targetId,
                 room_index: `${String([...station.rooms.keys()].indexOf(targetId) + 1)} of ${String(station.rooms.size)}`,
@@ -232,24 +233,22 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 ambient_feel: room?.sensory.tactile ?? '',
                 is_revisit: (state.roomVisitCount.get(targetId) ?? 0) > 1,
                 enemy_defeated_here: room?.threat !== null && getRoomThreat(targetId, station) === null,
-            };
+            });
         },
     });
 
-    const pickUpItem = defineTool('pick_up_item', {
+    const pickUpItem = tool({
+        name: 'pick_up_item',
         description: 'Pick up an item in the current room and add it to your inventory.',
-        parameters: {
-            type: 'object',
-            properties: {
-                item: { type: 'string', description: 'Name of the item to pick up' },
-            },
-            required: ['item'],
-        },
-        handler: (args: { item: string }) => {
-            if (state.gameOver) return { error: 'The game is over.' };
+        parameters: z.object({
+            item: z.string().describe('Name of the item to pick up'),
+        }),
+        execute: (args: { item: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const room = station.rooms.get(state.currentRoom);
-            if (!room) return { error: 'Invalid room.' };
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             // Find item by name
             const itemName = args.item.toLowerCase();
@@ -264,11 +263,11 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
             // Threat blocks pickup
             const threat = getRoomThreat(state.currentRoom, station);
             if (threat) {
-                return { error: `The ${threat.name} is blocking the item. Deal with the threat first.` };
+                return JSON.stringify({ error: `The ${threat.name} is blocking the item. Deal with the threat first.` });
             }
 
             if (state.inventory.length >= state.maxInventory) {
-                return { error: `Your inventory is full (${String(state.inventory.length)}/${String(state.maxInventory)}). Drop or use something first.` };
+                return JSON.stringify({ error: `Your inventory is full (${String(state.inventory.length)}/${String(state.maxInventory)}). Drop or use something first.` });
             }
 
             // Check room loot
@@ -281,22 +280,22 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 if (item?.effect.type === 'objective') {
                     state.hasObjectiveItem = true;
                     state.metrics.itemsCollected.push(actualId);
-                    return {
+                    return JSON.stringify({
                         success: true,
                         item: item.name,
                         message: `You pick up the ${item.name}. ${item.description}`,
                         objective: 'Continue your mission.',
-                    };
+                    });
                 }
 
                 state.inventory.push(actualId);
                 state.metrics.itemsCollected.push(actualId);
-                return {
+                return JSON.stringify({
                     success: true,
                     item: item?.name ?? actualId,
                     inventory: state.inventory.map(id => getItemName(id, station)),
                     slots_remaining: state.maxInventory - state.inventory.length,
-                };
+                });
             }
 
             // Check enemy drop
@@ -305,32 +304,30 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 state.roomDrops.delete(state.currentRoom);
                 state.inventory.push(drop);
                 state.metrics.itemsCollected.push(drop);
-                return {
+                return JSON.stringify({
                     success: true,
                     item: getItemName(drop, station),
                     inventory: state.inventory.map(id => getItemName(id, station)),
                     slots_remaining: state.maxInventory - state.inventory.length,
-                };
+                });
             }
 
             if (!roomLootAvailable && !drop) {
-                return { error: 'There\'s nothing left to pick up in this room.' };
+                return JSON.stringify({ error: 'There\'s nothing left to pick up in this room.' });
             }
-            return { error: `There is no "${args.item}" here.` };
+            return JSON.stringify({ error: `There is no "${args.item}" here.` });
         },
     });
 
-    const useItem = defineTool('use_item', {
+    const useItem = tool({
+        name: 'use_item',
         description: 'Use an item from your inventory. Effects vary by item type: medical items heal, weapon items boost damage, utility items have special effects.',
-        parameters: {
-            type: 'object',
-            properties: {
-                item: { type: 'string', description: 'Name of the item to use' },
-            },
-            required: ['item'],
-        },
-        handler: (args: { item: string }) => {
-            if (state.gameOver) return { error: 'The game is over.' };
+        parameters: z.object({
+            item: z.string().describe('Name of the item to use'),
+        }),
+        execute: (args: { item: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const itemName = args.item.toLowerCase();
             let foundIdx = -1;
@@ -346,15 +343,15 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
             }
 
             if (foundIdx === -1) {
-                return { error: `You don't have "${args.item}" in your inventory.`, inventory: state.inventory.map(id => getItemName(id, station)) };
+                return JSON.stringify({ error: `You don't have "${args.item}" in your inventory.`, inventory: state.inventory.map(id => getItemName(id, station)) });
             }
 
             const item = station.items.get(foundId);
-            if (!item) return { error: 'Item data missing.' };
+            if (!item) return JSON.stringify({ error: 'Item data missing.' });
 
             // Key items are not consumed
             if (item.isKeyItem) {
-                return { success: true, item: item.name, effect: `The ${item.name} is a key item. Keep it.` };
+                return JSON.stringify({ success: true, item: item.name, effect: `The ${item.name} is a key item. Keep it.` });
             }
 
             state.inventory.splice(foundIdx, 1);
@@ -366,38 +363,37 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     const healed = Math.min(healAmount, state.maxHp - state.hp);
                     state.hp += healed;
                     state.metrics.totalDamageHealed += healed;
-                    return { success: true, item: item.name, effect: `Healed ${String(healed)} HP. ${item.useNarration}`, player_condition: hpDescription(state) };
+                    return JSON.stringify({ success: true, item: item.name, effect: `Healed ${String(healed)} HP. ${item.useNarration}`, player_condition: hpDescription(state) });
                 }
                 case 'damage_boost': {
                     state.plasmaBoost = true;
-                    return { success: true, item: item.name, effect: `${item.useNarration} Next attack deals +${String(item.effect.value)} damage.` };
+                    return JSON.stringify({ success: true, item: item.name, effect: `${item.useNarration} Next attack deals +${String(item.effect.value)} damage.` });
                 }
                 case 'shield': {
                     state.shieldActive = true;
-                    return { success: true, item: item.name, effect: `${item.useNarration} Shield absorbs ${String(item.effect.value)} damage.` };
+                    return JSON.stringify({ success: true, item: item.name, effect: `${item.useNarration} Shield absorbs ${String(item.effect.value)} damage.` });
                 }
                 default:
-                    return { success: true, item: item.name, effect: item.useNarration };
+                    return JSON.stringify({ success: true, item: item.name, effect: item.useNarration });
             }
         },
     });
 
-    const attackTool = defineTool('attack', {
+    const attackTool = tool({
+        name: 'attack',
         description: 'Attack the enemy in the current room with the player\'s chosen approach. Only call this AFTER the player has chosen or described their approach.',
-        parameters: {
-            type: 'object',
-            properties: {
-                approach: { type: 'string', description: 'How you attack — your strategy or action' },
-            },
-            required: ['approach'],
-        },
-        handler: (args: { approach: string }) => {
-            if (state.gameOver) return { error: 'The game is over.' };
+        parameters: z.object({
+            approach: z.string().describe('How you attack — your strategy or action'),
+        }),
+        execute: (args: { approach: string }, ctx?: RunContext<GameContext>) => {
+            const gameCtx = getCtx(ctx);
+            const { state, station, build } = gameCtx;
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const npc = getRoomThreat(state.currentRoom, station);
-            if (!npc) return { error: 'There is no enemy to fight here.' };
+            if (!npc) return JSON.stringify({ error: 'There is no enemy to fight here.' });
 
-            ctx.onCombatStart?.();
+            gameCtx.onCombatStart();
 
             // Player attacks
             let playerDamage = randInt(build.baseDamage[0], build.baseDamage[1]);
@@ -406,7 +402,6 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 state.plasmaBoost = false;
             }
             if (state.activeEvents.some(e => e.type === 'radiation_spike')) {
-                // Radiation spike reduces the player's combat output while active.
                 playerDamage = Math.max(1, Math.floor(playerDamage * 0.75));
             }
             npc.currentHp -= playerDamage;
@@ -440,14 +435,12 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 if (hpPct <= npc.fleeThreshold) {
                     fled = true;
                     npc.memory.hasFled = true;
-                    // Move NPC to adjacent room
                     const room = station.rooms.get(state.currentRoom);
                     const fleeTargets = room?.connections.filter(id => id !== state.currentRoom) ?? [];
                     if (fleeTargets.length > 0) {
                         const fleeTarget = fleeTargets[randInt(0, fleeTargets.length - 1)];
                         npc.roomId = fleeTarget;
                         npc.memory.fledTo = fleeTarget;
-                        // Clear threat from current room
                         if (room) room.threat = null;
                     }
                 }
@@ -458,7 +451,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 state.hp = 0;
                 state.gameOver = true;
                 state.metrics.deathCause = `Killed by ${npc.name}`;
-                return {
+                return JSON.stringify({
                     approach: args.approach,
                     player_damage_dealt: playerDamage,
                     enemy_name: npc.name,
@@ -468,7 +461,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     player_died: true,
                     game_over: true,
                     message: 'You have been killed.',
-                };
+                });
             }
 
             const result: Record<string, unknown> = {
@@ -493,7 +486,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 result.flee_message = `The ${npc.name} turns and flees deeper into the station!`;
             }
 
-            return result;
+            return JSON.stringify(result);
         },
     });
 
@@ -508,24 +501,21 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
 
     // ─── New Tools ──────────────────────────────────────────────────────────
 
-    const attemptAction = defineTool('attempt_action', {
+    const attemptAction = tool({
+        name: 'attempt_action',
         description: 'Resolve a creative player action through dice roll. The AI assesses domain and difficulty; the game engine resolves outcome. Use for any non-standard action (barricading, hacking, improvising, etc.).',
-        parameters: {
-            type: 'object',
-            properties: {
-                action: { type: 'string', description: 'What the player is attempting' },
-                domain: { type: 'string', enum: ['combat', 'tech', 'medical', 'social', 'survival', 'science'], description: 'The skill domain' },
-                difficulty: { type: 'string', enum: ['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible'], description: 'How hard this is' },
-                relevant_items: { type: 'array', items: { type: 'string' }, description: 'Inventory items that help' },
-                environmental_factors: { type: 'array', items: { type: 'string' }, description: 'Room features that help' },
-            },
-            required: ['action', 'domain', 'difficulty'],
-        },
-        handler: (args: { action: string; domain: string; difficulty: string; relevant_items?: string[]; environmental_factors?: string[] }) => {
-            if (state.gameOver) return { error: 'The game is over.' };
+        parameters: z.object({
+            action: z.string().describe('What the player is attempting'),
+            domain: z.enum(['combat', 'tech', 'medical', 'social', 'survival', 'science']).describe('The skill domain'),
+            difficulty: z.enum(['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible']).describe('How hard this is'),
+            relevant_items: z.array(z.string()).default([]).describe('Inventory items that help'),
+            environmental_factors: z.array(z.string()).default([]).describe('Room features that help'),
+        }),
+        execute: (args: { action: string; domain: ActionDomain; difficulty: ActionDifficulty; relevant_items: string[]; environmental_factors: string[] }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
-            const domain = args.domain as ActionDomain;
-            const difficulty = args.difficulty as ActionDifficulty;
+            const { domain, difficulty } = args;
 
             const TARGETS: Record<ActionDifficulty, number> = {
                 trivial: 95, easy: 80, moderate: 60, hard: 40, extreme: 20, impossible: 5,
@@ -542,10 +532,9 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
             }
 
             // Items
-            const itemBonus = Math.min((args.relevant_items?.length ?? 0) * 5, 15);
+            const itemBonus = Math.min(args.relevant_items.length * 5, 15);
             if (itemBonus > 0) {
-                // Verify items exist in inventory
-                const validItems = (args.relevant_items ?? []).filter(name =>
+                const validItems = args.relevant_items.filter(name =>
                     state.inventory.some(id => {
                         const item = station.items.get(id);
                         return item?.name.toLowerCase() === name.toLowerCase() || id.toLowerCase() === name.toLowerCase();
@@ -559,7 +548,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
             }
 
             // Environment
-            const envBonus = Math.min((args.environmental_factors?.length ?? 0) * 3, 9);
+            const envBonus = Math.min(args.environmental_factors.length * 3, 9);
             if (envBonus > 0) {
                 modifiers.environment = envBonus;
                 target += envBonus;
@@ -606,7 +595,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
 
             state.metrics.creativeActionsAttempted++;
 
-            return {
+            return JSON.stringify({
                 action: args.action,
                 outcome,
                 roll,
@@ -615,24 +604,22 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 damage_dealt_to_player: damageDealt > 0 ? damageDealt : undefined,
                 player_condition: hpDescription(state),
                 game_over: state.gameOver || undefined,
-            };
+            });
         },
     });
 
-    const interactNPC = defineTool('interact_npc', {
+    const interactNPC = tool({
+        name: 'interact_npc',
         description: 'Interact with an NPC non-violently. Negotiate, intimidate, trade, or recruit. Only works on NPCs with appropriate behavior flags.',
-        parameters: {
-            type: 'object',
-            properties: {
-                approach: { type: 'string', enum: ['negotiate', 'intimidate', 'offer_mercy', 'trade', 'ask_info', 'recruit'], description: 'Interaction approach' },
-                target_npc: { type: 'string', description: 'Name of the NPC' },
-                leverage: { type: 'string', description: 'What the player is offering or using as leverage' },
-                tone: { type: 'string', enum: ['aggressive', 'calm', 'desperate', 'commanding', 'empathetic'], description: 'Tone of approach' },
-            },
-            required: ['approach', 'target_npc', 'tone'],
-        },
-        handler: (args: { approach: string; target_npc: string; leverage?: string; tone: string }) => {
-            if (state.gameOver) return { error: 'The game is over.' };
+        parameters: z.object({
+            approach: z.enum(['negotiate', 'intimidate', 'offer_mercy', 'trade', 'ask_info', 'recruit']).describe('Interaction approach'),
+            target_npc: z.string().describe('Name of the NPC'),
+            leverage: z.string().default('').describe('What the player is offering or using as leverage'),
+            tone: z.enum(['aggressive', 'calm', 'desperate', 'commanding', 'empathetic']).describe('Tone of approach'),
+        }),
+        execute: (args: { approach: string; target_npc: string; leverage: string; tone: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             // Find NPC by name
             let npc: NPC | null = null;
@@ -642,19 +629,19 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     break;
                 }
             }
-            if (!npc) return { error: `No NPC named "${args.target_npc}" is here.` };
-            if (npc.disposition === 'dead') return { error: `${npc.name} is already dead.` };
+            if (!npc) return JSON.stringify({ error: `No NPC named "${args.target_npc}" is here.` });
+            if (npc.disposition === 'dead') return JSON.stringify({ error: `${npc.name} is already dead.` });
 
             // Check behavior compatibility
             const approach = args.approach;
             if (approach === 'negotiate' && !npc.behaviors.has('can_negotiate') && !npc.behaviors.has('is_intelligent')) {
-                return { error: `${npc.name} cannot be reasoned with.` };
+                return JSON.stringify({ error: `${npc.name} cannot be reasoned with.` });
             }
             if (approach === 'trade' && !npc.behaviors.has('can_trade')) {
-                return { error: `${npc.name} has nothing to trade.` };
+                return JSON.stringify({ error: `${npc.name} has nothing to trade.` });
             }
             if (approach === 'recruit' && !npc.behaviors.has('can_ally')) {
-                return { error: `${npc.name} will not join you.` };
+                return JSON.stringify({ error: `${npc.name} will not join you.` });
             }
 
             // Base chance from disposition
@@ -702,7 +689,6 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                         state.npcAllies.add(npc.id);
                         break;
                     case 'trade':
-                        // Simple trade: offer leverage item
                         break;
                     case 'ask_info':
                         break;
@@ -725,7 +711,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     }
                 }
 
-                return {
+                return JSON.stringify({
                     success: true,
                     approach,
                     npc_name: npc.name,
@@ -734,10 +720,10 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     roll,
                     chance,
                     is_ally: npc.isAlly,
-                };
+                });
             }
 
-            return {
+            return JSON.stringify({
                 success: false,
                 approach,
                 npc_name: npc.name,
@@ -746,34 +732,31 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                 roll,
                 chance,
                 message: `${npc.name} rejects your ${approach}.`,
-            };
+            });
         },
     });
 
-    const recordMoralChoice = defineTool('record_moral_choice', {
+    const recordMoralChoice = tool({
+        name: 'record_moral_choice',
         description: 'Record a significant moral choice the player made. Call this when the player spares an enemy, sacrifices resources, ignores a plea for help, or makes any morally significant decision.',
-        parameters: {
-            type: 'object',
-            properties: {
-                description: { type: 'string', description: 'What the player chose to do' },
-                tendency: { type: 'string', enum: ['mercy', 'sacrifice', 'pragmatic'], description: 'Which moral tendency this represents' },
-                magnitude: { type: 'number', description: 'How significant (1-3): 1=minor, 2=moderate, 3=major' },
-            },
-            required: ['description', 'tendency', 'magnitude'],
-        },
-        handler: (args: { description: string; tendency: string; magnitude: number }) => {
-            const tendency = args.tendency as 'mercy' | 'sacrifice' | 'pragmatic';
+        parameters: z.object({
+            description: z.string().describe('What the player chose to do'),
+            tendency: z.enum(['mercy', 'sacrifice', 'pragmatic']).describe('Which moral tendency this represents'),
+            magnitude: z.number().describe('How significant (1-3): 1=minor, 2=moderate, 3=major'),
+        }),
+        execute: (args: { description: string; tendency: 'mercy' | 'sacrifice' | 'pragmatic'; magnitude: number }, ctx?: RunContext<GameContext>) => {
+            const { state } = getCtx(ctx);
             const magnitude = Math.max(1, Math.min(3, args.magnitude));
 
             state.moralProfile.choices.push({
                 turn: state.turnCount,
                 description: args.description,
-                tendency,
+                tendency: args.tendency,
                 magnitude,
             });
-            state.moralProfile.tendencies[tendency] += magnitude;
+            state.moralProfile.tendencies[args.tendency] += magnitude;
 
-            return { recorded: true, tendency, total: state.moralProfile.tendencies[tendency] };
+            return JSON.stringify({ recorded: true, tendency: args.tendency, total: state.moralProfile.tendencies[args.tendency] });
         },
     });
 
@@ -795,29 +778,27 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
         'Interaction options displayed as interactive UI buttons. Do NOT list them in text. Write one atmospheric line, then STOP and wait.',
     );
 
-    const completeObjective = defineTool('complete_objective', {
+    const completeObjective = tool({
+        name: 'complete_objective',
         description: 'Mark the current objective step as complete when the player performs the required action in the correct room.',
-        parameters: {
-            type: 'object',
-            properties: {
-                step_description: { type: 'string', description: 'Description of what was accomplished' },
-            },
-            required: ['step_description'],
-        },
-        handler: (args: { step_description: string }) => {
+        parameters: z.object({
+            step_description: z.string().describe('Description of what was accomplished'),
+        }),
+        execute: (args: { step_description: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
             const objectives = station.objectives;
             if (objectives.currentStepIndex >= objectives.steps.length) {
-                return { error: 'No more objectives.' };
+                return JSON.stringify({ error: 'No more objectives.' });
             }
             const currentStep = objectives.steps[objectives.currentStepIndex];
 
             if (currentStep.roomId !== state.currentRoom) {
-                return { error: 'You are not in the correct room for this objective.' };
+                return JSON.stringify({ error: 'You are not in the correct room for this objective.' });
             }
 
             if (currentStep.requiredItemId && !state.inventory.includes(currentStep.requiredItemId) && !state.hasObjectiveItem) {
                 const itemName = getItemName(currentStep.requiredItemId, station);
-                return { error: `You need the ${itemName} to complete this objective.` };
+                return JSON.stringify({ error: `You need the ${itemName} to complete this objective.` });
             }
 
             currentStep.completed = true;
@@ -825,43 +806,44 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
 
             if (objectives.currentStepIndex >= objectives.steps.length) {
                 objectives.completed = true;
-                return {
+                return JSON.stringify({
                     success: true,
                     description: args.step_description,
                     all_complete: true,
                     message: 'All objectives complete! Head to the escape point!',
                     escape_room: station.rooms.get(station.escapeRoomId)?.name ?? 'escape',
-                };
+                });
             }
 
             const next = objectives.steps[objectives.currentStepIndex];
-            return {
+            return JSON.stringify({
                 success: true,
                 description: args.step_description,
                 all_complete: false,
                 next_objective: next.description,
                 next_room: station.rooms.get(next.roomId)?.name ?? next.roomId,
-            };
+            });
         },
     });
 
     // ─── Class-Specific Tools ───────────────────────────────────────────────
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool array requires 'any' for variance compatibility with mixed parameter types
-    const tools: Tool<any>[] = [
+    const tools: Tool<GameContext>[] = [
         lookAround, moveTo, pickUpItem, useItem, attackTool,
         suggestAttacks, attemptAction, interactNPC, suggestInteractions,
         recordMoralChoice, suggestActions, completeObjective,
     ];
 
-    if (build.id === 'soldier') {
-        tools.push(defineTool('tactical_scan', {
+    if (classId === 'soldier') {
+        tools.push(tool({
+            name: 'tactical_scan',
             description: 'Reveal enemy stats and weaknesses before combat. Soldier class ability.',
-            parameters: { type: 'object', properties: {}, required: [] },
-            handler: () => {
+            parameters: z.object({}),
+            execute: (_args, ctx?: RunContext<GameContext>) => {
+                const { state, station } = getCtx(ctx);
                 const threat = getRoomThreat(state.currentRoom, station);
-                if (!threat) return { error: 'No enemy to scan.' };
-                return {
+                if (!threat) return JSON.stringify({ error: 'No enemy to scan.' });
+                return JSON.stringify({
                     name: threat.name,
                     hp: `${String(threat.currentHp)}/${String(threat.maxHp)}`,
                     damage_range: `${String(threat.damage[0])}-${String(threat.damage[1])}`,
@@ -869,24 +851,22 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     behaviors: [...threat.behaviors],
                     flee_threshold: threat.fleeThreshold > 0 ? `Will flee below ${String(Math.round(threat.fleeThreshold * 100))}% HP` : 'Will not flee',
                     personality: threat.personality,
-                };
+                });
             },
-        }));
+        }) as Tool<GameContext>);
     }
 
-    if (build.id === 'engineer') {
-        tools.push(defineTool('bypass_system', {
+    if (classId === 'engineer') {
+        tools.push(tool({
+            name: 'bypass_system',
             description: 'Bypass a locked door without a keycard, or repair a system. Engineer class ability. Requires multitool in inventory.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    target: { type: 'string', description: 'What to bypass or repair' },
-                },
-                required: ['target'],
-            },
-            handler: (args: { target: string }) => {
+            parameters: z.object({
+                target: z.string().describe('What to bypass or repair'),
+            }),
+            execute: (args: { target: string }, ctx?: RunContext<GameContext>) => {
+                const { state, station } = getCtx(ctx);
                 if (!state.inventory.some(id => id === 'multitool' || station.items.get(id)?.name.toLowerCase().includes('multitool'))) {
-                    return { error: 'You need a multitool for this.' };
+                    return JSON.stringify({ error: 'You need a multitool for this.' });
                 }
 
                 // Check adjacent rooms for locked doors
@@ -895,7 +875,7 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     const adjRoom = station.rooms.get(adjId);
                     if (adjRoom?.lockedBy && adjRoom.name.toLowerCase().includes(args.target.toLowerCase())) {
                         adjRoom.lockedBy = null;
-                        return { success: true, message: `You bypass the lock on ${adjRoom.name}. The door hisses open.` };
+                        return JSON.stringify({ success: true, message: `You bypass the lock on ${adjRoom.name}. The door hisses open.` });
                     }
                 }
 
@@ -906,59 +886,59 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                     if (secretRoom && !room.connections.includes(room.secretConnection)) {
                         room.connections.push(room.secretConnection);
                         secretRoom.connections.push(state.currentRoom);
-                        return { success: true, message: `You discover a hidden passage to ${secretRoom.name}!` };
+                        return JSON.stringify({ success: true, message: `You discover a hidden passage to ${secretRoom.name}!` });
                     }
                 }
 
-                return { success: true, message: 'You tinker with the systems. Something clicks.' };
+                return JSON.stringify({ success: true, message: 'You tinker with the systems. Something clicks.' });
             },
-        }));
+        }) as Tool<GameContext>);
     }
 
-    if (build.id === 'medic') {
-        tools.push(defineTool('field_surgery', {
+    if (classId === 'medic') {
+        tools.push(tool({
+            name: 'field_surgery',
             description: 'Heal 15 HP using medical expertise. Usable once per room. Medic class ability.',
-            parameters: { type: 'object', properties: {}, required: [] },
-            handler: () => {
+            parameters: z.object({}),
+            execute: (_args, ctx?: RunContext<GameContext>) => {
+                const { state } = getCtx(ctx);
                 if (state.fieldSurgeryUsedInRoom.has(state.currentRoom)) {
-                    return { error: 'You already performed field surgery in this room.' };
+                    return JSON.stringify({ error: 'You already performed field surgery in this room.' });
                 }
                 const healed = Math.min(15, state.maxHp - state.hp);
                 state.hp += healed;
                 state.metrics.totalDamageHealed += healed;
                 state.fieldSurgeryUsedInRoom.add(state.currentRoom);
-                return { success: true, healed, player_condition: hpDescription(state) };
+                return JSON.stringify({ success: true, healed, player_condition: hpDescription(state) });
             },
-        }));
+        }) as Tool<GameContext>);
     }
 
-    if (build.id === 'hacker') {
-        tools.push(defineTool('system_hack', {
+    if (classId === 'hacker') {
+        tools.push(tool({
+            name: 'system_hack',
             description: 'Hack station systems: reveal all crew logs in current room, disable enemy buffs, or reveal the station map. Hacker class ability. Requires data_spike in inventory.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    target: { type: 'string', enum: ['crew_logs', 'enemy_debuff', 'reveal_map', 'secret_passage'], description: 'What to hack' },
-                },
-                required: ['target'],
-            },
-            handler: (args: { target: string }) => {
+            parameters: z.object({
+                target: z.enum(['crew_logs', 'enemy_debuff', 'reveal_map', 'secret_passage']).describe('What to hack'),
+            }),
+            execute: (args: { target: string }, ctx?: RunContext<GameContext>) => {
+                const { state, station } = getCtx(ctx);
                 if (!state.inventory.some(id => id === 'data_spike' || station.items.get(id)?.name.toLowerCase().includes('data spike'))) {
-                    return { error: 'You need a data spike for this.' };
+                    return JSON.stringify({ error: 'You need a data spike for this.' });
                 }
 
                 switch (args.target) {
                     case 'crew_logs': {
                         const room = station.rooms.get(state.currentRoom);
-                        if (!room) return { error: 'Invalid room.' };
+                        if (!room) return JSON.stringify({ error: 'Invalid room.' });
                         state.metrics.crewLogsFound += room.crewLogs.length;
-                        return { success: true, logs: room.crewLogs, message: 'All crew logs in this room decrypted.' };
+                        return JSON.stringify({ success: true, logs: room.crewLogs, message: 'All crew logs in this room decrypted.' });
                     }
                     case 'enemy_debuff': {
                         const threat = getRoomThreat(state.currentRoom, station);
-                        if (!threat) return { error: 'No enemy to debuff.' };
+                        if (!threat) return JSON.stringify({ error: 'No enemy to debuff.' });
                         threat.damage = [Math.floor(threat.damage[0] * 0.7), Math.floor(threat.damage[1] * 0.7)];
-                        return { success: true, message: `${threat.name}'s combat systems disrupted. Damage reduced.` };
+                        return JSON.stringify({ success: true, message: `${threat.name}'s combat systems disrupted. Damage reduced.` });
                     }
                     case 'reveal_map': {
                         const mapData = [...station.rooms.entries()].map(([id, r]) => ({
@@ -967,24 +947,24 @@ export function createGameTools(ctx: ToolContext): Tool<any>[] {
                             has_threat: r.threat !== null && getRoomThreat(id, station) !== null,
                             has_loot: r.loot !== null && !state.roomLootTaken.has(id),
                         }));
-                        return { success: true, map: mapData, message: 'Station layout downloaded.' };
+                        return JSON.stringify({ success: true, map: mapData, message: 'Station layout downloaded.' });
                     }
                     case 'secret_passage': {
                         const room = station.rooms.get(state.currentRoom);
-                        if (!room?.secretConnection) return { error: 'No hidden passages detected.' };
+                        if (!room?.secretConnection) return JSON.stringify({ error: 'No hidden passages detected.' });
                         const secretRoom = station.rooms.get(room.secretConnection);
                         if (secretRoom && !room.connections.includes(room.secretConnection)) {
                             room.connections.push(room.secretConnection);
                             secretRoom.connections.push(state.currentRoom);
-                            return { success: true, message: `Hidden passage to ${secretRoom.name} revealed!` };
+                            return JSON.stringify({ success: true, message: `Hidden passage to ${secretRoom.name} revealed!` });
                         }
-                        return { error: 'Passage already revealed.' };
+                        return JSON.stringify({ error: 'Passage already revealed.' });
                     }
                     default:
-                        return { error: `Unknown hack target: ${args.target}` };
+                        return JSON.stringify({ error: `Unknown hack target: ${args.target}` });
                 }
             },
-        }));
+        }) as Tool<GameContext>);
     }
 
     return tools;

@@ -277,13 +277,10 @@ export function reconstructMarkdown(runs: ContentRun[], contentTarget: number): 
 
 /**
  * Like `reconstructMarkdown` but only applies formatting delimiters to FULLY
- * revealed runs. The currently-being-typed (partial) run gets no delimiters,
- * avoiding CommonMark flicker where `*text *` (space before closing `*`) toggles
- * between italic and literal on each character.
- *
- * Parent formatting from earlier complete runs is preserved through partial runs
- * (e.g. if an outer `**strong**` span is still open, the partial text inside it
- * remains bold).
+ * revealed runs. The currently-being-typed (partial) run also gets format
+ * delimiters opened so formatting appears progressively during typewriter reveal.
+ * The `closeFormats()` helper moves trailing whitespace outside closing delimiters,
+ * ensuring valid CommonMark even for partial content (e.g. `**Quaranti**`).
  */
 export function reconstructMarkdownPartial(runs: ContentRun[], contentTarget: number): string {
     let out = '';
@@ -342,9 +339,15 @@ export function reconstructMarkdownPartial(runs: ContentRun[], contentTarget: nu
             out += run.text;
             emitted += run.text.length;
         } else {
-            // Partial run — close formats not in this run's stack,
-            // but DON'T open new formats (avoids flicker)
+            // Partial run — close mismatched formats, then open new ones.
+            // closeFormats() moves trailing whitespace outside closing delimiters,
+            // so partial content like `**Quaranti**` is valid CommonMark.
             closeFormats(openFormats.length - 1, commonLen);
+
+            for (let i = commonLen; i < run.formats.length; i++) {
+                out += run.formats[i].open;
+                openFormats.push(run.formats[i]);
+            }
 
             out += run.text.slice(0, remaining);
             emitted += remaining;

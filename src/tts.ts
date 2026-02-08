@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import OpenAI from 'openai';
 import type { NPC, CrewMember } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
 import type { GameSegment } from './schema.js';
@@ -25,19 +24,12 @@ export interface NarratorContext {
     isNewRoom: boolean;
 }
 
-type OpenAIVoice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable'
-    | 'nova' | 'onyx' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar';
-
-interface VoiceConfig {
-    voice: OpenAIVoice;
-    instructions: string;
-}
-
 interface SpeechChunk {
     text: string;
     charBudget: number;
-    voice: OpenAIVoice;
-    instructions: string;
+    voiceId: string;
+    temperature: number;
+    speakingRate: number;
     index: number;
     segmentIndex: number;
 }
@@ -50,32 +42,43 @@ interface GeneratedWav {
     segmentIndex: number;
 }
 
-// ─── Voice Pool ────────────────────────────────────────────────────────────
+// ─── Inworld API ───────────────────────────────────────────────────────────
 
-const NARRATOR_VOICE: OpenAIVoice = 'cedar';
-const NARRATOR_INSTRUCTIONS = 'You are narrating a sci-fi horror text adventure set on an abandoned space station. Speak with a warm but measured tone, building tension through pacing. Use deliberate pauses before revealing dangers. Keep a steady, grounded delivery — authoritative but not theatrical.';
+const INWORLD_API_BASE = 'https://api.inworld.ai/tts/v1';
+const INWORLD_MODEL = 'inworld-tts-1.5-max';
+const INWORLD_SAMPLE_RATE = 48000;
+const INWORLD_BITS_PER_SAMPLE = 16;
+const INWORLD_CHANNELS = 1;
 
-const NPC_VOICE_POOL: OpenAIVoice[] = [
-    'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
-    'nova', 'sage', 'shimmer', 'verse', 'marin',
+// ─── Voice Pool (Inworld voice IDs) ───────────────────────────────────────
+
+const NARRATOR_VOICE = 'Hades';
+
+const NPC_VOICE_POOL: string[] = [
+    'Alex', 'Ashley', 'Craig', 'Deborah', 'Dennis',
+    'Edward', 'Julia', 'Mark', 'Olivia', 'Priya',
+    'Ronald', 'Sarah', 'Shaun', 'Theodore', 'Timothy',
+    'Wendy', 'Hana', 'Clive', 'Carter', 'Blake',
 ];
 
-const BOSS_VOICE: OpenAIVoice = 'onyx';
+const BOSS_VOICE = 'Dominus';
 
-const INNER_VOICE: OpenAIVoice = 'shimmer';
-const INNER_VOICE_INSTRUCTIONS = 'You are the player\'s inner voice. Soft, ethereal, almost dreamlike. A breathy near-whisper, slow cadence, pause between phrases. Maximum contrast with the grounded narrator.';
+const INNER_VOICE = 'Luna';
 
-const STATION_PA_VOICE: OpenAIVoice = 'echo';
-const STATION_PA_INSTRUCTIONS = 'Station public address system. Flat monotone, micro-pauses between words, zero inflection. A machine reading an obituary.';
+const STATION_PA_VOICE = 'Elizabeth';
 
-const CREW_ECHO_INSTRUCTIONS = 'You are a recorded crew log, played through a crackling speaker. Audio is compressed and distant, with faint static. Speak with the tired resignation of someone who knew the end was near.';
+// ─── Voice Tuning (temperature / speaking rate per role) ─────────────────
 
-const NARRATOR_MOODS: Record<string, string> = {
-    combat: 'Urgent, intense narration. Short punchy delivery. Breathless pacing. Every beat lands like a blow.',
-    wounded: 'Strained, fragile narration. Words come with effort. Quiet, intimate. The narrator sounds hurt.',
-    discovery: 'Quiet wonder in the narration. Careful observation. A hint of awe at something new and unknown.',
-    default: NARRATOR_INSTRUCTIONS,
-};
+interface VoiceTuning {
+    temperature: number;
+    speakingRate: number;
+}
+
+const TUNING_DEFAULT: VoiceTuning = { temperature: 1.1, speakingRate: 1.0 };
+const TUNING_BOSS: VoiceTuning = { temperature: 1.3, speakingRate: 0.9 };
+const TUNING_INNER: VoiceTuning = { temperature: 0.9, speakingRate: 0.9 };
+const TUNING_PA: VoiceTuning = { temperature: 0.7, speakingRate: 1.0 };
+const TUNING_CREW_ECHO: VoiceTuning = { temperature: 1.0, speakingRate: 0.95 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -132,6 +135,30 @@ function parseWavDuration(buffer: Buffer): number {
     return (buffer.byteLength - 44) / byteRate;
 }
 
+/** Build a complete WAV file from raw PCM data. */
+function createWavBuffer(rawAudio: Buffer, channels: number, sampleRate: number, bitsPerSample: number): Buffer {
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+    const dataSize = rawAudio.byteLength;
+
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);                           // ChunkID
+    header.writeUInt32LE(36 + dataSize, 4);            // ChunkSize
+    header.write('WAVE', 8);                           // Format
+    header.write('fmt ', 12);                          // Subchunk1ID
+    header.writeUInt32LE(16, 16);                      // Subchunk1Size (PCM)
+    header.writeUInt16LE(1, 20);                       // AudioFormat (PCM = 1)
+    header.writeUInt16LE(channels, 22);                // NumChannels
+    header.writeUInt32LE(sampleRate, 24);               // SampleRate
+    header.writeUInt32LE(byteRate, 28);                // ByteRate
+    header.writeUInt16LE(blockAlign, 32);              // BlockAlign
+    header.writeUInt16LE(bitsPerSample, 34);           // BitsPerSample
+    header.write('data', 36);                          // Subchunk2ID
+    header.writeUInt32LE(dataSize, 40);                // Subchunk2Size
+
+    return Buffer.concat([header, rawAudio]);
+}
+
 /** Sentence-end boundary: punctuation followed by whitespace or end-of-string. */
 const SENTENCE_END_RE = /[.!?](?:\s|$)/;
 
@@ -144,7 +171,7 @@ interface TTSEngineOptions {
 }
 
 export class TTSEngine {
-    private openai: OpenAI | null = null;
+    private inworldApiKey: string | null = null;
     private streamId = 0;
     private audioEnabled = false;
     private debugLog: (label: string, content: string) => void;
@@ -200,52 +227,122 @@ export class TTSEngine {
         this.tempDir = await mkdtemp(join(tmpdir(), 'station-omega-tts-'));
 
         // Try to set up audio — if anything fails, we stay in silent typewriter mode
-        if (!process.env['OPENAI_API_KEY']) {
-            this.debugLog('TTS', 'No OPENAI_API_KEY — running in silent typewriter mode');
+        if (!process.env['INWORLD_API_KEY']) {
+            this.debugLog('TTS', 'No INWORLD_API_KEY — running in silent typewriter mode');
             return;
         }
 
         try {
-            this.openai = new OpenAI();
+            this.inworldApiKey = process.env['INWORLD_API_KEY'];
             await this.checkFfplay();
             this.audioEnabled = true;
-            this.debugLog('TTS', `Initialized OpenAI TTS client. Temp dir: ${this.tempDir}`);
+            this.debugLog('TTS', `Initialized Inworld TTS client (${INWORLD_MODEL}). Temp dir: ${this.tempDir}`);
         } catch (err: unknown) {
-            this.openai = null;
+            this.inworldApiKey = null;
             this.audioEnabled = false;
             this.debugLog('TTS', `Audio unavailable (${String(err)}) — running in silent typewriter mode`);
         }
     }
 
-    /** Generate speech via OpenAI gpt-4o-mini-tts and save to a WAV file. */
-    private async generateWithOpenAI(chunk: SpeechChunk): Promise<GeneratedWav | null> {
-        if (!this.openai || !this.tempDir) return null;
+    /** Generate speech via Inworld TTS streaming API and save to a WAV file. */
+    private async generateWithInworld(chunk: SpeechChunk): Promise<GeneratedWav | null> {
+        if (!this.inworldApiKey || !this.tempDir) return null;
 
         try {
             this.abortController = new AbortController();
-            const response = await this.openai.audio.speech.create(
-                {
-                    model: 'gpt-4o-mini-tts',
-                    voice: chunk.voice,
-                    input: chunk.text,
-                    instructions: chunk.instructions,
-                    response_format: 'wav',
+            const response = await fetch(`${INWORLD_API_BASE}/voice:stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Basic ${this.inworldApiKey}`,
                 },
-                { signal: this.abortController.signal },
-            );
+                body: JSON.stringify({
+                    text: chunk.text,
+                    voice_id: chunk.voiceId,
+                    model_id: INWORLD_MODEL,
+                    audio_config: {
+                        audio_encoding: 'LINEAR16',
+                        sample_rate_hertz: INWORLD_SAMPLE_RATE,
+                        speaking_rate: chunk.speakingRate,
+                    },
+                    temperature: chunk.temperature,
+                }),
+                signal: this.abortController.signal,
+            });
 
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            if (!response.ok) {
+                let errorDetails = '';
+                try { errorDetails = await response.text(); } catch { /* ignore */ }
+                throw new TTSError(`Inworld TTS HTTP ${String(response.status)}: ${errorDetails}`);
+            }
+
+            // Parse streaming NDJSON response — each line has { result: { audioContent: "base64..." } }
+            const reader = response.body?.getReader();
+            if (!reader) throw new TTSError('Inworld TTS response has no body');
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+            const rawChunks: Buffer[] = [];
+
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const parsed = JSON.parse(line) as { result?: { audioContent?: string } };
+                        if (parsed.result?.audioContent) {
+                            const audioChunk = Buffer.from(parsed.result.audioContent, 'base64');
+                            // Strip WAV header from individual chunks (first 44 bytes if present)
+                            const isRiff = audioChunk.subarray(0, 4).toString() === 'RIFF';
+                            if (isRiff && audioChunk.length > 44) {
+                                rawChunks.push(audioChunk.subarray(44));
+                            } else if (!isRiff) {
+                                rawChunks.push(audioChunk);
+                            }
+                            // Discard RIFF chunks with no audio payload (≤ 44 bytes)
+                        }
+                    } catch {
+                        // Skip malformed JSON lines
+                    }
+                }
+            }
+
+            // Process any remaining buffer content (final line without trailing newline)
+            if (buffer.trim()) {
+                try {
+                    const parsed = JSON.parse(buffer) as { result?: { audioContent?: string } };
+                    if (parsed.result?.audioContent) {
+                        const audioChunk = Buffer.from(parsed.result.audioContent, 'base64');
+                        if (audioChunk.length > 44 && audioChunk.subarray(0, 4).toString() === 'RIFF') {
+                            rawChunks.push(audioChunk.subarray(44));
+                        } else {
+                            rawChunks.push(audioChunk);
+                        }
+                    }
+                } catch {
+                    // Skip malformed JSON
+                }
+            }
+
+            const combinedAudio = Buffer.concat(rawChunks);
+            // Build a single WAV file with proper header
+            const wavBuffer = createWavBuffer(combinedAudio, INWORLD_CHANNELS, INWORLD_SAMPLE_RATE, INWORLD_BITS_PER_SAMPLE);
             const filePath = join(this.tempDir, `tts-${String(this.streamId)}-${String(chunk.index)}.wav`);
-            await writeFile(filePath, buffer);
+            await writeFile(filePath, wavBuffer);
 
-            const audioDuration = parseWavDuration(buffer);
+            const audioDuration = parseWavDuration(wavBuffer);
 
             this.abortController = null;
             return { filePath, index: chunk.index, charBudget: chunk.charBudget, audioDuration, segmentIndex: chunk.segmentIndex };
         } catch (err: unknown) {
             this.abortController = null;
-            // Don't treat abort as an error
             if (err instanceof Error && err.name === 'AbortError') return null;
             throw err;
         }
@@ -258,54 +355,17 @@ export class TTSEngine {
         }
     }
 
-    private getVoiceConfigForNPC(npcId: string): VoiceConfig {
+    private getVoiceIdForNPC(npcId: string): string {
         const npc = this.npcMap.get(npcId);
 
         // Tier-4 bosses always use the boss voice
         if (npc?.tier === 4) {
-            return {
-                voice: BOSS_VOICE,
-                instructions: this.buildNPCInstructions(npc),
-            };
+            return BOSS_VOICE;
         }
 
         // Deterministic hash into the NPC voice pool
         const idx = hashString(npcId) % NPC_VOICE_POOL.length;
-        return {
-            voice: NPC_VOICE_POOL[idx],
-            instructions: npc ? this.buildNPCInstructions(npc) : 'Speak as a space station crew member in a sci-fi horror setting.',
-        };
-    }
-
-    /** Build voice steering instructions from NPC personality and sound signature. */
-    private buildNPCInstructions(npc: NPC): string {
-        const parts: string[] = [];
-
-        // Tier-based delivery hints
-        switch (npc.tier) {
-            case 4:
-                parts.push('You are a powerful boss creature. Speak with deep menace, authority, and terrifying presence. Use slow, deliberate pacing.');
-                break;
-            case 3:
-                parts.push('You are an aggressive, dangerous creature. Speak with intensity and hostility. Your voice should convey threat and violence.');
-                break;
-            case 2:
-                parts.push('You are a threatening presence on an abandoned space station. Speak with tension and unease.');
-                break;
-            default:
-                parts.push('You are a creature or character on an abandoned space station. Speak with an unsettling quality.');
-                break;
-        }
-
-        if (npc.personality) {
-            parts.push(`Character: ${npc.personality}`);
-        }
-
-        if (npc.soundSignature) {
-            parts.push(`Voice quality: ${npc.soundSignature}`);
-        }
-
-        return parts.join(' ');
+        return NPC_VOICE_POOL[idx];
     }
 
     setCrewRoster(roster: CrewMember[]): void {
@@ -316,52 +376,63 @@ export class TTSEngine {
         this.narratorContext = ctx;
     }
 
-    private getCrewEchoConfig(crewName: string): VoiceConfig {
-        // Deterministic hash into the NPC voice pool (same pool, different base string)
-        const idx = hashString(`crew_${crewName}`) % NPC_VOICE_POOL.length;
-        const voice = NPC_VOICE_POOL[idx];
-
-        // Find crew member info for steering
-        const member = this.crewRoster.find(c => c.name === crewName);
-        const parts: string[] = [CREW_ECHO_INSTRUCTIONS];
-        if (member) {
-            parts.push(`You are ${member.name}, ${member.role}. Your fate: ${member.fate}.`);
-        } else {
-            parts.push(`You are ${crewName}, a crew member of this station.`);
-        }
-
-        return { voice, instructions: parts.join(' ') };
-    }
-
-    /** Select the narrator mood based on current game context. */
-    private getNarratorMood(): string {
-        if (this.narratorContext.inCombat) return NARRATOR_MOODS['combat'];
-        if (this.narratorContext.hpPercent < 25) return NARRATOR_MOODS['wounded'];
-        if (this.narratorContext.isNewRoom) return NARRATOR_MOODS['discovery'];
-        return NARRATOR_MOODS['default'];
-    }
-
-    /** Get voice config for a GameSegment. */
-    private getVoiceConfigForSegment(seg: GameSegment): VoiceConfig {
+    /** Get Inworld audio markup prefix for emotional delivery. */
+    private getEmotionMarkup(seg: GameSegment): string {
         switch (seg.type) {
             case 'dialogue': {
                 if (seg.npcId) {
-                    return this.getVoiceConfigForNPC(seg.npcId);
+                    const npc = this.npcMap.get(seg.npcId);
+                    if (npc?.tier === 4) return '[angry] ';
+                    if (npc?.disposition === 'hostile') return '[angry] ';
+                    return '';
                 }
-                return { voice: NARRATOR_VOICE, instructions: this.getNarratorMood() };
+                // Narrator mood based on game context
+                if (this.narratorContext.inCombat) return '[fearful] ';
+                if (this.narratorContext.hpPercent < 25) return '[sad] ';
+                if (this.narratorContext.isNewRoom) return '[surprised] ';
+                return '';
             }
             case 'thought':
-                return { voice: INNER_VOICE, instructions: INNER_VOICE_INSTRUCTIONS };
+                return '[whispering] ';
+            case 'crew_echo':
+                return '[whispering] ';
             case 'station_pa':
-                return { voice: STATION_PA_VOICE, instructions: STATION_PA_INSTRUCTIONS };
+                return '';
+            default:
+                return '';
+        }
+    }
+
+    private getCrewEchoVoiceId(crewName: string): string {
+        // Deterministic hash into the NPC voice pool (same pool, different base string)
+        const idx = hashString(`crew_${crewName}`) % NPC_VOICE_POOL.length;
+        return NPC_VOICE_POOL[idx];
+    }
+
+    /** Get Inworld voice config (ID + tuning) for a GameSegment. */
+    private getVoiceConfigForSegment(seg: GameSegment): { voiceId: string; tuning: VoiceTuning } {
+        switch (seg.type) {
+            case 'dialogue': {
+                if (seg.npcId) {
+                    const npc = this.npcMap.get(seg.npcId);
+                    const voiceId = this.getVoiceIdForNPC(seg.npcId);
+                    const tuning = npc?.tier === 4 ? TUNING_BOSS : TUNING_DEFAULT;
+                    return { voiceId, tuning };
+                }
+                return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
+            }
+            case 'thought':
+                return { voiceId: INNER_VOICE, tuning: TUNING_INNER };
+            case 'station_pa':
+                return { voiceId: STATION_PA_VOICE, tuning: TUNING_PA };
             case 'crew_echo': {
                 if (seg.crewName) {
-                    return this.getCrewEchoConfig(seg.crewName);
+                    return { voiceId: this.getCrewEchoVoiceId(seg.crewName), tuning: TUNING_CREW_ECHO };
                 }
-                return { voice: NARRATOR_VOICE, instructions: CREW_ECHO_INSTRUCTIONS };
+                return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
             }
             default:
-                return { voice: NARRATOR_VOICE, instructions: this.getNarratorMood() };
+                return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
         }
     }
 
@@ -398,7 +469,8 @@ export class TTSEngine {
         const clean = stripMarkdown(seg.text);
         if (!clean) return;
 
-        const { voice, instructions } = this.getVoiceConfigForSegment(seg);
+        const { voiceId, tuning } = this.getVoiceConfigForSegment(seg);
+        const emotionMarkup = this.getEmotionMarkup(seg);
 
         const parts = splitLongText(clean, 500);
         const validParts = parts.filter(p => p.trim() && (SENTENCE_END_RE.test(p) || p.length >= 20));
@@ -413,11 +485,14 @@ export class TTSEngine {
                 ? bodyChars - budgetUsed
                 : Math.round(bodyChars * ratio);
             budgetUsed += chunkBudget;
+            // Prepend emotion markup to every chunk for consistent emotional context
+            const textWithMarkup = emotionMarkup + part;
             this.chunkQueue.push({
-                text: part,
+                text: textWithMarkup,
                 charBudget: chunkBudget,
-                voice,
-                instructions,
+                voiceId,
+                temperature: tuning.temperature,
+                speakingRate: tuning.speakingRate,
                 index: this.nextChunkIndex.value++,
                 segmentIndex: segIdx,
             });
@@ -473,8 +548,8 @@ export class TTSEngine {
                     try {
                         let result: GeneratedWav | null;
 
-                        if (this.audioEnabled && this.openai && this.tempDir) {
-                            result = await this.generateWithOpenAI(chunk);
+                        if (this.audioEnabled && this.inworldApiKey && this.tempDir) {
+                            result = await this.generateWithInworld(chunk);
                         } else {
                             // Silent typewriter mode: compute duration from text length
                             const audioDuration = chunk.text.length / DEFAULT_CHARS_PER_SEC;
@@ -648,7 +723,7 @@ export class TTSEngine {
     }
 
     hasApiKey(): boolean {
-        return this.openai !== null;
+        return this.inworldApiKey !== null;
     }
 
     isAudioEnabled(): boolean {
@@ -657,29 +732,29 @@ export class TTSEngine {
 
     setAudioEnabled(value: boolean): void {
         // Can't enable audio without an API key
-        if (value && !this.openai) return;
+        if (value && !this.inworldApiKey) return;
         this.audioEnabled = value;
     }
 
-    /** Set the OpenAI API key at runtime, enabling audio TTS. */
+    /** Set the Inworld API key at runtime, enabling audio TTS. */
     async setApiKey(key: string): Promise<void> {
-        process.env['OPENAI_API_KEY'] = key;
-        this.openai = new OpenAI();
+        process.env['INWORLD_API_KEY'] = key;
+        this.inworldApiKey = key;
 
         try {
             await this.checkFfplay();
         } catch {
-            this.openai = null;
+            this.inworldApiKey = null;
             this.audioEnabled = false;
             throw new TTSError('ffplay not found. Install ffmpeg to enable TTS audio playback.');
         }
 
         this.audioEnabled = true;
-        this.debugLog('TTS', 'API key set — audio TTS enabled');
+        this.debugLog('TTS', 'Inworld API key set — audio TTS enabled');
         await this.persistApiKey(key);
     }
 
-    /** Write the API key to .env.local so Bun auto-loads it on next launch. */
+    /** Write the Inworld API key to .env.local so Bun auto-loads it on next launch. */
     private async persistApiKey(key: string): Promise<void> {
         const envPath = join(process.cwd(), '.env.local');
         try {
@@ -690,9 +765,9 @@ export class TTSEngine {
                 // File doesn't exist yet — start fresh
             }
 
-            const line = `OPENAI_API_KEY=${key}`;
-            if (/^OPENAI_API_KEY=.*/m.test(content)) {
-                content = content.replace(/^OPENAI_API_KEY=.*/m, () => line);
+            const line = `INWORLD_API_KEY=${key}`;
+            if (/^INWORLD_API_KEY=.*/m.test(content)) {
+                content = content.replace(/^INWORLD_API_KEY=.*/m, () => line);
             } else {
                 content = content.length > 0 && !content.endsWith('\n')
                     ? `${content}\n${line}\n`
@@ -700,7 +775,7 @@ export class TTSEngine {
             }
 
             await writeFile(envPath, content, { mode: 0o600 });
-            this.debugLog('TTS', 'API key persisted to .env.local');
+            this.debugLog('TTS', 'Inworld API key persisted to .env.local');
         } catch (err: unknown) {
             // Persistence failure should never break the game
             this.debugLog('TTS', `Failed to persist API key: ${String(err)}`);
@@ -712,8 +787,7 @@ export class TTSEngine {
         // Wait for pumps to finish after abort
         if (this.generationPromise) await this.generationPromise;
         if (this.playbackPromise) await this.playbackPromise;
-        // Release the OpenAI client
-        this.openai = null;
+        this.inworldApiKey = null;
         if (this.tempDir) {
             await rm(this.tempDir, { recursive: true, force: true }).catch(() => { /* ignore */ });
             this.tempDir = null;

@@ -632,7 +632,7 @@ export class GameUI {
             { name: 'Run History', description: 'View past expedition logs', value: 'history' },
         ];
         if (showVoiceSetup) {
-            menuOptions.push({ name: 'Voice Setup', description: 'Enter OpenAI API key for voice narration', value: 'voice_setup' });
+            menuOptions.push({ name: 'Voice Setup', description: 'Enter Inworld API key for voice narration', value: 'voice_setup' });
         }
         menuOptions.push({ name: 'Quit', description: 'Exit the game', value: 'quit' });
 
@@ -708,7 +708,7 @@ export class GameUI {
 
         const desc = new TextRenderable(this.renderer, {
             id: 'apikey-desc',
-            content: t`${fg(COLORS.text)('Enter your OpenAI API key to enable voice narration.')}\n${fg(COLORS.textDim)('Leave blank and press Enter to skip.')}`,
+            content: t`${fg(COLORS.text)('Enter your Inworld API key to enable voice narration.')}\n${fg(COLORS.textDim)('Leave blank and press Enter to skip.')}`,
         });
 
         const input = new InputRenderable(this.renderer, {
@@ -718,7 +718,7 @@ export class GameUI {
             focusedBackgroundColor: COLORS.inputFocusBg,
             textColor: COLORS.inputText,
             cursorColor: COLORS.cursor,
-            placeholder: 'sk-...',
+            placeholder: 'base64 credentials...',
         });
 
         const container = new BoxRenderable(this.renderer, {

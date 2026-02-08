@@ -505,7 +505,7 @@ async function runGameplay(
                     return;
                 }
                 if (input.startsWith('/')) {
-                    ui.appendNarrative('*That looks like a command, not an API key. Enter your OpenAI API key or /cancel:*');
+                    ui.appendNarrative('*That looks like a command, not an API key. Enter your Inworld API key or /cancel:*');
                     return;
                 }
                 awaitingApiKey = false;
@@ -538,7 +538,7 @@ async function runGameplay(
             // /voice command — key entry or toggle
             if (input.toLowerCase() === '/voice') {
                 if (!ttsEngine.hasApiKey()) {
-                    ui.appendNarrative('*Enter your OpenAI API key to enable voice narration (or /cancel):*');
+                    ui.appendNarrative('*Enter your Inworld API key to enable voice narration (or /cancel):*');
                     awaitingApiKey = true;
                 } else {
                     const nowEnabled = !ttsEngine.isAudioEnabled();
@@ -583,7 +583,7 @@ async function main() {
     const ui = new GameUI();
     await ui.init();
 
-    // Initialize TTS (OpenAI gpt-4o-mini-tts API) — never crashes, degrades to silent typewriter
+    // Initialize TTS (Inworld TTS-1.5 Max API) — never crashes, degrades to silent typewriter
     const globalTTS = new TTSEngine({ debugLog });
     await globalTTS.init();
 

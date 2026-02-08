@@ -146,6 +146,8 @@ function classIcon(cls: CharacterClassId): string {
 interface SegmentCardState {
     chunks: TextChunk[];           // pre-styled, full content
     textNode: TextRenderable;      // the renderable in the card
+    cardBox: BoxRenderable;        // the card container (deferred add to scroll)
+    addedToScroll: boolean;        // whether cardBox has been added to narrativeScroll
     totalChars: number;            // total content char count
     revealedChars: number;         // typewriter position (float)
     revealAllowedChars: number;    // TTS-gated budget
@@ -1216,11 +1218,13 @@ export class GameUI {
 
         const card = new BoxRenderable(this.renderer, cardOpts);
         card.add(textNode);
-        this.narrativeScroll.add(card);
 
+        // Defer adding card to scroll — it will appear when revealChunk() first targets it
         this.segmentCards.push({
             chunks,
             textNode,
+            cardBox: card,
+            addedToScroll: false,
             totalChars,
             revealedChars: headerChars,
             revealAllowedChars: headerChars,
@@ -1238,6 +1242,10 @@ export class GameUI {
         this.hideTypingIndicator();
 
         for (const card of this.segmentCards) {
+            if (!card.addedToScroll) {
+                this.narrativeScroll.add(card.cardBox);
+                card.addedToScroll = true;
+            }
             if (!card.finalized) {
                 card.revealedChars = card.totalChars;
                 card.finalized = true;
@@ -1587,6 +1595,12 @@ export class GameUI {
 
         const card = this.segmentCards[segmentIndex];
         if (card.finalized) return;
+
+        // Add card to scroll on first reveal so the box only appears when typing begins
+        if (!card.addedToScroll) {
+            this.narrativeScroll.add(card.cardBox);
+            card.addedToScroll = true;
+        }
 
         // Compute how many additional characters this TTS chunk allows
         card.revealAllowedChars = Math.min(card.revealAllowedChars + charBudget, card.totalChars);

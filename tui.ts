@@ -11,6 +11,7 @@ import {
     InputRenderable,
     SelectRenderable,
     SyntaxStyle,
+    StyledText,
     RGBA,
     t,
     bold,
@@ -64,6 +65,11 @@ const COLORS = {
     gradeD: '#ff8844',
     gradeF: '#ff4444',
 };
+
+// ─── Spinner ────────────────────────────────────────────────────────────────
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPINNER_INTERVAL_MS = 80;
 
 // ─── Markdown Theme ─────────────────────────────────────────────────────────
 
@@ -160,7 +166,6 @@ export class GameUI {
     private narrativeScroll!: ScrollBoxRenderable;
     private inputField!: InputRenderable;
     private inputCallback: ((input: string) => void) | null = null;
-    private inputEnabled = true;
     private distortion = new DistortionEffect({ glitchChancePerSecond: 0.3, maxGlitchLines: 2 });
     private distortionFn = (buffer: Parameters<typeof this.distortion.apply>[0], deltaTime: number) => {
         this.distortion.apply(buffer, deltaTime);
@@ -197,6 +202,9 @@ export class GameUI {
     private missionModalBox!: BoxRenderable;
     private missionModalScroll!: ScrollBoxRenderable;
     private missionModalVisible = false;
+    private mapModalBox!: BoxRenderable;
+    private mapModalScroll!: ScrollBoxRenderable;
+    private mapModalVisible = false;
     private prevObjectiveStep = -1;
     private prevObjectivesComplete = false;
     private lastStatus: GameStatus | null = null;
@@ -204,7 +212,9 @@ export class GameUI {
     // Per-segment card reveal state
     private segmentCards: SegmentCardState[] = [];
     private revealTimer: ReturnType<typeof setInterval> | null = null;
-    private typingIndicatorCard: BoxRenderable | null = null;
+    private inputBar!: BoxRenderable;
+    private spinnerBar: BoxRenderable | null = null;
+    private spinnerTimer: ReturnType<typeof setInterval> | null = null;
     private revealFirstChunk = true;
     private debugLog: ((label: string, content: string) => void) | null = null;
 
@@ -279,7 +289,7 @@ export class GameUI {
         // Wire up input Enter event
         this.inputField.on(InputRenderableEvents.ENTER, (value: string) => {
             const trimmed = value.trim();
-            if (!trimmed || !this.inputEnabled) return;
+            if (!trimmed) return;
 
             // If popup is active, let selectPopupItem handle it
             if (this.popupState !== 'idle') return;
@@ -289,6 +299,11 @@ export class GameUI {
             // /mission opens the mission modal
             if (trimmed.toLowerCase() === '/mission') {
                 this.showMissionModal();
+                return;
+            }
+            // /map opens the map modal
+            if (trimmed.toLowerCase() === '/map') {
+                this.showMapModal();
                 return;
             }
 
@@ -346,9 +361,24 @@ export class GameUI {
         // Intercept key presses on the input field for popup + inline choices navigation
         const origHandleKey = this.inputField.handleKeyPress.bind(this.inputField);
         this.inputField.handleKeyPress = (key: KeyEvent): boolean => {
+            // Map modal takes top priority
+            if (this.mapModalVisible) {
+                const keyName = key.name.toLowerCase();
+                if (key.name === 'escape') { this.dismissMapModal(); return true; }
+                if (keyName === 'f1') { this.dismissMapModal(); return true; }
+                if (keyName === 'f2') { this.dismissMapModal(); this.showMissionModal(); return true; }
+                // Allow scrolling in the modal (arrow keys, page up/down, etc.).
+                if (this.mapModalScroll.handleKeyPress(key)) return true;
+                return true; // Block typing while modal is open
+            }
+
             // Mission modal takes top priority
             if (this.missionModalVisible) {
+                const keyName = key.name.toLowerCase();
                 if (key.name === 'escape') { this.dismissMissionModal(); return true; }
+                if (keyName === 'f2') { this.dismissMissionModal(); return true; }
+                if (keyName === 'f1') { this.dismissMissionModal(); this.showMapModal(); return true; }
+                if (this.missionModalScroll.handleKeyPress(key)) return true;
                 return true; // Block all input while modal is open
             }
 
@@ -374,8 +404,15 @@ export class GameUI {
                 }
             }
 
-            // Tab opens mission modal when input is empty and no popup/choices active
-            if (key.name === 'tab' && !this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
+            // F1 opens map modal when input is empty and no popup/choices active
+            const keyName = key.name.toLowerCase();
+            if (keyName === 'f1' && !this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
+                this.showMapModal();
+                return true;
+            }
+
+            // F2 opens mission modal when input is empty and no popup/choices active
+            if (keyName === 'f2' && !this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
                 this.showMissionModal();
                 return true;
             }
@@ -428,6 +465,38 @@ export class GameUI {
         this.missionModalBox.add(this.missionModalScroll);
         this.renderer.root.add(this.missionModalBox);
 
+        // Map modal overlay
+        this.mapModalScroll = new ScrollBoxRenderable(this.renderer, {
+            id: 'map-modal-scroll',
+            flexGrow: 1,
+            width: '100%',
+            scrollY: true,
+            scrollX: true,
+            stickyScroll: false,
+            contentOptions: { flexDirection: 'column', gap: 0 },
+        });
+
+        this.mapModalBox = new BoxRenderable(this.renderer, {
+            id: 'map-modal-box',
+            position: 'absolute',
+            bottom: 3,
+            left: '10%',
+            width: '80%',
+            height: '70%',
+            borderStyle: 'rounded',
+            borderColor: COLORS.title,
+            backgroundColor: '#0d1117',
+            zIndex: 12,
+            visible: false,
+            flexDirection: 'column',
+            paddingLeft: 1,
+            paddingRight: 1,
+            paddingTop: 1,
+            paddingBottom: 1,
+        });
+        this.mapModalBox.add(this.mapModalScroll);
+        this.renderer.root.add(this.mapModalBox);
+
         this.inputField.focus();
     }
 
@@ -448,18 +517,17 @@ export class GameUI {
             this.narrativeScroll,
         );
 
-        // Input area
-        const inputBar = Box(
-            {
-                height: 1,
-                width: '100%',
-                flexDirection: 'row',
-                paddingLeft: 1,
-            },
-            Text({ content: t`${fg(COLORS.title)('>')} ` }),
-            this.inputField,
-            Text({ content: t` ${fg(COLORS.textDim)('Tab:Mission  /:Commands')} `, paddingRight: 1 }),
-        );
+        // Input area (BoxRenderable so we can remove/re-add for spinner swap)
+        this.inputBar = new BoxRenderable(this.renderer, {
+            id: 'input-bar',
+            height: 1,
+            width: '100%',
+            flexDirection: 'row',
+            paddingLeft: 1,
+        });
+        this.inputBar.add(Text({ content: t`${fg(COLORS.title)('>')} ` }));
+        this.inputBar.add(this.inputField);
+        this.inputBar.add(Text({ content: t` ${fg(COLORS.textDim)('F1:Map  F2:Mission  /:Commands')} `, paddingRight: 1 }));
 
         if (this.isNarrowMode) {
             // Narrow terminal: no sidebar, compact status bar below narrative
@@ -476,7 +544,7 @@ export class GameUI {
             );
             this.layoutRoot.add(narrativePanel);
             this.layoutRoot.add(compactBar);
-            this.layoutRoot.add(inputBar);
+            this.layoutRoot.add(this.inputBar);
             return;
         }
 
@@ -601,7 +669,7 @@ export class GameUI {
         mainRow.add(this.sidebar);
 
         this.layoutRoot.add(mainRow);
-        this.layoutRoot.add(inputBar);
+        this.layoutRoot.add(this.inputBar);
     }
 
     private clearLayout(): void {
@@ -1390,7 +1458,7 @@ export class GameUI {
         const filled = total > 0 ? Math.round((completed / total) * barW) : 0;
         const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
 
-        this.missionText.content = t`${fg(COLORS.textDim)(title)}\n${fg(COLORS.title)(bar)} ${fg(COLORS.text)(`${String(completed)}/${String(total)}`)}\n${fg(COLORS.textDim)('Tab: details')}`;
+        this.missionText.content = t`${fg(COLORS.textDim)(title)}\n${fg(COLORS.title)(bar)} ${fg(COLORS.text)(`${String(completed)}/${String(total)}`)}\n${fg(COLORS.textDim)('F2: details')}`;
     }
 
     private updateAlerts(status: GameStatus): void {
@@ -1482,6 +1550,52 @@ export class GameUI {
         this.missionModalVisible = false;
     }
 
+    // ─── Map Modal ─────────────────────────────────────────────────────────
+
+    private showMapModal(): void {
+        const status = this.lastStatus;
+        if (!status) return;
+
+        // Clear previous modal content
+        for (const child of this.mapModalScroll.getChildren()) {
+            this.mapModalScroll.remove(child.id);
+        }
+
+        const titleText = new TextRenderable(this.renderer, {
+            id: 'map-modal-title',
+            content: t`${bold(fg(COLORS.title)('STATION MAP'))} ${fg(COLORS.textDim)('(visited areas)')}`,
+        });
+        this.mapModalScroll.add(titleText);
+
+        this.mapModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'map-modal-spacer',
+            content: ' ',
+        }));
+
+        this.mapModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'map-modal-content',
+            content: new StyledText(status.mapText),
+        }));
+
+        this.mapModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'map-modal-spacer2',
+            content: ' ',
+        }));
+        this.mapModalScroll.add(new TextRenderable(this.renderer, {
+            id: 'map-modal-hint',
+            content: t`${fg(COLORS.textDim)('Arrow keys: scroll  |  Esc: close')}`,
+        }));
+
+        this.mapModalScroll.scrollTo({ x: 0, y: 0 });
+        this.mapModalBox.visible = true;
+        this.mapModalVisible = true;
+    }
+
+    private dismissMapModal(): void {
+        this.mapModalBox.visible = false;
+        this.mapModalVisible = false;
+    }
+
     // ─── Narrative Mission Cards ────────────────────────────────────────────
 
     private detectObjectiveChanges(status: GameStatus): void {
@@ -1555,30 +1669,48 @@ export class GameUI {
 
     showTypingIndicator(): void {
         this.hideTypingIndicator();
-        const dots = new TextRenderable(this.renderer, {
-            id: `typing-dots-${String(Date.now())}`,
-            content: t`${fg(COLORS.textDim)('...')}`,
+
+        const spinnerText = new TextRenderable(this.renderer, {
+            id: 'spinner-text',
+            content: t`${fg(COLORS.title)(SPINNER_FRAMES[0])} ${fg(COLORS.textDim)('Uplink active...')}`,
         });
-        const card = new BoxRenderable(this.renderer, {
-            id: `typing-card-${String(Date.now())}`,
-            backgroundColor: COLORS.cardBg,
-            marginLeft: 1,
-            marginRight: 1,
-            paddingLeft: 2,
-            paddingRight: 2,
-            paddingTop: 0,
-            paddingBottom: 0,
+
+        this.spinnerBar = new BoxRenderable(this.renderer, {
+            id: 'spinner-bar',
+            height: 1,
+            width: '100%',
+            flexDirection: 'row',
+            paddingLeft: 1,
         });
-        card.add(dots);
-        this.narrativeScroll.add(card);
-        this.typingIndicatorCard = card;
+        this.spinnerBar.add(Text({ content: t`${fg(COLORS.title)('>')} ` }));
+        this.spinnerBar.add(spinnerText);
+
+        // Blur input so the terminal cursor hides
+        this.inputField.blur();
+
+        // Swap: remove input bar, add spinner bar in its place
+        this.layoutRoot.remove(this.inputBar.id);
+        this.layoutRoot.add(this.spinnerBar);
+
+        let frameIdx = 0;
+        this.spinnerTimer = setInterval(() => {
+            frameIdx = (frameIdx + 1) % SPINNER_FRAMES.length;
+            spinnerText.content = t`${fg(COLORS.title)(SPINNER_FRAMES[frameIdx])} ${fg(COLORS.textDim)('Uplink active...')}`;
+        }, SPINNER_INTERVAL_MS);
     }
 
     hideTypingIndicator(): void {
-        if (this.typingIndicatorCard) {
-            this.narrativeScroll.remove(this.typingIndicatorCard.id);
-            this.typingIndicatorCard = null;
+        if (this.spinnerTimer) {
+            clearInterval(this.spinnerTimer);
+            this.spinnerTimer = null;
         }
+        if (this.spinnerBar) {
+            this.layoutRoot.remove(this.spinnerBar.id);
+            this.spinnerBar = null;
+        }
+        // Restore the input bar and re-focus
+        this.layoutRoot.add(this.inputBar);
+        this.inputField.focus();
     }
 
     // ─── TTS-Gated Typewriter Reveal (Per-Segment Card) ────────────────
@@ -1689,14 +1821,6 @@ export class GameUI {
 
     onInput(callback: (input: string) => void): void {
         this.inputCallback = callback;
-    }
-
-    disableInput(): void {
-        this.inputEnabled = false;
-    }
-
-    enableInput(): void {
-        this.inputEnabled = true;
     }
 
     // ─── Game Over ──────────────────────────────────────────────────────────
@@ -1867,6 +1991,20 @@ export class GameUI {
                     this.popupSelect.setSelectedIndex(0);
                     return;
                 }
+            }
+
+            // UI-local commands (do not send to the game agent).
+            if (cmd.name === 'mission') {
+                this.dismissPopup();
+                this.inputField.value = '';
+                this.showMissionModal();
+                return;
+            }
+            if (cmd.name === 'map') {
+                this.dismissPopup();
+                this.inputField.value = '';
+                this.showMapModal();
+                return;
             }
 
             // No targets needed — submit immediately

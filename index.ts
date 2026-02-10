@@ -17,6 +17,7 @@ import { GameResponseSchema } from './src/schema.js';
 import type { DisplaySegment, GameResponse } from './src/schema.js';
 import { StreamingSegmentParser } from './src/json-stream-parser.js';
 import { segmentToStyledChunks, countChunkChars, getHeaderCharCount } from './src/segment-style.js';
+import { renderMapStyled } from './src/map-render.js';
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -82,11 +83,30 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
             description: s.description,
             completed: s.completed,
         })),
+        mapText: renderMapStyled(
+            station,
+            { roomsVisited: state.roomsVisited, currentRoom: state.currentRoom, roomLootTaken: state.roomLootTaken },
+            station.mapLayout,
+        ),
     };
 }
 
 function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine: TTSEngine): SlashCommandDef[] {
     return [
+        {
+            name: 'map',
+            description: 'Open the station map (visited areas)',
+            needsTarget: false,
+            getTargets: () => [],
+            toPrompt: () => '/map',
+        },
+        {
+            name: 'mission',
+            description: 'Open mission objectives',
+            needsTarget: false,
+            getTargets: () => [],
+            toPrompt: () => '/mission',
+        },
         {
             name: 'look',
             description: 'Examine the room',

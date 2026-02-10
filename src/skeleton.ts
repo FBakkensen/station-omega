@@ -316,7 +316,7 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
     // Place a healing item in entry room if no loot there yet
     if (!rooms[0].lootSlot) {
         const healItem: ItemSkeleton = {
-            id: 'starter_heal',
+            id: 'emergency_medkit',
             category: 'medical',
             effect: { type: 'heal', value: 30, description: 'Emergency medkit' },
             isKeyItem: false,
@@ -333,7 +333,7 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
         if (boostCandidates.length > 0) {
             const boostRoom = rng.pick(boostCandidates);
             const boostItem: ItemSkeleton = {
-                id: 'combat_boost',
+                id: 'energy_shield',
                 category: 'weapon',
                 effect: { type: 'shield', value: 20, description: 'Energy shield absorbs damage' },
                 isKeyItem: false,

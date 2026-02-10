@@ -8,6 +8,7 @@ import type {
     NPCMemory,
     NPCBehaviorFlag,
 } from './types.js';
+import { generateMapLayout } from './map-layout.js';
 
 function makeNPCMemory(): NPCMemory {
     return {
@@ -89,14 +90,16 @@ export function assembleStation(
 
         items.set(skItem.id, {
             id: skItem.id,
-            name: cr?.name ?? skItem.id.replace(/_/g, ' '),
+            name: cr?.name ?? skItem.effect.description,
             description: cr?.description ?? skItem.effect.description,
             category: skItem.category,
             effect: { ...skItem.effect },
             isKeyItem: skItem.isKeyItem,
-            useNarration: cr?.useNarration ?? `You use the ${skItem.id.replace(/_/g, ' ')}.`,
+            useNarration: cr?.useNarration ?? `You use the ${skItem.effect.description}.`,
         });
     }
+
+    const mapLayout = generateMapLayout(rooms, skeleton.config.seed, skeleton.entryRoomId);
 
     return {
         config: skeleton.config,
@@ -110,5 +113,6 @@ export function assembleStation(
         entryRoomId: skeleton.entryRoomId,
         escapeRoomId: skeleton.escapeRoomId,
         crewRoster: [...creative.crewRoster],
+        mapLayout,
     };
 }

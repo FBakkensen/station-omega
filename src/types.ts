@@ -1,3 +1,5 @@
+import type { TextChunk } from '@opentui/core';
+
 // ─── Story & World Configuration ────────────────────────────────────────────
 
 export type StoryArc =
@@ -156,6 +158,15 @@ export interface StationSkeleton {
     escapeRoomId: string;
 }
 
+// ─── Map Layout (procedural, topology-safe) ────────────────────────────────
+
+export interface MapLayout {
+    seed: number;
+    positions: Map<string, { x: number; y: number }>;
+    bounds: { minX: number; maxX: number; minY: number; maxY: number };
+    scaleHint: { dx: number; dy: number };
+}
+
 // ─── Creative Types (AI-generated, narrative) ───────────────────────────────
 
 export interface RoomCreative {
@@ -259,6 +270,7 @@ export interface GeneratedStation {
     entryRoomId: string;
     escapeRoomId: string;
     crewRoster: CrewMember[];
+    mapLayout: MapLayout;
 }
 
 // ─── Moral Choices ──────────────────────────────────────────────────────────
@@ -414,6 +426,7 @@ export interface GameStatus {
     objectiveCurrentDesc: string;
     objectivesComplete: boolean;
     objectiveSteps: Array<{ description: string; completed: boolean }>;
+    mapText: TextChunk[];
 }
 
 // ─── Slash Commands (for TUI) ───────────────────────────────────────────────

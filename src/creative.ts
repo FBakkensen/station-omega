@@ -24,6 +24,7 @@ Atmospheric, horror-themed content. Style: Alien meets Dead Space. Crew logs sho
 - Room names must be evocative and unique (never generic like "Room 1")
 - Enemy names should reflect their tier and nature
 - Keep descriptions concise but atmospheric
+- Item names must be immersive and in-universe. Never use game-mechanic terms like "starter", "boost", "buff", "drop", or "objective". Name items as a space station crew member would.
 - Generate 3-5 crew roster members
 - Each room should have 1-2 crew logs
 - Provide 3 sounds, 2 smells, and 3 visuals per room`;
@@ -222,9 +223,9 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         const creative = (content.items ?? []).find(i => i.itemId === skItem.id);
         return {
             itemId: skItem.id,
-            name: creative?.name ?? skItem.id.replace(/_/g, ' '),
+            name: creative?.name ?? skItem.effect.description,
             description: creative?.description ?? skItem.effect.description,
-            useNarration: creative?.useNarration ?? `You use the ${skItem.id.replace(/_/g, ' ')}.`,
+            useNarration: creative?.useNarration ?? `You use the ${skItem.effect.description}.`,
         };
     });
 

@@ -542,7 +542,7 @@ async function runGameplay(
                     awaitingApiKey = true;
                 } else {
                     const nowEnabled = !ttsEngine.isAudioEnabled();
-                    ttsEngine.setAudioEnabled(nowEnabled);
+                    ttsEngine.setAudioEnabled(nowEnabled, true);
                     ui.appendNarrative(nowEnabled ? '*Voice narration enabled.*' : '*Voice narration disabled.*');
                     ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
                 }
@@ -589,8 +589,13 @@ async function main() {
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
     while (true) {
-        // TITLE screen — show Voice Setup option when no API key is configured
-        const choice = await ui.showTitleScreen(!globalTTS.hasApiKey());
+        // TITLE screen — show Voice Setup or Voice Toggle based on API key state
+        const hasKey = globalTTS.hasApiKey();
+        const choice = await ui.showTitleScreen({
+            showVoiceSetup: !hasKey,
+            showVoiceToggle: hasKey,
+            voiceEnabled: globalTTS.isAudioEnabled(),
+        });
         if (choice === 'quit') {
             break;
         }
@@ -611,6 +616,12 @@ async function main() {
                     // setApiKey failed (e.g. no ffplay) — will stay in silent mode
                 }
             }
+            continue;
+        }
+
+        if (choice === 'voice_toggle') {
+            const nowEnabled = !globalTTS.isAudioEnabled();
+            globalTTS.setAudioEnabled(nowEnabled, true);
             continue;
         }
 

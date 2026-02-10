@@ -236,6 +236,13 @@ export class TTSEngine {
             this.inworldApiKey = process.env['INWORLD_API_KEY'];
             await this.checkFfplay();
             this.audioEnabled = true;
+
+            // Check persisted voice preference
+            if (process.env['VOICE_ENABLED'] === 'false') {
+                this.audioEnabled = false;
+                this.debugLog('TTS', 'Voice disabled by VOICE_ENABLED=false setting');
+            }
+
             this.debugLog('TTS', `Initialized Inworld TTS client (${INWORLD_MODEL}). Temp dir: ${this.tempDir}`);
         } catch (err: unknown) {
             this.inworldApiKey = null;
@@ -730,10 +737,13 @@ export class TTSEngine {
         return this.audioEnabled;
     }
 
-    setAudioEnabled(value: boolean): void {
+    setAudioEnabled(value: boolean, persist = false): void {
         // Can't enable audio without an API key
         if (value && !this.inworldApiKey) return;
         this.audioEnabled = value;
+        if (persist) {
+            void this.persistVoiceEnabled(value);
+        }
     }
 
     /** Set the Inworld API key at runtime, enabling audio TTS. */
@@ -752,6 +762,7 @@ export class TTSEngine {
         this.audioEnabled = true;
         this.debugLog('TTS', 'Inworld API key set — audio TTS enabled');
         await this.persistApiKey(key);
+        void this.persistVoiceEnabled(true);
     }
 
     /** Write the Inworld API key to .env.local so Bun auto-loads it on next launch. */
@@ -779,6 +790,34 @@ export class TTSEngine {
         } catch (err: unknown) {
             // Persistence failure should never break the game
             this.debugLog('TTS', `Failed to persist API key: ${String(err)}`);
+        }
+    }
+
+    /** Write the voice enabled preference to .env.local so Bun auto-loads it on next launch. */
+    private async persistVoiceEnabled(enabled: boolean): Promise<void> {
+        const envPath = join(process.cwd(), '.env.local');
+        try {
+            let content = '';
+            try {
+                content = await readFile(envPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet — start fresh
+            }
+
+            const line = `VOICE_ENABLED=${String(enabled)}`;
+            if (/^VOICE_ENABLED=.*/m.test(content)) {
+                content = content.replace(/^VOICE_ENABLED=.*/m, () => line);
+            } else {
+                content = content.length > 0 && !content.endsWith('\n')
+                    ? `${content}\n${line}\n`
+                    : `${content}${line}\n`;
+            }
+
+            await writeFile(envPath, content, { mode: 0o600 });
+            this.debugLog('TTS', `Voice preference persisted to .env.local: ${String(enabled)}`);
+        } catch (err: unknown) {
+            // Persistence failure should never break the game
+            this.debugLog('TTS', `Failed to persist voice preference: ${String(err)}`);
         }
     }
 

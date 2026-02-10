@@ -612,7 +612,11 @@ export class GameUI {
 
     // ─── Title Screen ───────────────────────────────────────────────────────
 
-    showTitleScreen(showVoiceSetup = false): Promise<'new_run' | 'history' | 'voice_setup' | 'quit'> {
+    showTitleScreen(options: {
+        showVoiceSetup?: boolean;
+        showVoiceToggle?: boolean;
+        voiceEnabled?: boolean;
+    } = {}): Promise<'new_run' | 'history' | 'voice_setup' | 'voice_toggle' | 'quit'> {
         this.clearLayout();
 
         const artLines = TITLE_ART.map((line, i) =>
@@ -631,7 +635,10 @@ export class GameUI {
             { name: 'New Run', description: 'Begin a new expedition into Station Omega', value: 'new_run' },
             { name: 'Run History', description: 'View past expedition logs', value: 'history' },
         ];
-        if (showVoiceSetup) {
+        if (options.showVoiceToggle) {
+            const label = options.voiceEnabled ? 'Voice: ON' : 'Voice: OFF';
+            menuOptions.push({ name: label, description: 'Enable/Disable voice narration', value: 'voice_toggle' });
+        } else if (options.showVoiceSetup) {
             menuOptions.push({ name: 'Voice Setup', description: 'Enter Inworld API key for voice narration', value: 'voice_setup' });
         }
         menuOptions.push({ name: 'Quit', description: 'Exit the game', value: 'quit' });
@@ -691,7 +698,7 @@ export class GameUI {
             menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
                 const selected = menu.getSelectedOption();
                 if (!selected) return;
-                resolve(selected.value as 'new_run' | 'history' | 'voice_setup' | 'quit');
+                resolve(selected.value as 'new_run' | 'history' | 'voice_setup' | 'voice_toggle' | 'quit');
             });
         });
     }

@@ -208,6 +208,7 @@ The ending depends on the player's moral profile and mission completion:
 ## Rules
 - Always use the available tools to resolve player actions. Do not make up game state.
 - Do not invent rooms, logs, or sensory details not provided by tools. Use ONLY the data returned by tool calls.
+- Items must be narratively described before the player can pick them up. When entering a room or looking around, describe visible items using the item_visible and drop_visible fields. The pick_up_item tool will reject items that haven't been revealed through move_to or look_around.
 - When the player enters a new room, use look_around to describe it.
 - If the player says something conversational, stay in character as the station's environment/narrator.
 - The player starts in the entry room: ${station.entryRoomId}.

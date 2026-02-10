@@ -160,6 +160,7 @@ export function initializePlayerState(
         roomsVisited: new Set<string>([entryRoomId]),
         roomLootTaken: new Set<string>(),
         roomDrops: new Map<string, string>(),
+        revealedItems: new Set<string>(),
         hasObjectiveItem: false,
         gameOver: false,
         won: false,

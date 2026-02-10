@@ -122,6 +122,11 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
 
             const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
             const drop = state.roomDrops.get(state.currentRoom) ?? null;
+
+            // Reveal items so pick_up_item can validate discovery
+            if (lootPresent && room.loot) state.revealedItems.add(room.loot);
+            if (drop) state.revealedItems.add(drop);
+
             const threat = getRoomThreat(state.currentRoom, station);
             const exits = getAdjacentRooms(state, station).map(id => {
                 const r = station.rooms.get(id);
@@ -222,12 +227,20 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
             const room = station.rooms.get(targetId);
             const threat = getRoomThreat(targetId, station);
 
+            // Reveal items on room entry
+            const lootPresent = room?.loot && !state.roomLootTaken.has(targetId);
+            const drop = state.roomDrops.get(targetId) ?? null;
+            if (lootPresent && room.loot) state.revealedItems.add(room.loot);
+            if (drop) state.revealedItems.add(drop);
+
             return JSON.stringify({
                 success: true,
                 room_name: room?.name ?? targetId,
                 room_index: `${String([...station.rooms.keys()].indexOf(targetId) + 1)} of ${String(station.rooms.size)}`,
                 description: room?.descriptionSeed ?? '',
                 threat_present: threat ? threat.name : null,
+                item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
+                drop_visible: drop ? getItemName(drop, station) : null,
                 player_condition: hpDescription(state),
                 ambient_sound: room?.sensory.sounds[0] ?? '',
                 ambient_feel: room?.sensory.tactile ?? '',
@@ -273,6 +286,9 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
             // Check room loot
             const roomLootAvailable = room.loot && !state.roomLootTaken.has(state.currentRoom);
             if (roomLootAvailable && room.loot && (room.loot === itemId || room.loot.toLowerCase() === itemName)) {
+                if (!state.revealedItems.has(room.loot)) {
+                    return JSON.stringify({ error: 'You haven\'t noticed that item yet. Try looking around.' });
+                }
                 const actualId = room.loot;
                 state.roomLootTaken.add(state.currentRoom);
                 const item = station.items.get(actualId);
@@ -301,6 +317,9 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
             // Check enemy drop
             const drop = state.roomDrops.get(state.currentRoom);
             if (drop && (drop === itemId || station.items.get(drop)?.name.toLowerCase() === itemName)) {
+                if (!state.revealedItems.has(drop)) {
+                    return JSON.stringify({ error: 'You haven\'t noticed that item yet. Try looking around.' });
+                }
                 state.roomDrops.delete(state.currentRoom);
                 state.inventory.push(drop);
                 state.metrics.itemsCollected.push(drop);
@@ -480,6 +499,7 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 result.loot_dropped = getItemName(npc.drop, station);
                 result.loot_hint = `The ${npc.name} dropped ${getItemName(npc.drop, station)}. You can pick it up.`;
                 state.roomDrops.set(state.currentRoom, npc.drop);
+                state.revealedItems.add(npc.drop);
             }
 
             if (fled) {

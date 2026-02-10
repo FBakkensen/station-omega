@@ -365,6 +365,7 @@ export interface GameState {
     roomsVisited: Set<string>;
     roomLootTaken: Set<string>;
     roomDrops: Map<string, string>;
+    revealedItems: Set<string>;
     hasObjectiveItem: boolean;
     gameOver: boolean;
     won: boolean;

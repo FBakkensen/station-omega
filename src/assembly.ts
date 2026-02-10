@@ -65,7 +65,7 @@ export function assembleStation(
 
         npcs.set(skEnemy.id, {
             id: skEnemy.id,
-            name: cr?.name ?? `Entity-${String(skEnemy.tier)}`,
+            name: cr?.name ?? 'Unknown Hostile',
             roomId: hostRoom?.id ?? skeleton.entryRoomId,
             disposition: 'hostile',
             maxHp: skEnemy.hp,

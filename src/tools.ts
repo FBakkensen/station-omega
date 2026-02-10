@@ -867,7 +867,6 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     name: threat.name,
                     hp: `${String(threat.currentHp)}/${String(threat.maxHp)}`,
                     damage_range: `${String(threat.damage[0])}-${String(threat.damage[1])}`,
-                    tier: threat.tier,
                     behaviors: [...threat.behaviors],
                     flee_threshold: threat.fleeThreshold > 0 ? `Will flee below ${String(Math.round(threat.fleeThreshold * 100))}% HP` : 'Will not flee',
                     personality: threat.personality,

@@ -211,7 +211,7 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         const creative = (content.enemies ?? []).find(e => e.enemyId === skEnemy.id);
         return {
             enemyId: skEnemy.id,
-            name: creative?.name ?? `Entity-${String(skEnemy.tier)}${skEnemy.id.slice(-2)}`,
+            name: creative?.name ?? 'Unknown Hostile',
             appearance: creative?.appearance ?? 'A twisted form emerges from the shadows.',
             personality: creative?.personality ?? skEnemy.personality,
             deathDescription: creative?.deathDescription ?? 'It collapses and goes still.',

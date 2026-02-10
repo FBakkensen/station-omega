@@ -7,7 +7,7 @@ export function buildSystemPrompt(station: GeneratedStation, build: CharacterBui
         .join('\n');
 
     const npcList = [...station.npcs.values()]
-        .map(n => `- **${n.name}** (${n.id}): tier ${String(n.tier)}, ${n.disposition}, in room ${n.roomId}. ${n.appearance}`)
+        .map(n => `- **${n.name}** (${n.id}): ${n.disposition}, in room ${n.roomId}. ${n.appearance}`)
         .join('\n');
 
     const objectiveSteps = station.objectives.steps

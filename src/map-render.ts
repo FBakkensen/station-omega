@@ -7,17 +7,17 @@ import type { GameState, GeneratedStation, MapLayout, Room, RoomArchetype } from
 const ROOM_HALF_W = 3;   // half-width: room block is 7 chars (center ± 3)
 const ROOM_HALF_H = 1;   // half-height: room block is 3 rows (center ± 1)
 
-const ARCHETYPE_LABEL: Record<RoomArchetype, string> = {
-    entry:      'ENT',
-    escape:     'ESC',
-    medical:    'MED',
-    reactor:    'REA',
-    command:    'CMD',
-    science:    'SCI',
-    cargo:      'CGO',
-    quarters:   'QTR',
-    utility:    'UTL',
-    restricted: 'RES',
+const ARCHETYPE_ICON: Record<RoomArchetype, string> = {
+    entry:      '\u25B6',  // ▶
+    escape:     '\u2606',  // ☆
+    medical:    '\u271A',  // ✚
+    reactor:    '\u2622',  // ☢
+    command:    '\u2605',  // ★
+    science:    '\u269B',  // ⚛
+    cargo:      '\u25A3',  // ▣
+    quarters:   '\u2302',  // ⌂
+    utility:    '\u2699',  // ⚙
+    restricted: '\u2298',  // ⊘
 };
 
 // ─── Color Palette ─────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ function placeRoomBlock(
         : ['╭', '─', '╮', '│', '╰', '╯'];
 
     // Interior label (5 chars between left and right borders)
-    const label = isPlayer ? '  @  ' : ` ${ARCHETYPE_LABEL[archetype]} `;
+    const label = isPlayer ? '  \u25CE  ' : `  ${ARCHETYPE_ICON[archetype]}  `;
 
     // Top row
     set(gx - ROOM_HALF_W, gy - ROOM_HALF_H, makeCell(tl), 3);
@@ -458,13 +458,18 @@ function buildGrid(
             for (let i = 0; i < stubLen; i++) {
                 const x = a.gx + (useH ? sx * (startOffset + i) : 0);
                 const y = a.gy + (useH ? 0 : sy * (startOffset + i));
+                // Don't draw stubs through existing corridors between visited rooms
+                const existing = get(x, y);
+                if ((existing.role === 'corridor' && existing.stub !== true) || existing.role === 'junction') {
+                    break;
+                }
                 if (i < stubLen - 1) {
                     const ch = useH ? '─' : '│';
                     set(x, y, { char: ch, role: 'corridor', stub: true }, 1);
                 } else {
                     const targetRoom = station.rooms.get(nid);
                     const locked = Boolean(targetRoom?.lockedBy);
-                    set(x, y, { char: locked ? 'L' : '?', role: locked ? 'locked' : 'unknown' }, 1);
+                    set(x, y, { char: locked ? '\u2297' : '\u25CC', role: locked ? 'locked' : 'unknown' }, 1);
                 }
             }
         }
@@ -496,9 +501,9 @@ function buildGrid(
         if (!p) continue;
         const { gx, gy } = toGrid(p.x, p.y);
 
-        if (room.isObjectiveRoom) tryPlaceMarker(set, get, gx, gy, '+', 'objective');
-        if (room.loot && !state.roomLootTaken.has(id)) tryPlaceMarker(set, get, gx, gy, '$', 'loot');
-        if (isThreatAlive(room, station)) tryPlaceMarker(set, get, gx, gy, '*', 'threat');
+        if (room.isObjectiveRoom) tryPlaceMarker(set, get, gx, gy, '\u2295', 'objective');
+        if (room.loot && !state.roomLootTaken.has(id)) tryPlaceMarker(set, get, gx, gy, '\u25C6', 'loot');
+        if (isThreatAlive(room, station)) tryPlaceMarker(set, get, gx, gy, '\u2620', 'threat');
     }
 
     return grid;
@@ -509,14 +514,14 @@ function buildGrid(
 export function buildMapLegend(): TextChunk[] {
     const dim = '#5a6a7a';
     return [
-        bold(bg(PLAYER_BG)(fg(PLAYER_FG)(' @ '))), fg(dim)(' you  '),
-        bg(ROOM_BG.entry)(fg(ROOM_FG.entry)('ENT')), fg(dim)(' entry  '),
-        bg(ROOM_BG.escape)(fg(ROOM_FG.escape)('ESC')), fg(dim)(' escape  '),
-        bold(fg('#ff4444')('*')), fg(dim)(' threat  '),
-        bold(fg('#ffcc00')('$')), fg(dim)(' loot  '),
-        bold(fg('#00ff88')('+')), fg(dim)(' objective  '),
-        fg('#5a6a7a')('?'), fg(dim)(' unknown  '),
-        bold(fg('#ff8844')('L')), fg(dim)(' locked'),
+        bold(bg(PLAYER_BG)(fg(PLAYER_FG)(' \u25CE '))), fg(dim)(' you  '),
+        bg(ROOM_BG.entry)(fg(ROOM_FG.entry)('\u25B6')), fg(dim)(' entry  '),
+        bg(ROOM_BG.escape)(fg(ROOM_FG.escape)('\u2606')), fg(dim)(' escape  '),
+        bold(fg('#ff4444')('\u2620')), fg(dim)(' threat  '),
+        bold(fg('#ffcc00')('\u25C6')), fg(dim)(' loot  '),
+        bold(fg('#00ff88')('\u2295')), fg(dim)(' objective  '),
+        fg('#5a6a7a')('\u25CC'), fg(dim)(' unknown  '),
+        bold(fg('#ff8844')('\u2297')), fg(dim)(' locked'),
     ];
 }
 
@@ -595,7 +600,7 @@ export function renderMapText(
 
     if (opts.showLegend !== false) {
         lines.push('');
-        lines.push('Legend: @ you  ENT entry  ESC escape  * threat  $ loot  + objective  ? unknown  L locked');
+        lines.push('Legend: \u25CE you  \u25B6 entry  \u2606 escape  \u2620 threat  \u25C6 loot  \u2295 objective  \u25CC unknown  \u2297 locked');
         lines.push('Hint: F1 map  F2 mission  Esc close');
     }
 

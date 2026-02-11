@@ -18,10 +18,10 @@ Station Omega is an AI-powered text adventure game using the OpenAI Agents SDK (
 
 ### Source Files
 
-- **`index.ts`** — Main game loop: creates an `Agent<GameContext>` with dynamic instructions, `previousResponseId` chaining, and streaming via `run()`. Manages TTS, UI, event tracking, and player input.
+- **`index.ts`** — Main game loop: creates an `Agent<GameContext>` with static instructions, `previousResponseId` chaining, per-turn `system()` context messages, output guardrails, and streaming via `run()`. Manages TTS, UI, event tracking, and player input.
 - **`tui.ts`** — Terminal UI built with `@opentui/core`. Exports `GameUI` class with a scrollable narrative panel, per-segment card rendering, status bar, character selection, and input field.
 - **`src/tools.ts`** — All 16 game tools defined via `tool()` from `@openai/agents` with Zod schemas. Tools access shared state through `RunContext<GameContext>` dependency injection. Defines `GameContext` and `ChoiceSet` types.
-- **`src/prompt.ts`** — Builds the system prompt: static prefix (>1024 tokens for prompt caching) + dynamic state suffix injected per turn.
+- **`src/prompt.ts`** — Builds the static system prompt (>1024 tokens for prompt caching). Dynamic state is now passed per-turn via `system()` messages in the input array.
 - **`src/schema.ts`** — Zod schema for structured JSON output (`GameResponseSchema`). Defines `GameSegment` (5 types: narration, dialogue, thought, station_pa, crew_echo), `DisplaySegment` (with resolved speaker name + index), and `segmentToMarkdown()`.
 - **`src/types.ts`** — All TypeScript types: game state, station structure, NPC/item/room models, character builds, moral choices, scoring, events.
 - **`src/skeleton.ts`** — Phase 1 of station generation: deterministic room graph, items, enemies, and objectives using a seeded PRNG (LCG). Pure TypeScript, no AI calls.
@@ -62,9 +62,22 @@ Each player turn flows through:
 - **Tool-driven gameplay**: The AI never fabricates game state. All actions resolve through `tool()` handlers that read/write the shared `GameContext` via `RunContext`. New mechanics must follow this pattern.
 - **`RunContext<GameContext>` dependency injection**: All tools receive game state, station data, and callbacks through the Agents SDK's context mechanism — no closure-captured state. Use the `getCtx()` guard helper instead of non-null assertions.
 - **`previousResponseId` chaining**: Conversation history is managed server-side. Each turn passes only the new user message plus the previous response ID.
-- **Dynamic instructions**: The `Agent` uses a function for `instructions` that reads from `RunContext` to inject current game state (events, NPC hints, moral profile) as a variable suffix after the static prompt rules.
+- **Instructions/Context separation**: `Agent.instructions` is a static string (the full system prompt from `buildSystemPrompt()`), cached via `promptCacheRetention: '24h'`. Dynamic game state is passed as a `system()` message in the `input` array each turn, making the AI treat it as context to interpret rather than rules to follow.
 - **Combat is stateless per-round**: Enemy HP persists on the NPC object. Multi-round fights work because defeated enemies have `disposition: 'dead'`.
 - **Enemy drops mutate room data**: When an enemy drops loot, the drop is tracked in `state.roomDrops` and made pickable via `pick_up_item`.
+
+### AI-as-Game-Master Principle
+
+This game uses an AI narrator — the design should leverage that, not fight it.
+
+- **Tools are primitives.** HP, damage, dice rolls, inventory, room adjacency, locks, `revealedItems` gating. Tools return raw mechanical data — never narrative strings.
+- **The AI is the game master.** It interprets tool results and game state to generate the experience. Tools report what happened; the AI tells the story.
+- **Instructions vs Context.** `Agent.instructions` = static game rules (cacheable). Dynamic state (events, NPC hints, moral profile) = `system` message in the `input` array each turn. Rules are rules; state is context to interpret.
+- **Events are conditions, not scripts.** A power failure means the AI shifts to non-visual narration — not that tools strip data.
+- **NPC behaviors are tendencies.** Flags like `can_flee` indicate capability. The AI decides when and how they manifest.
+- **Output guardrails verify, not narrate.** The game engine validates AI output against rules (valid NPC IDs, crew names) via SDK output guardrails — pure TypeScript checks, no extra LLM call.
+
+When adding mechanics: "Is this physics (tool) or narration (AI)?" Dice rolls, HP, state transitions = tool. How it looks, sounds, feels = AI.
 
 ### Tech Stack
 
@@ -100,6 +113,6 @@ The Game Master uses `gpt-5.2` with `reasoning: { effort: 'none' }` — a reason
 - **Sandwich method**: Repeat critical instructions at both the beginning and end of the prompt via a `# Reminder` section.
 - **Think-before-act**: Since `reasoning: none` disables internal chain-of-thought, the prompt should encourage the model to consider game state before resolving actions.
 - **Preambles**: Instruct the model to write a brief atmospheric line before tool calls — this improves tool-calling accuracy and fits the narrative style.
-- **Prompt caching**: Structure dynamic instructions as static prefix (>1024 tokens, rules/format) + variable suffix (game state). Set `promptCacheRetention: '24h'` for extended caching.
+- **Prompt caching**: `Agent.instructions` is fully static (>1024 tokens). Dynamic game state is passed as `system()` messages in the input array, keeping the system prompt 100% cacheable. Set `promptCacheRetention: '24h'` for extended caching.
 - **Verbosity**: The `text: { verbosity: 'low' }` API parameter enforces concise output at the model level, complementing the prompt's "2-4 sentences" instruction.
 - **Compaction**: For long game sessions, consider using the Responses API `/responses/compact` endpoint to compress conversation history when approaching context limits.

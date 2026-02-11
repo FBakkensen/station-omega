@@ -19,14 +19,6 @@ function randInt(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function hpDescription(state: GameState): string {
-    const pct = state.hp / state.maxHp;
-    if (pct >= 0.8) return 'You feel strong and healthy.';
-    if (pct >= 0.5) return 'You have some cuts and bruises, but you can push on.';
-    if (pct >= 0.25) return 'You\'re badly wounded. Blood drips from several gashes.';
-    return 'You\'re barely standing. Vision blurring. Every breath hurts.';
-}
-
 function getAdjacentRooms(state: GameState, station: GeneratedStation): string[] {
     const room = station.rooms.get(state.currentRoom);
     if (!room) return [];
@@ -143,14 +135,17 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 description: room.descriptionSeed,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
                 drop_visible: drop ? getItemName(drop, station) : null,
-                threat: threat ? { name: threat.name, demeanor: threat.disposition, appearance: threat.appearance } : null,
+                threat: threat
+                    ? { name: threat.name, demeanor: threat.disposition, appearance: threat.appearance }
+                    : null,
                 npcs_present: getNPCsInRoom(state.currentRoom, station).map(npc => ({
                     name: npc.name,
                     disposition: npc.disposition,
                     is_ally: npc.isAlly,
                 })),
                 exits,
-                player_condition: hpDescription(state),
+                player_hp: state.hp,
+                player_maxHp: state.maxHp,
                 inventory: state.inventory.length > 0 ? state.inventory.map(id => getItemName(id, station)) : ['empty'],
                 sensory: room.sensory,
                 crew_logs: room.crewLogs,
@@ -212,7 +207,6 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 return JSON.stringify({
                     success: true,
                     room_name: targetRoom?.name ?? 'Escape',
-                    event: 'VICTORY! You made it to the escape point. Mission complete.',
                     game_over: true,
                     won: true,
                 });
@@ -241,9 +235,9 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 threat_present: threat ? threat.name : null,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
                 drop_visible: drop ? getItemName(drop, station) : null,
-                player_condition: hpDescription(state),
-                ambient_sound: room?.sensory.sounds[0] ?? '',
-                ambient_feel: room?.sensory.tactile ?? '',
+                player_hp: state.hp,
+                player_maxHp: state.maxHp,
+                sensory: room?.sensory ?? null,
                 is_revisit: (state.roomVisitCount.get(targetId) ?? 0) > 1,
                 enemy_defeated_here: room?.threat !== null && getRoomThreat(targetId, station) === null,
             });
@@ -276,18 +270,18 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
             // Threat blocks pickup
             const threat = getRoomThreat(state.currentRoom, station);
             if (threat) {
-                return JSON.stringify({ error: `The ${threat.name} is blocking the item. Deal with the threat first.` });
+                return JSON.stringify({ success: false, reason: 'threat_blocking', threat_name: threat.name });
             }
 
             if (state.inventory.length >= state.maxInventory) {
-                return JSON.stringify({ error: `Your inventory is full (${String(state.inventory.length)}/${String(state.maxInventory)}). Drop or use something first.` });
+                return JSON.stringify({ success: false, reason: 'inventory_full', current: state.inventory.length, max: state.maxInventory });
             }
 
             // Check room loot
             const roomLootAvailable = room.loot && !state.roomLootTaken.has(state.currentRoom);
             if (roomLootAvailable && room.loot && (room.loot === itemId || room.loot.toLowerCase() === itemName)) {
                 if (!state.revealedItems.has(room.loot)) {
-                    return JSON.stringify({ error: 'You haven\'t noticed that item yet. Try looking around.' });
+                    return JSON.stringify({ success: false, reason: 'not_revealed' });
                 }
                 const actualId = room.loot;
                 state.roomLootTaken.add(state.currentRoom);
@@ -298,9 +292,9 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     state.metrics.itemsCollected.push(actualId);
                     return JSON.stringify({
                         success: true,
-                        item: item.name,
-                        message: `You pick up the ${item.name}. ${item.description}`,
-                        objective: 'Continue your mission.',
+                        item_id: actualId,
+                        item_name: item.name,
+                        is_objective_item: true,
                     });
                 }
 
@@ -308,7 +302,8 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 state.metrics.itemsCollected.push(actualId);
                 return JSON.stringify({
                     success: true,
-                    item: item?.name ?? actualId,
+                    item_id: actualId,
+                    item_name: item?.name ?? actualId,
                     inventory: state.inventory.map(id => getItemName(id, station)),
                     slots_remaining: state.maxInventory - state.inventory.length,
                 });
@@ -318,23 +313,24 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
             const drop = state.roomDrops.get(state.currentRoom);
             if (drop && (drop === itemId || station.items.get(drop)?.name.toLowerCase() === itemName)) {
                 if (!state.revealedItems.has(drop)) {
-                    return JSON.stringify({ error: 'You haven\'t noticed that item yet. Try looking around.' });
+                    return JSON.stringify({ success: false, reason: 'not_revealed' });
                 }
                 state.roomDrops.delete(state.currentRoom);
                 state.inventory.push(drop);
                 state.metrics.itemsCollected.push(drop);
                 return JSON.stringify({
                     success: true,
-                    item: getItemName(drop, station),
+                    item_id: drop,
+                    item_name: getItemName(drop, station),
                     inventory: state.inventory.map(id => getItemName(id, station)),
                     slots_remaining: state.maxInventory - state.inventory.length,
                 });
             }
 
             if (!roomLootAvailable && !drop) {
-                return JSON.stringify({ error: 'There\'s nothing left to pick up in this room.' });
+                return JSON.stringify({ success: false, reason: 'nothing_available' });
             }
-            return JSON.stringify({ error: `There is no "${args.item}" here.` });
+            return JSON.stringify({ success: false, reason: 'not_found', requested: args.item });
         },
     });
 
@@ -370,7 +366,7 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
 
             // Key items are not consumed
             if (item.isKeyItem) {
-                return JSON.stringify({ success: true, item: item.name, effect: `The ${item.name} is a key item. Keep it.` });
+                return JSON.stringify({ success: false, reason: 'key_item', item_name: item.name });
             }
 
             state.inventory.splice(foundIdx, 1);
@@ -382,18 +378,18 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     const healed = Math.min(healAmount, state.maxHp - state.hp);
                     state.hp += healed;
                     state.metrics.totalDamageHealed += healed;
-                    return JSON.stringify({ success: true, item: item.name, effect: `Healed ${String(healed)} HP. ${item.useNarration}`, player_condition: hpDescription(state) });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'heal', healed, player_hp: state.hp, player_maxHp: state.maxHp });
                 }
                 case 'damage_boost': {
                     state.plasmaBoost = true;
-                    return JSON.stringify({ success: true, item: item.name, effect: `${item.useNarration} Next attack deals +${String(item.effect.value)} damage.` });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'damage_boost', bonus: item.effect.value });
                 }
                 case 'shield': {
                     state.shieldActive = true;
-                    return JSON.stringify({ success: true, item: item.name, effect: `${item.useNarration} Shield absorbs ${String(item.effect.value)} damage.` });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'shield', absorb: item.effect.value });
                 }
                 default:
-                    return JSON.stringify({ success: true, item: item.name, effect: item.useNarration });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type });
             }
         },
     });
@@ -479,7 +475,6 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     enemy_defeated: defeated,
                     player_died: true,
                     game_over: true,
-                    message: 'You have been killed.',
                 });
             }
 
@@ -491,19 +486,15 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
                 enemy_defeated: defeated,
                 enemy_remaining_hp: defeated ? 0 : npc.currentHp,
-                player_condition: hpDescription(state),
+                player_hp: state.hp,
+                player_maxHp: state.maxHp,
                 enemy_fled: fled,
             };
 
             if (defeated && npc.drop) {
                 result.loot_dropped = getItemName(npc.drop, station);
-                result.loot_hint = `The ${npc.name} dropped ${getItemName(npc.drop, station)}. You can pick it up.`;
                 state.roomDrops.set(state.currentRoom, npc.drop);
                 state.revealedItems.add(npc.drop);
-            }
-
-            if (fled) {
-                result.flee_message = `The ${npc.name} turns and flees deeper into the station!`;
             }
 
             return JSON.stringify(result);
@@ -605,11 +596,11 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 }
             }
 
-            // Add room modifier on success
+            // Add room modifier on success (mechanical flag only)
             if (outcome === 'critical_success' || outcome === 'success') {
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
-                    room.roomModifiers.push(args.action);
+                    room.roomModifiers.push(`creative_action_success:${String(state.turnCount)}`);
                 }
             }
 
@@ -622,7 +613,8 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 target,
                 modifiers,
                 damage_dealt_to_player: damageDealt > 0 ? damageDealt : undefined,
-                player_condition: hpDescription(state),
+                player_hp: state.hp,
+                player_maxHp: state.maxHp,
                 game_over: state.gameOver || undefined,
             });
         },
@@ -735,8 +727,8 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     success: true,
                     approach,
                     npc_name: npc.name,
+                    old_disposition: prevDisposition,
                     new_disposition: npc.disposition,
-                    personality_hint: npc.personality,
                     roll,
                     chance,
                     is_ally: npc.isAlly,
@@ -748,10 +740,8 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 approach,
                 npc_name: npc.name,
                 disposition: npc.disposition,
-                personality_hint: npc.personality,
                 roll,
                 chance,
-                message: `${npc.name} rejects your ${approach}.`,
             });
         },
     });
@@ -813,12 +803,12 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
             const currentStep = objectives.steps[objectives.currentStepIndex];
 
             if (currentStep.roomId !== state.currentRoom) {
-                return JSON.stringify({ error: 'You are not in the correct room for this objective.' });
+                return JSON.stringify({ success: false, reason: 'wrong_room' });
             }
 
             if (currentStep.requiredItemId && !state.inventory.includes(currentStep.requiredItemId) && !state.hasObjectiveItem) {
                 const itemName = getItemName(currentStep.requiredItemId, station);
-                return JSON.stringify({ error: `You need the ${itemName} to complete this objective.` });
+                return JSON.stringify({ success: false, reason: 'missing_item', required_item: itemName });
             }
 
             currentStep.completed = true;
@@ -830,7 +820,6 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     success: true,
                     description: args.step_description,
                     all_complete: true,
-                    message: 'All objectives complete! Head to the escape point!',
                     escape_room: station.rooms.get(station.escapeRoomId)?.name ?? 'escape',
                 });
             }
@@ -894,7 +883,7 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     const adjRoom = station.rooms.get(adjId);
                     if (adjRoom?.lockedBy && adjRoom.name.toLowerCase().includes(args.target.toLowerCase())) {
                         adjRoom.lockedBy = null;
-                        return JSON.stringify({ success: true, message: `You bypass the lock on ${adjRoom.name}. The door hisses open.` });
+                        return JSON.stringify({ success: true, action: 'bypass_lock', target_room: adjRoom.name });
                     }
                 }
 
@@ -905,11 +894,11 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     if (secretRoom && !room.connections.includes(room.secretConnection)) {
                         room.connections.push(room.secretConnection);
                         secretRoom.connections.push(state.currentRoom);
-                        return JSON.stringify({ success: true, message: `You discover a hidden passage to ${secretRoom.name}!` });
+                        return JSON.stringify({ success: true, action: 'reveal_passage', target_room: secretRoom.name });
                     }
                 }
 
-                return JSON.stringify({ success: true, message: 'You tinker with the systems. Something clicks.' });
+                return JSON.stringify({ success: true, action: 'generic' });
             },
         }) as Tool<GameContext>);
     }
@@ -928,7 +917,7 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 state.hp += healed;
                 state.metrics.totalDamageHealed += healed;
                 state.fieldSurgeryUsedInRoom.add(state.currentRoom);
-                return JSON.stringify({ success: true, healed, player_condition: hpDescription(state) });
+                return JSON.stringify({ success: true, healed, player_hp: state.hp, player_maxHp: state.maxHp });
             },
         }) as Tool<GameContext>);
     }
@@ -951,13 +940,13 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                         const room = station.rooms.get(state.currentRoom);
                         if (!room) return JSON.stringify({ error: 'Invalid room.' });
                         state.metrics.crewLogsFound += room.crewLogs.length;
-                        return JSON.stringify({ success: true, logs: room.crewLogs, message: 'All crew logs in this room decrypted.' });
+                        return JSON.stringify({ success: true, hack_type: 'crew_logs', logs: room.crewLogs });
                     }
                     case 'enemy_debuff': {
                         const threat = getRoomThreat(state.currentRoom, station);
                         if (!threat) return JSON.stringify({ error: 'No enemy to debuff.' });
                         threat.damage = [Math.floor(threat.damage[0] * 0.7), Math.floor(threat.damage[1] * 0.7)];
-                        return JSON.stringify({ success: true, message: `${threat.name}'s combat systems disrupted. Damage reduced.` });
+                        return JSON.stringify({ success: true, hack_type: 'enemy_debuff', target_name: threat.name, new_damage: threat.damage });
                     }
                     case 'reveal_map': {
                         const mapData = [...station.rooms.entries()].map(([id, r]) => ({
@@ -966,7 +955,7 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                             has_threat: r.threat !== null && getRoomThreat(id, station) !== null,
                             has_loot: r.loot !== null && !state.roomLootTaken.has(id),
                         }));
-                        return JSON.stringify({ success: true, map: mapData, message: 'Station layout downloaded.' });
+                        return JSON.stringify({ success: true, hack_type: 'reveal_map', map: mapData });
                     }
                     case 'secret_passage': {
                         const room = station.rooms.get(state.currentRoom);
@@ -975,7 +964,7 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                         if (secretRoom && !room.connections.includes(room.secretConnection)) {
                             room.connections.push(room.secretConnection);
                             secretRoom.connections.push(state.currentRoom);
-                            return JSON.stringify({ success: true, message: `Hidden passage to ${secretRoom.name} revealed!` });
+                            return JSON.stringify({ success: true, hack_type: 'secret_passage', target_room: secretRoom.name });
                         }
                         return JSON.stringify({ error: 'Passage already revealed.' });
                     }

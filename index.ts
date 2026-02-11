@@ -1,5 +1,5 @@
-import { Agent, run } from '@openai/agents';
-import type { RunContext, RunStreamEvent } from '@openai/agents';
+import { Agent, run, system, user } from '@openai/agents';
+import type { OutputGuardrail, RunStreamEvent } from '@openai/agents';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
 import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, NPCDisplayInfo, GameStatus, StoryArc } from './src/types.js';
@@ -220,15 +220,10 @@ function resolveSegment(
     return { ...seg, type: seg.type as DisplaySegment['type'], speakerName, segmentIndex };
 }
 
-// ─── Dynamic Instructions ───────────────────────────────────────────────────
+// ─── Turn Context ───────────────────────────────────────────────────────────
 
-function buildGameInstructions(runContext: RunContext<GameContext>): string {
-    const { state, station, build } = runContext.context;
-
-    // STATIC prefix (cached by OpenAI — must come first, >1024 tokens)
-    const staticRules = buildSystemPrompt(station, build);
-
-    // VARIABLE suffix (game state that changes each turn)
+/** Build dynamic per-turn context as a system message. Returns null if no context needed. */
+function buildTurnContext(state: GameState, station: GeneratedStation): string | null {
     const parts: string[] = [];
 
     // Active events
@@ -236,30 +231,34 @@ function buildGameInstructions(runContext: RunContext<GameContext>): string {
         parts.push(getEventContext(state.activeEvents));
     }
 
-    // NPC behavior hints
+    // NPC state hints (raw data for AI to interpret)
     const roomNpcs = [...station.npcs.values()].filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
     for (const npc of roomNpcs) {
-        if (npc.behaviors.has('can_flee') && npc.currentHp < npc.maxHp * npc.fleeThreshold) {
-            parts.push(`NPC HINT: ${npc.name} looks ready to flee.`);
+        const hpPct = npc.currentHp / npc.maxHp;
+        if (npc.behaviors.has('can_flee') && hpPct < npc.fleeThreshold) {
+            parts.push(`NPC STATE: ${npc.name} — HP ${String(Math.round(hpPct * 100))}%, below flee threshold`);
         }
-        if (npc.behaviors.has('can_beg') && npc.currentHp < npc.maxHp * 0.3) {
-            parts.push(`NPC HINT: ${npc.name} is whimpering, seeming to beg for mercy.`);
+        if (npc.behaviors.has('can_beg') && hpPct < 0.3) {
+            parts.push(`NPC STATE: ${npc.name} — HP ${String(Math.round(hpPct * 100))}%, severely wounded`);
         }
         if (npc.isAlly) {
             parts.push(`ALLY: ${npc.name} is fighting alongside you.`);
         }
     }
 
-    // Moral profile hint
+    // Moral profile (raw scores — let the AI interpret)
     const { mercy, sacrifice, pragmatic } = state.moralProfile.tendencies;
     if (mercy + sacrifice + pragmatic > 0) {
-        const dominant = mercy >= sacrifice && mercy >= pragmatic ? 'merciful'
-            : sacrifice >= pragmatic ? 'self-sacrificing' : 'pragmatic';
-        parts.push(`MORAL PROFILE: The player has shown ${dominant} tendencies.`);
+        parts.push(`MORAL PROFILE: mercy=${String(mercy)}, sacrifice=${String(sacrifice)}, pragmatic=${String(pragmatic)}`);
     }
 
-    const dynamicState = parts.join('\n\n');
-    return dynamicState ? `${staticRules}\n\n# Current State\n${dynamicState}` : staticRules;
+    // Player condition as raw ratio
+    const hpPct = state.hp / state.maxHp;
+    if (hpPct < 0.5) {
+        parts.push(`PLAYER CONDITION: HP ${String(state.hp)}/${String(state.maxHp)} (${String(Math.round(hpPct * 100))}%)`);
+    }
+
+    return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
 // ─── Run Gameplay ───────────────────────────────────────────────────────────
@@ -324,13 +323,45 @@ async function runGameplay(
     debugLog('SYSTEM', buildSystemPrompt(station, build));
     ui.setDebugLog(debugLog);
 
-    // Create game agent with dynamic instructions
+    // Static instructions string (fully cacheable with promptCacheRetention)
+    const staticInstructions = buildSystemPrompt(station, build);
+
+    // Output guardrail — validates AI output against game rules (no extra LLM call)
+    const gameRulesGuardrail: OutputGuardrail<typeof GameResponseSchema> = {
+        name: 'game-rules-check',
+        execute: ({ agentOutput: response }) => {
+            const issues: string[] = [];
+
+            for (const seg of response.segments) {
+                // Dialogue must reference a living NPC in the current room
+                if (seg.type === 'dialogue' && seg.npcId) {
+                    const npc = station.npcs.get(seg.npcId);
+                    if (!npc) issues.push(`Unknown NPC ID: ${seg.npcId}`);
+                    else if (npc.disposition === 'dead') issues.push(`Dead NPC speaking: ${seg.npcId}`);
+                    else if (npc.roomId !== state.currentRoom) issues.push(`NPC not in room: ${seg.npcId}`);
+                }
+                // Crew echo must reference a roster member
+                if (seg.type === 'crew_echo' && seg.crewName) {
+                    const found = station.crewRoster.some(c => c.name === seg.crewName);
+                    if (!found) issues.push(`Unknown crew name: ${seg.crewName}`);
+                }
+            }
+
+            return Promise.resolve({
+                tripwireTriggered: issues.length > 0,
+                outputInfo: { issues },
+            });
+        },
+    };
+
+    // Create game agent with static instructions (context passed per-turn via system message)
     const gameAgent = new Agent<GameContext, typeof GameResponseSchema>({
         name: 'GameMaster',
         model: 'gpt-5.2',
-        instructions: buildGameInstructions,
+        instructions: staticInstructions,
         tools,
         outputType: GameResponseSchema,
+        outputGuardrails: [gameRulesGuardrail],
         modelSettings: {
             store: true,
             promptCacheRetention: '24h',
@@ -372,7 +403,14 @@ async function runGameplay(
     async function sendPrompt(prompt: string): Promise<void> {
         tickTurn();
 
-        const stream = await run(gameAgent, prompt, {
+        // Build per-turn context as a system message (dynamic state the AI interprets)
+        const turnContext = buildTurnContext(state, station);
+        const input = [
+            ...(turnContext ? [system(turnContext)] : []),
+            user(prompt),
+        ];
+
+        const stream = await run(gameAgent, input, {
             stream: true,
             context: gameCtx,
             maxTurns: 10,
@@ -446,7 +484,18 @@ async function runGameplay(
         }
 
         // Capture response ID for next turn's chaining
-        lastResponseId = stream.lastResponseId;
+        try {
+            lastResponseId = stream.lastResponseId;
+        } catch (err: unknown) {
+            // Output guardrail tripwire — log and continue (segments already rendered)
+            const errObj = err as { result?: { output?: { issues?: string[] } } };
+            const issues = errObj.result?.output?.issues;
+            if (issues) {
+                debugLog('GUARDRAIL', `Game rules check tripped: ${issues.join(', ')}`);
+            } else {
+                debugLog('GUARDRAIL', `Output guardrail error: ${String(err)}`);
+            }
+        }
 
         // Log the raw JSON response
         if (rawJson) {

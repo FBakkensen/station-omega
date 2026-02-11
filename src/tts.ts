@@ -164,7 +164,7 @@ const SENTENCE_END_RE = /[.!?](?:\s|$)/;
 
 // ─── TTS Engine ────────────────────────────────────────────────────────────
 
-const DEFAULT_CHARS_PER_SEC = 25;
+const DEFAULT_CHARS_PER_SEC = 18;
 
 interface TTSEngineOptions {
     debugLog?: (label: string, content: string) => void;

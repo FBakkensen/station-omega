@@ -1,15 +1,16 @@
-import { Agent, run, system, user } from '@openai/agents';
+import { run, system, user } from '@openai/agents';
 import type { OutputGuardrail, RunStreamEvent } from '@openai/agents';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
-import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, NPCDisplayInfo, GameStatus, StoryArc } from './src/types.js';
+import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, NPCDisplayInfo, GameStatus, StoryArc, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
 import { generateSkeleton } from './src/skeleton.js';
 import { generateCreativeContent } from './src/creative.js';
 import { assembleStation } from './src/assembly.js';
 import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/character.js';
-import { createGameTools } from './src/tools.js';
+import { createGameToolSets } from './src/tools.js';
 import type { GameContext, ChoiceSet } from './src/tools.js';
-import { buildSystemPrompt } from './src/prompt.js';
+import { buildOrchestratorPrompt } from './src/prompt.js';
+import { createAgents } from './src/agents.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
@@ -18,6 +19,18 @@ import type { DisplaySegment, GameResponse } from './src/schema.js';
 import { StreamingSegmentParser } from './src/json-stream-parser.js';
 import { segmentToStyledChunks, countChunkChars, getHeaderCharCount } from './src/segment-style.js';
 import { renderMapStyled } from './src/map-render.js';
+
+// ─── Turn Snapshot (for rollback on error) ──────────────────────────────────
+
+interface TurnSnapshot {
+    state: GameState;
+    npcs: Map<string, NPC>;
+    rooms: Map<string, Room>;
+    objectives: ObjectiveChain;
+    eventLastTriggered: Map<EventType, number>;
+    lastResponseId: string | undefined;
+    pendingChoices: ChoiceSet | null;
+}
 
 // ─── Debug Log ──────────────────────────────────────────────────────────────
 
@@ -311,7 +324,7 @@ async function runGameplay(
         onChoices: (cs) => { pendingChoices = cs; },
     };
 
-    const tools = createGameTools(classId);
+    const toolSets = createGameToolSets(classId);
 
     // Wire TTS reveal callback — syncs text display with audio playback
     ttsEngine.onRevealChunk = (segmentIndex, charBudget, durationSec) => {
@@ -320,11 +333,8 @@ async function runGameplay(
     };
 
     initDebugLog();
-    debugLog('SYSTEM', buildSystemPrompt(station, build));
+    debugLog('SYSTEM', buildOrchestratorPrompt(station, build));
     ui.setDebugLog(debugLog);
-
-    // Static instructions string (fully cacheable with promptCacheRetention)
-    const staticInstructions = buildSystemPrompt(station, build);
 
     // Output guardrail — validates AI output against game rules (no extra LLM call)
     const gameRulesGuardrail: OutputGuardrail<typeof GameResponseSchema> = {
@@ -354,28 +364,17 @@ async function runGameplay(
         },
     };
 
-    // Create game agent with static instructions (context passed per-turn via system message)
-    const gameAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'GameMaster',
-        model: 'gpt-5.2',
-        instructions: staticInstructions,
-        tools,
-        outputType: GameResponseSchema,
-        outputGuardrails: [gameRulesGuardrail],
-        modelSettings: {
-            store: true,
-            promptCacheRetention: '24h',
-            reasoning: { effort: 'none' },
-            text: { verbosity: 'low' },
-        },
-    });
+    // Create orchestrator + specialist agents with handoffs
+    const { gameMaster, combatAgent } = createAgents(station, build, toolSets, gameRulesGuardrail);
 
-    // Post-tool-use hook: check for game over after attack
-    gameAgent.on('agent_tool_end', (_ctx, toolDef) => {
-        if (toolDef.name === 'attack' && state.hp <= 0) {
-            state.gameOver = true;
-        }
-    });
+    // Post-tool-use hook: check for game over after attack (on both agents that have the attack tool)
+    for (const agent of [gameMaster, combatAgent]) {
+        agent.on('agent_tool_end', (_ctx, toolDef) => {
+            if (toolDef.name === 'attack' && state.hp <= 0) {
+                state.gameOver = true;
+            }
+        });
+    }
 
     let lastResponseId: string | undefined;
     let turnId = 0;
@@ -400,49 +399,112 @@ async function runGameplay(
         }
     }
 
+    function createSnapshot(): TurnSnapshot {
+        return {
+            state: structuredClone(state),
+            npcs: structuredClone(station.npcs),
+            rooms: structuredClone(station.rooms),
+            objectives: structuredClone(station.objectives),
+            eventLastTriggered: structuredClone(eventTracker.lastTriggered),
+            lastResponseId,
+            pendingChoices: pendingChoices ? structuredClone(pendingChoices) : null,
+        };
+    }
+
+    function restoreSnapshot(snapshot: TurnSnapshot): void {
+        // GameState: copy all fields onto the live state object
+        Object.assign(state, snapshot.state);
+
+        // Station NPCs: replace Map contents
+        station.npcs.clear();
+        for (const [id, npc] of snapshot.npcs) station.npcs.set(id, npc);
+
+        // Station Rooms: replace Map contents
+        station.rooms.clear();
+        for (const [id, room] of snapshot.rooms) station.rooms.set(id, room);
+
+        // Objectives: mutate in place (reference used by tools)
+        station.objectives.currentStepIndex = snapshot.objectives.currentStepIndex;
+        station.objectives.completed = snapshot.objectives.completed;
+        station.objectives.steps = snapshot.objectives.steps;
+
+        // Event tracker cooldowns
+        eventTracker.lastTriggered = snapshot.eventLastTriggered;
+
+        // Turn-level variables
+        lastResponseId = snapshot.lastResponseId;
+        pendingChoices = snapshot.pendingChoices;
+    }
+
     async function sendPrompt(prompt: string): Promise<void> {
-        tickTurn();
+        const snapshot = createSnapshot();
 
-        // Build per-turn context as a system message (dynamic state the AI interprets)
-        const turnContext = buildTurnContext(state, station);
-        const input = [
-            ...(turnContext ? [system(turnContext)] : []),
-            user(prompt),
-        ];
+        try {
+            tickTurn();
 
-        const stream = await run(gameAgent, input, {
-            stream: true,
-            context: gameCtx,
-            maxTurns: 10,
-            previousResponseId: lastResponseId,
-        });
+            // Build per-turn context as a system message (dynamic state the AI interprets)
+            const turnContext = buildTurnContext(state, station);
+            const input = [
+                ...(turnContext ? [system(turnContext)] : []),
+                user(prompt),
+            ];
 
-        // Process streaming events with JSON segment parser
-        let rawJson = '';
-        let streamStarted = false;
-        let segmentsRendered = 0;
-        const segmentParser = new StreamingSegmentParser();
-        for await (const event of stream as AsyncIterable<RunStreamEvent>) {
-            if (event.type === 'raw_model_stream_event') {
-                const data = event.data as { type: string; delta?: string };
-                if (data.type === 'output_text_delta' && data.delta) {
-                    rawJson += data.delta;
-                    if (!streamStarted) {
-                        // Set narrator context for dynamic mood steering
-                        const room = station.rooms.get(state.currentRoom);
-                        const inCombat = room?.threat != null && station.npcs.get(room.threat)?.disposition !== 'dead';
-                        const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
-                        ttsEngine.setNarratorContext({
-                            inCombat,
-                            hpPercent: (state.hp / state.maxHp) * 100,
-                            isNewRoom: visitCount <= 1,
-                        });
-                        ttsEngine.beginStream();
-                        streamStarted = true;
+            const stream = await run(gameMaster, input, {
+                stream: true,
+                context: gameCtx,
+                maxTurns: 12,
+                previousResponseId: lastResponseId,
+            });
+
+            // Process streaming events with JSON segment parser
+            let rawJson = '';
+            let streamStarted = false;
+            let segmentsRendered = 0;
+            const segmentParser = new StreamingSegmentParser();
+            for await (const event of stream as AsyncIterable<RunStreamEvent>) {
+                // Log agent handoffs for debugging
+                if (event.type === 'agent_updated_stream_event') {
+                    debugLog('HANDOFF', `Active agent: ${event.agent.name}`);
+                }
+                if (event.type === 'raw_model_stream_event') {
+                    const data = event.data as { type: string; delta?: string };
+                    if (data.type === 'output_text_delta' && data.delta) {
+                        rawJson += data.delta;
+                        if (!streamStarted) {
+                            // Set narrator context for dynamic mood steering
+                            const room = station.rooms.get(state.currentRoom);
+                            const inCombat = room?.threat != null && station.npcs.get(room.threat)?.disposition !== 'dead';
+                            const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
+                            ttsEngine.setNarratorContext({
+                                inCombat,
+                                hpPercent: (state.hp / state.maxHp) * 100,
+                                isNewRoom: visitCount <= 1,
+                            });
+                            ttsEngine.beginStream();
+                            streamStarted = true;
+                        }
+                        // Extract complete segments from incremental JSON
+                        const segments = segmentParser.push(data.delta);
+                        for (const seg of segments) {
+                            const display = resolveSegment(seg, segmentsRendered, station);
+                            const chunks = segmentToStyledChunks(display);
+                            const headerChars = getHeaderCharCount(display);
+                            const bodyChars = countChunkChars(chunks) - headerChars;
+                            ui.pushSegmentCard(display, chunks, headerChars);
+                            ttsEngine.pushSegment(seg, bodyChars);
+                            segmentsRendered++;
+                            debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
+                        }
                     }
-                    // Extract complete segments from incremental JSON
-                    const segments = segmentParser.push(data.delta);
-                    for (const seg of segments) {
+                }
+            }
+
+            // Fallback: if streaming yielded no segments, try full parse of rawJson
+            if (rawJson && segmentsRendered === 0) {
+                debugLog('WARN', 'No segments extracted during stream — fallback parse');
+                try {
+                    const parsed = JSON.parse(rawJson) as GameResponse;
+                    for (const seg of parsed.segments) {
                         const display = resolveSegment(seg, segmentsRendered, station);
                         const chunks = segmentToStyledChunks(display);
                         const headerChars = getHeaderCharCount(display);
@@ -450,90 +512,83 @@ async function runGameplay(
                         ui.pushSegmentCard(display, chunks, headerChars);
                         ttsEngine.pushSegment(seg, bodyChars);
                         segmentsRendered++;
-                        debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
                     }
+                } catch {
+                    // Strip JSON scaffolding and show whatever text we got
+                    const textMatches = rawJson.match(/"text"\s*:\s*"([^"]+)"/gu);
+                    if (textMatches) {
+                        const fallbackText = textMatches
+                            .map(m => m.replace(/"text"\s*:\s*"/u, '').replace(/"$/u, ''))
+                            .join('\n\n');
+                        ui.appendNarrative(fallbackText);
+                    }
+                    debugLog('WARN', `Fallback parse failed. Raw: ${rawJson.slice(0, 200)}`);
                 }
             }
-        }
 
-        // Fallback: if streaming yielded no segments, try full parse of rawJson
-        if (rawJson && segmentsRendered === 0) {
-            debugLog('WARN', 'No segments extracted during stream — fallback parse');
+            // Capture response ID for next turn's chaining
             try {
-                const parsed = JSON.parse(rawJson) as GameResponse;
-                for (const seg of parsed.segments) {
-                    const display = resolveSegment(seg, segmentsRendered, station);
-                    const chunks = segmentToStyledChunks(display);
-                    const headerChars = getHeaderCharCount(display);
-                    const bodyChars = countChunkChars(chunks) - headerChars;
-                    ui.pushSegmentCard(display, chunks, headerChars);
-                    ttsEngine.pushSegment(seg, bodyChars);
-                    segmentsRendered++;
+                lastResponseId = stream.lastResponseId;
+            } catch (err: unknown) {
+                // Output guardrail tripwire — log and continue (segments already rendered)
+                const errObj = err as { result?: { output?: { issues?: string[] } } };
+                const issues = errObj.result?.output?.issues;
+                if (issues) {
+                    debugLog('GUARDRAIL', `Game rules check tripped: ${issues.join(', ')}`);
+                } else {
+                    debugLog('GUARDRAIL', `Output guardrail error: ${String(err)}`);
                 }
-            } catch {
-                // Strip JSON scaffolding and show whatever text we got
-                const textMatches = rawJson.match(/"text"\s*:\s*"([^"]+)"/gu);
-                if (textMatches) {
-                    const fallbackText = textMatches
-                        .map(m => m.replace(/"text"\s*:\s*"/u, '').replace(/"$/u, ''))
-                        .join('\n\n');
-                    ui.appendNarrative(fallbackText);
+            }
+
+            // Log the raw JSON response
+            if (rawJson) {
+                debugLog('AI-RAW', rawJson);
+            }
+
+            // Post-stream finalization
+            ui.disableCombatGlitch();
+            ui.updateStatus(getStatus(state, station));
+
+            const afterStream = () => {
+                debugLog('SESSION', 'afterStream — calling finalizeAllCards');
+                ui.finalizeAllCards();
+                if (pendingChoices) {
+                    ui.showChoiceCards(pendingChoices.title, pendingChoices.choices);
+                    pendingChoices = null;
                 }
-                debugLog('WARN', `Fallback parse failed. Raw: ${rawJson.slice(0, 200)}`);
-            }
-        }
+                if (state.gameOver) {
+                    ui.showGameOver(state.won);
+                }
+            };
 
-        // Capture response ID for next turn's chaining
-        try {
-            lastResponseId = stream.lastResponseId;
+            // Flush TTS pipeline and finalize UI
+            const thisTurn = turnId;
+            debugLog('SESSION', 'Waiting for TTS flushStream...');
+            try {
+                await ttsEngine.flushStream();
+                if (turnId !== thisTurn) {
+                    debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
+                    return;
+                }
+                debugLog('SESSION', 'flushStream resolved');
+                afterStream();
+            } catch (err: unknown) {
+                debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
+                ttsEngine.stop();
+                ui.appendNarrative('*Voice system error — audio disabled for this response.*');
+                afterStream();
+            }
         } catch (err: unknown) {
-            // Output guardrail tripwire — log and continue (segments already rendered)
-            const errObj = err as { result?: { output?: { issues?: string[] } } };
-            const issues = errObj.result?.output?.issues;
-            if (issues) {
-                debugLog('GUARDRAIL', `Game rules check tripped: ${issues.join(', ')}`);
-            } else {
-                debugLog('GUARDRAIL', `Output guardrail error: ${String(err)}`);
-            }
-        }
-
-        // Log the raw JSON response
-        if (rawJson) {
-            debugLog('AI-RAW', rawJson);
-        }
-
-        // Post-stream finalization
-        ui.disableCombatGlitch();
-        ui.updateStatus(getStatus(state, station));
-
-        const afterStream = () => {
-            debugLog('SESSION', 'afterStream — calling finalizeAllCards');
-            ui.finalizeAllCards();
-            if (pendingChoices) {
-                ui.showChoiceCards(pendingChoices.title, pendingChoices.choices);
-                pendingChoices = null;
-            }
-            if (state.gameOver) {
-                ui.showGameOver(state.won);
-            }
-        };
-
-        // Flush TTS pipeline and finalize UI
-        const thisTurn = turnId;
-        debugLog('SESSION', 'Waiting for TTS flushStream...');
-        try {
-            await ttsEngine.flushStream();
-            if (turnId !== thisTurn) {
-                debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
-                return;
-            }
-            debugLog('SESSION', 'flushStream resolved');
-            afterStream();
-        } catch (err: unknown) {
-            debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
+            debugLog('SESSION', `Turn failed, rolling back: ${String(err)}`);
+            restoreSnapshot(snapshot);
             ttsEngine.stop();
-            ui.appendNarrative('*Voice system error — audio disabled for this response.*');
-            afterStream();
+            ui.discardTurnCards();
+            ui.hideTypingIndicator();
+            ui.disableCombatGlitch();
+            ui.updateStatus(getStatus(state, station));
+            ui.appendNarrative(
+                '*Static crackles through the comms. The station systems are unresponsive. Try again.*'
+            );
         }
     }
 
@@ -622,11 +677,7 @@ async function runGameplay(
             ui.appendPlayerCommand(input);
             ui.showTypingIndicator();
             sendPrompt(input).catch((err: unknown) => {
-                debugLog('SESSION', `sendPrompt error: ${String(err)}`);
-                ttsEngine.stop();
-                ui.hideTypingIndicator();
-                ui.finalizeAllCards();
-                ui.appendNarrative('*Static crackles through the comms. The station systems are unresponsive. Try again.*');
+                debugLog('SESSION', `Unhandled sendPrompt error: ${String(err)}`);
             });
         });
     });

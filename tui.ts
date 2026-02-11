@@ -1310,6 +1310,19 @@ export class GameUI {
         this.debugLog?.('UI-PUSH-CARD', `seg[${String(seg.segmentIndex)}] type=${seg.type} speaker=${seg.speakerName ?? 'none'} totalChars=${String(totalChars)} headerChars=${String(headerChars)}`);
     }
 
+    /** Remove all segment cards from a failed turn without revealing them. */
+    discardTurnCards(): void {
+        this.debugLog?.('UI-DISCARD', `Discarding ${String(this.segmentCards.length)} cards`);
+        this.stopRevealTimer();
+        for (const card of this.segmentCards) {
+            if (card.addedToScroll) {
+                this.narrativeScroll.remove(card.cardBox.id);
+            }
+        }
+        this.segmentCards = [];
+        this.revealFirstChunk = true;
+    }
+
     /** Instantly reveal all remaining text in all segment cards and reset state. */
     finalizeAllCards(): void {
         this.debugLog?.('UI-FINALIZE', `Finalizing ${String(this.segmentCards.length)} cards`);

@@ -99,9 +99,18 @@ function defineSuggestTool(
     });
 }
 
-// ─── Tool Factory ───────────────────────────────────────────────────────────
+// ─── Tool Sets ──────────────────────────────────────────────────────────────
 
-export function createGameTools(classId: string): Tool<GameContext>[] {
+export interface GameToolSets {
+    all: Tool<GameContext>[];           // All tools (orchestrator)
+    combat: Tool<GameContext>[];        // attack, suggest_attacks, use_item, [tactical_scan]
+    dialogue: Tool<GameContext>[];      // interact_npc, suggest_interactions, record_moral_choice, use_item
+    exploration: Tool<GameContext>[];   // look_around, move_to, pick_up_item, attempt_action,
+                                        // suggest_actions, complete_objective, field_surgery,
+                                        // [bypass_system], [system_hack]
+}
+
+export function createGameToolSets(classId: string): GameToolSets {
 
     const lookAround = tool({
         name: 'look_around',
@@ -837,14 +846,13 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
 
     // ─── Class-Specific Tools ───────────────────────────────────────────────
 
-    const tools: Tool<GameContext>[] = [
-        lookAround, moveTo, pickUpItem, useItem, attackTool,
-        suggestAttacks, attemptAction, interactNPC, suggestInteractions,
-        recordMoralChoice, suggestActions, completeObjective,
-    ];
+    let tacticalScan: Tool<GameContext> | null = null;
+    let bypassSystem: Tool<GameContext> | null = null;
+    let fieldSurgery: Tool<GameContext> | null = null;
+    let systemHack: Tool<GameContext> | null = null;
 
     if (classId === 'soldier') {
-        tools.push(tool({
+        tacticalScan = tool({
             name: 'tactical_scan',
             description: 'Reveal enemy stats and weaknesses before combat. Soldier class ability.',
             parameters: z.object({}),
@@ -861,11 +869,11 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                     personality: threat.personality,
                 });
             },
-        }) as Tool<GameContext>);
+        }) as Tool<GameContext>;
     }
 
     if (classId === 'engineer') {
-        tools.push(tool({
+        bypassSystem = tool({
             name: 'bypass_system',
             description: 'Bypass a locked door without a keycard, or repair a system. Engineer class ability. Requires multitool in inventory.',
             parameters: z.object({
@@ -900,11 +908,11 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
 
                 return JSON.stringify({ success: true, action: 'generic' });
             },
-        }) as Tool<GameContext>);
+        }) as Tool<GameContext>;
     }
 
     if (classId === 'medic') {
-        tools.push(tool({
+        fieldSurgery = tool({
             name: 'field_surgery',
             description: 'Heal 15 HP using medical expertise. Usable once per room. Medic class ability.',
             parameters: z.object({}),
@@ -919,11 +927,11 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                 state.fieldSurgeryUsedInRoom.add(state.currentRoom);
                 return JSON.stringify({ success: true, healed, player_hp: state.hp, player_maxHp: state.maxHp });
             },
-        }) as Tool<GameContext>);
+        }) as Tool<GameContext>;
     }
 
     if (classId === 'hacker') {
-        tools.push(tool({
+        systemHack = tool({
             name: 'system_hack',
             description: 'Hack station systems: reveal all crew logs in current room, disable enemy buffs, or reveal the station map. Hacker class ability. Requires data_spike in inventory.',
             parameters: z.object({
@@ -972,10 +980,35 @@ export function createGameTools(classId: string): Tool<GameContext>[] {
                         return JSON.stringify({ error: `Unknown hack target: ${args.target}` });
                 }
             },
-        }) as Tool<GameContext>);
+        }) as Tool<GameContext>;
     }
 
-    return tools;
+    // ─── Assemble Tool Sets ─────────────────────────────────────────────────
+
+    const all: Tool<GameContext>[] = [
+        lookAround, moveTo, pickUpItem, useItem, attackTool,
+        suggestAttacks, attemptAction, interactNPC, suggestInteractions,
+        recordMoralChoice, suggestActions, completeObjective,
+    ];
+    if (tacticalScan) all.push(tacticalScan);
+    if (bypassSystem) all.push(bypassSystem);
+    if (fieldSurgery) all.push(fieldSurgery);
+    if (systemHack) all.push(systemHack);
+
+    const combat: Tool<GameContext>[] = [attackTool, suggestAttacks, useItem];
+    if (tacticalScan) combat.push(tacticalScan);
+
+    const dialogue: Tool<GameContext>[] = [interactNPC, suggestInteractions, recordMoralChoice, useItem];
+
+    const exploration: Tool<GameContext>[] = [
+        lookAround, moveTo, pickUpItem, attemptAction,
+        suggestActions, completeObjective,
+    ];
+    if (fieldSurgery) exploration.push(fieldSurgery);
+    if (bypassSystem) exploration.push(bypassSystem);
+    if (systemHack) exploration.push(systemHack);
+
+    return { all, combat, dialogue, exploration };
 }
 
 // ─── Tone Matching ──────────────────────────────────────────────────────────

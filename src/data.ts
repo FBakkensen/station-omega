@@ -76,15 +76,6 @@ export const DIFFICULTY_MULTIPLIERS: Readonly<Record<Difficulty, number>> = {
     nightmare: 1.6,
 } as const;
 
-// ─── Enemy Tier Stats ───────────────────────────────────────────────────────
-
-export const ENEMY_TIER_STATS: ReadonlyMap<1 | 2 | 3 | 4, { hp: number; damage: [number, number]; label: string }> = new Map([
-    [1, { hp: 25, damage: [8, 12] as [number, number], label: 'fodder' }],
-    [2, { hp: 45, damage: [14, 22] as [number, number], label: 'standard' }],
-    [3, { hp: 65, damage: [18, 28] as [number, number], label: 'elite' }],
-    [4, { hp: 90, damage: [14, 24] as [number, number], label: 'boss' }],
-]);
-
 // ─── Room Archetype Distribution ────────────────────────────────────────────
 
 export function ROOM_ARCHETYPE_BY_DEPTH(depth: number, maxDepth: number): RoomArchetype[] {

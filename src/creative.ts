@@ -22,7 +22,7 @@ Atmospheric, horror-themed content. Style: Alien meets Dead Space. Crew logs sho
 - Every roomId/enemyId/itemId in your output MUST match an ID from the skeleton provided
 - Crew log authors must come from the crew roster you generate
 - Room names must be evocative and unique (never generic like "Room 1")
-- Enemy names should reflect their tier and nature
+- Enemy names should be atmospheric and evocative — never include mechanical labels, tier numbers, or difficulty indicators
 - Keep descriptions concise but atmospheric
 - Item names must be immersive and in-universe. Never use game-mechanic terms like "starter", "boost", "buff", "drop", or "objective". Name items as a space station crew member would.
 - Generate 3-5 crew roster members
@@ -126,7 +126,6 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
         archetype: r.archetype,
         depth: r.depth,
         hasEnemy: r.enemySlot !== null,
-        enemyTier: r.enemySlot?.tier ?? null,
         hasLoot: r.lootSlot !== null,
         lootCategory: r.lootSlot?.category ?? null,
         isObjective: r.isObjectiveRoom,
@@ -134,7 +133,6 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
 
     const enemySummaries = skeleton.enemies.map(e => ({
         id: e.id,
-        tier: e.tier,
         behaviorHint: e.behaviorHint,
         personality: e.personality,
     }));
@@ -154,6 +152,11 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
         enemies: enemySummaries,
         items: itemSummaries,
     }, null, 2);
+}
+
+/** Strip leading "Tier N" prefixes that the creative agent may bake into enemy names. */
+function sanitizeEnemyName(name: string): string {
+    return name.replace(/^Tier\s*\d+\s*[-\u2013\u2014*:]\s*/i, '').trim() || name;
 }
 
 function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkeleton): CreativeContent {
@@ -211,7 +214,7 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         const creative = (content.enemies ?? []).find(e => e.enemyId === skEnemy.id);
         return {
             enemyId: skEnemy.id,
-            name: creative?.name ?? 'Unknown Hostile',
+            name: creative?.name ? sanitizeEnemyName(creative.name) : 'Unknown Hostile',
             appearance: creative?.appearance ?? 'A twisted form emerges from the shadows.',
             personality: creative?.personality ?? skEnemy.personality,
             deathDescription: creative?.deathDescription ?? 'It collapses and goes still.',

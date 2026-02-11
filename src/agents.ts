@@ -51,20 +51,7 @@ export function createAgents(
         },
     });
 
-    const explorationAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'ExplorationNarrator',
-        model: 'gpt-5-mini',
-        instructions: buildExplorationPrompt(station, build),
-        tools: toolSets.exploration,
-        outputType: GameResponseSchema,
-        outputGuardrails: [guardrail],
-        modelSettings: {
-            store: true,
-            reasoning: { effort: 'low' },
-        },
-    });
-
-    // Handoffs with game-state-based isEnabled predicates
+    // Handoffs — defined before agents that reference them
     const combatHandoff = handoff(combatAgent, {
         toolNameOverride: 'transfer_to_combat',
         toolDescriptionOverride: 'Hand off to combat narrator when the player engages an enemy or is in active combat.',
@@ -74,6 +61,20 @@ export function createAgents(
             if (!room?.threat) return false;
             const npc = s.npcs.get(room.threat);
             return npc !== undefined && npc.disposition !== 'dead';
+        },
+    });
+
+    const explorationAgent = new Agent<GameContext, typeof GameResponseSchema>({
+        name: 'ExplorationNarrator',
+        model: 'gpt-5-mini',
+        instructions: buildExplorationPrompt(station, build),
+        tools: toolSets.exploration,
+        handoffs: [combatHandoff],
+        outputType: GameResponseSchema,
+        outputGuardrails: [guardrail],
+        modelSettings: {
+            store: true,
+            reasoning: { effort: 'low' },
         },
     });
 

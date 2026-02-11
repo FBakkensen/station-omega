@@ -3,8 +3,8 @@ import { z } from 'zod';
 export const GameSegmentSchema = z.object({
     type: z.enum(['narration', 'dialogue', 'thought', 'station_pa', 'crew_echo']),
     text: z.string(),
-    npcId: z.string().nullable(),
-    crewName: z.string().nullable(),
+    npcId: z.string().nullable().describe('NPC internal ID from the NPC list (e.g. "enemy_room_1"), or null'),
+    crewName: z.string().nullable().describe('Crew member full name from the crew roster, or null'),
 });
 
 export const GameResponseSchema = z.object({

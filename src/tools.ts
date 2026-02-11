@@ -145,9 +145,10 @@ export function createGameToolSets(classId: string): GameToolSets {
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
                 drop_visible: drop ? getItemName(drop, station) : null,
                 threat: threat
-                    ? { name: threat.name, demeanor: threat.disposition, appearance: threat.appearance }
+                    ? { id: threat.id, name: threat.name, demeanor: threat.disposition, appearance: threat.appearance }
                     : null,
                 npcs_present: getNPCsInRoom(state.currentRoom, station).map(npc => ({
+                    id: npc.id,
                     name: npc.name,
                     disposition: npc.disposition,
                     is_ally: npc.isAlly,
@@ -242,6 +243,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                 room_index: `${String([...station.rooms.keys()].indexOf(targetId) + 1)} of ${String(station.rooms.size)}`,
                 description: room?.descriptionSeed ?? '',
                 threat_present: threat ? threat.name : null,
+                threat_id: threat ? threat.id : null,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
                 drop_visible: drop ? getItemName(drop, station) : null,
                 player_hp: state.hp,
@@ -478,6 +480,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                 return JSON.stringify({
                     approach: args.approach,
                     player_damage_dealt: playerDamage,
+                    enemy_id: npc.id,
                     enemy_name: npc.name,
                     enemy_damage_dealt: enemyDamage,
                     shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
@@ -490,6 +493,7 @@ export function createGameToolSets(classId: string): GameToolSets {
             const result: Record<string, unknown> = {
                 approach: args.approach,
                 player_damage_dealt: playerDamage,
+                enemy_id: npc.id,
                 enemy_name: npc.name,
                 enemy_damage_dealt: enemyDamage,
                 shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
@@ -735,6 +739,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                 return JSON.stringify({
                     success: true,
                     approach,
+                    npc_id: npc.id,
                     npc_name: npc.name,
                     old_disposition: prevDisposition,
                     new_disposition: npc.disposition,
@@ -747,6 +752,7 @@ export function createGameToolSets(classId: string): GameToolSets {
             return JSON.stringify({
                 success: false,
                 approach,
+                npc_id: npc.id,
                 npc_name: npc.name,
                 disposition: npc.disposition,
                 roll,
@@ -861,6 +867,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                 const threat = getRoomThreat(state.currentRoom, station);
                 if (!threat) return JSON.stringify({ error: 'No enemy to scan.' });
                 return JSON.stringify({
+                    id: threat.id,
                     name: threat.name,
                     hp: `${String(threat.currentHp)}/${String(threat.maxHp)}`,
                     damage_range: `${String(threat.damage[0])}-${String(threat.damage[1])}`,

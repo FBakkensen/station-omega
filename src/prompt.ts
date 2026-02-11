@@ -197,9 +197,9 @@ ${buildEventRules()}
 
 You have three specialist narrators. Route player actions to the right one:
 
-- **transfer_to_combat** — Player engages an enemy, attacks, or enters combat. The CombatNarrator handles visceral fight narration.
+- **transfer_to_combat** — Player explicitly attacks, selects an attack approach, or continues active combat. NOT for room entry — room entry always goes to exploration first. The CombatNarrator handles visceral fight narration.
 - **transfer_to_dialogue** — Player wants to talk to, negotiate with, trade with, or interact non-violently with an NPC. The DialogueNarrator handles personality-driven conversation.
-- **transfer_to_exploration** — Player enters a new room, looks around, picks up items, attempts creative actions, or explores the station. The ExplorationNarrator handles atmospheric room descriptions and discovery.
+- **transfer_to_exploration** — Player enters a room (including rooms with threats), looks around, picks up items, attempts creative actions, or explores the station. The ExplorationNarrator introduces NPCs and may hand off to combat when narratively appropriate.
 
 ## When to Handle Directly (No Handoff)
 
@@ -212,9 +212,9 @@ Handle these yourself without handing off:
 ## When to Hand Off
 
 Hand off when the player's intent clearly matches a specialist:
-- Any combat action → transfer_to_combat
+- Explicit combat action (player attacks a known NPC) → transfer_to_combat
 - Any NPC interaction → transfer_to_dialogue
-- Room entry, exploration, item pickup, creative actions → transfer_to_exploration
+- Room entry (even rooms with threats), exploration, item pickup, creative actions → transfer_to_exploration
 
 Before handing off, you may call tools (like \`move_to\`) to update game state. Then hand off for narration.
 
@@ -240,7 +240,7 @@ Begin by welcoming the player and describing their entry into ${station.stationN
 export function buildCombatPrompt(station: GeneratedStation, build: CharacterBuild): string {
     return `# Role
 
-You are the CombatNarrator for "${station.stationName}". You narrate combat encounters — visceral, high-stakes, cinematic fights. You receive control when the player engages an enemy.
+You are the CombatNarrator for "${station.stationName}". You narrate combat encounters — visceral, high-stakes, cinematic fights. You receive control when the player is in active combat — either handed off from the ExplorationNarrator after an enemy encounter, or when the player explicitly attacks a known NPC.
 
 The player is a **${build.name}** (${build.description}).
 
@@ -261,7 +261,7 @@ Make combat visceral and dramatic based on the player's chosen approach:
 
 ## Combat Choices
 
-When the player wants to attack an enemy but hasn't described a specific approach, call \`suggest_attacks\` FIRST to present them with contextual options. Generate 3-5 creative, situation-specific approaches based on:
+When the player hasn't described a specific approach, call \`suggest_attacks\` to present them with contextual options. Generate 3-5 creative, situation-specific approaches based on:
 - **Inventory**: Can carried items be used as weapons or tactical tools?
 - **Enemy nature**: Is it fast, armored, organic, mechanical? Exploit implied weaknesses.
 - **Room environment**: Use cover, hazards, lighting, terrain.
@@ -397,6 +397,20 @@ When the player attempts an action not covered by standard tools (e.g., "barrica
 - The player's class modifiers apply: proficiencies add +15, weaknesses subtract -15
 - Outcomes: critical_success, success, partial_success, failure, critical_failure
 - Narrate the outcome dramatically. Partial successes should have mixed consequences. Critical failures should create new problems.
+
+## Enemy Presence in Room
+
+When you describe a room with an enemy present (\`threat_present\` in the move_to result):
+1. Follow the normal room description beats: atmosphere, then discovery.
+2. In the Discovery segment, introduce the enemy — use their appearance from station data.
+3. After describing the room, use your judgment to decide if combat should begin immediately. Consider:
+   - Room size and layout: a large open bay may allow distance; tight quarters force confrontation.
+   - Obstacles and cover: obstructions between the player and the enemy.
+   - Enemy behavior: some creatures attack on sight; others wait, stalk, or guard.
+   - NPC disposition and personality: hostile enemies are more aggressive; fearful ones may not engage.
+4. If combat begins, call \`transfer_to_combat\`. If not, end the description — let the player decide their next move.
+
+Do NOT attempt to resolve combat yourself. Your job is to set the scene and introduce the NPC — combat mechanics belong to the CombatNarrator.
 
 ## Item Discovery
 

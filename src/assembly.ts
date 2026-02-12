@@ -7,6 +7,8 @@ import type {
     Item,
     NPCMemory,
     NPCBehaviorFlag,
+    SystemFailure,
+    SystemFailureSkeleton,
 } from './types.js';
 import { generateMapLayout } from './map-layout.js';
 
@@ -19,6 +21,25 @@ function makeNPCMemory(): NPCMemory {
         hasFled: false,
         fledTo: null,
         tradeInventory: [],
+    };
+}
+
+function assembleFailure(sk: SystemFailureSkeleton): SystemFailure {
+    return {
+        systemId: sk.systemId,
+        status: sk.severity >= 3 ? 'critical' : (sk.severity >= 2 ? 'failing' : 'degraded'),
+        failureMode: sk.failureMode,
+        severity: sk.severity,
+        challengeState: 'detected',
+        requiredMaterials: [...sk.requiredMaterials],
+        requiredSkill: sk.requiredSkill,
+        difficulty: sk.difficulty,
+        turnsUntilCascade: sk.turnsUntilCascade,
+        cascadeTarget: sk.cascadeTarget,
+        hazardPerTurn: sk.hazardPerTurn,
+        diagnosisHint: sk.diagnosisHint,
+        technicalDetail: '',
+        mitigationPaths: [...sk.mitigationPaths],
     };
 }
 
@@ -54,6 +75,8 @@ export function assembleStation(
             isObjectiveRoom: skRoom.isObjectiveRoom,
             secretConnection: skRoom.secretConnection,
             roomModifiers: [],
+            systemFailures: skRoom.systemFailures.map(assembleFailure),
+            engineeringNotes: cr?.engineeringNotes ?? '',
         });
     }
 

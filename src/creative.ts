@@ -11,23 +11,24 @@ import type {
 
 const CREATIVE_PROMPT = `# Identity
 
-You are a creative content generator for a sci-fi problem-solving adventure with dry humor, set on a derelict space station.
+You are a creative content generator for a sci-fi engineering survival adventure with dry humor, set on a derelict space station with cascading system failures.
 
 # Style
 
-Grounded sci-fi with personality. The Martian meets Project Hail Mary. Crew logs should read like personal journal entries, sarcastic memos, or frustrated engineering reports — not horror diaries. Tell a coherent story of what went wrong matching the story arc.
+Grounded sci-fi with personality. The Martian meets Project Hail Mary. The station is falling apart — systems are the antagonist, not creatures. Crew logs should read like frustrated engineering reports, sarcastic maintenance memos, or panicked calibration records. Tell a coherent story of cascading system failures matching the story arc.
 
 # Rules
 
 - Every roomId/enemyId/itemId in your output MUST match an ID from the skeleton provided
 - Crew log authors must come from the crew roster you generate
-- Room names must be practical but memorable — the kind of names engineers would actually use (never generic like "Room 1")
-- Enemy names should be grounded — technical designations, nicknames, or descriptive labels that real people would use. Never include mechanical labels, tier numbers, or difficulty indicators
-- Keep descriptions concise but grounded — focus on what things look like physically, not how menacing they are
-- Item names must be immersive and in-universe. Never use game-mechanic terms like "starter", "boost", "buff", "drop", or "objective". Name items as a space station crew member would.
-- Generate 3-5 crew roster members
-- Each room should have 1-2 crew logs
-- Provide 3 sounds, 2 smells, and 3 visuals per room`;
+- Room names must be practical engineering labels — the kind of names that would be on actual station bulkhead signs (e.g., "Primary Coolant Junction", "Atmospheric Processing Bay", "Cargo Lock C-7")
+- Enemy names should be technical designations for malfunctioning systems — drones, security turrets, AI fragments. Never include tier numbers or difficulty indicators
+- Keep descriptions concise — focus on what's broken, what's working, what the sensors read. Engineering details, not atmosphere
+- Item names must be immersive and in-universe. Name items as a space station engineer would label equipment
+- engineeringNotes: 1-2 sentences of technical detail about the room's systems — what's nominal, what's degraded, what readings are off
+- Generate 3-5 crew roster members (engineers, scientists, technicians)
+- Each room should have 1-2 crew logs (prefer engineering_report, calibration_record, failure_analysis types)
+- Provide 3 sounds, 2 smells, and 3 visuals per room — focus on diagnostic clues (the sound a pump makes when it's cavitating, the smell of coolant, the flicker pattern of failing lights)`;
 
 /** Zod schema for structured output — guarantees valid JSON from gpt-5-mini. */
 const CreativeOutputSchema = z.object({
@@ -43,6 +44,7 @@ const CreativeOutputSchema = z.object({
         roomId: z.string(),
         name: z.string(),
         descriptionSeed: z.string(),
+        engineeringNotes: z.string(),
         sensory: z.object({
             sounds: z.array(z.string()),
             smells: z.array(z.string()),
@@ -63,6 +65,7 @@ const CreativeOutputSchema = z.object({
         personality: z.string(),
         deathDescription: z.string(),
         soundSignature: z.string(),
+        failureMode: z.string(),
     })),
     items: z.array(z.object({
         itemId: z.string(),
@@ -82,6 +85,7 @@ interface CreativeSchemaPartial {
         roomId: string;
         name?: string;
         descriptionSeed?: string;
+        engineeringNotes?: string;
         sensory?: {
             sounds?: string[];
             smells?: string[];
@@ -102,6 +106,7 @@ interface CreativeSchemaPartial {
         personality?: string;
         deathDescription?: string;
         soundSignature?: string;
+        failureMode?: string;
     }>;
     items?: Array<{
         itemId: string;
@@ -129,6 +134,7 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
         hasLoot: r.lootSlot !== null,
         lootCategory: r.lootSlot?.category ?? null,
         isObjective: r.isObjectiveRoom,
+        systemFailures: r.systemFailures.map(f => ({ system: f.systemId, mode: f.failureMode, severity: f.severity })),
     }));
 
     const enemySummaries = skeleton.enemies.map(e => ({
@@ -172,20 +178,22 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
 
     if (crewRoster.length === 0) {
         crewRoster.push(
-            { name: 'Dr. Tanaka', role: 'Chief Medical Officer', fate: 'Transformed' },
-            { name: 'Rodriguez', role: 'Chief Engineer', fate: 'Missing' },
-            { name: 'Director Holst', role: 'Station Director', fate: 'Corrupted' },
+            { name: 'Chen Wei', role: 'Chief Engineer', fate: 'Missing — last seen heading to reactor level' },
+            { name: 'Dr. Okafor', role: 'Environmental Systems Lead', fate: 'Evacuated to section 7' },
+            { name: 'Rodriguez', role: 'Station Commander', fate: 'Unknown — comms cut during cascade' },
         );
     }
 
     const crewNames = new Set(crewRoster.map(c => c.name));
+
+    const VALID_LOG_TYPES = new Set(['datapad', 'wall_scrawl', 'audio_recording', 'terminal_entry', 'engineering_report', 'calibration_record', 'failure_analysis']);
 
     const rooms: RoomCreative[] = skeleton.rooms.map(skRoom => {
         const creative = (content.rooms ?? []).find(r => r.roomId === skRoom.id);
         const validLogs = (creative?.crewLogs ?? [])
             .filter(log => crewNames.has(log.author) || log.author === 'Unknown')
             .map(log => ({
-                type: (log.type ?? 'datapad') as RoomCreative['crewLogs'][number]['type'],
+                type: (VALID_LOG_TYPES.has(log.type ?? '') ? log.type : 'terminal_entry') as RoomCreative['crewLogs'][number]['type'],
                 author: log.author,
                 content: log.content ?? '',
                 condition: log.condition ?? 'Found nearby.',
@@ -202,11 +210,12 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
                 tactile: creative?.sensory?.tactile ?? 'The air feels stale and cold.',
             },
             crewLogs: validLogs.length > 0 ? validLogs : [{
-                type: 'terminal_entry' as const,
+                type: 'engineering_report' as const,
                 author: crewRoster[0]?.name ?? 'Unknown',
-                content: 'Systems failing. Need to evacuate.',
+                content: 'Systems degrading faster than projected. Running out of workarounds.',
                 condition: 'A flickering terminal display.',
             }],
+            engineeringNotes: creative?.engineeringNotes ?? '',
         };
     });
 
@@ -214,11 +223,12 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         const creative = (content.enemies ?? []).find(e => e.enemyId === skEnemy.id);
         return {
             enemyId: skEnemy.id,
-            name: creative?.name ? sanitizeEnemyName(creative.name) : 'Unknown Hostile',
-            appearance: creative?.appearance ?? 'Something that definitely wasn\'t in the station schematics.',
+            name: creative?.name ? sanitizeEnemyName(creative.name) : 'Unknown System',
+            appearance: creative?.appearance ?? 'A piece of station hardware that\'s decided to stop cooperating.',
             personality: creative?.personality ?? skEnemy.personality,
-            deathDescription: creative?.deathDescription ?? 'It stops moving. Finally.',
-            soundSignature: creative?.soundSignature ?? 'A sound the station manual never mentioned.',
+            deathDescription: creative?.deathDescription ?? 'It powers down with a descending whine. Finally.',
+            soundSignature: creative?.soundSignature ?? 'Servos and static.',
+            failureMode: creative?.failureMode ?? 'corrupted firmware',
         };
     });
 
@@ -239,8 +249,8 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
 
     return {
         stationName: content.stationName ?? 'Station Omega',
-        briefing: content.briefing ?? 'Board the station. Find the black box. Get out alive.',
-        backstory: content.backstory ?? 'The station went dark three months ago. The last transmission was mostly profanity.',
+        briefing: content.briefing ?? 'Board the station. Fix what you can. Get to the escape pod.',
+        backstory: content.backstory ?? 'The station went dark three days ago. The last transmission was a cascade failure alarm followed by a lot of creative profanity.',
         crewRoster,
         rooms: validRooms,
         enemies: validEnemies,
@@ -250,11 +260,11 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
 
 /** Room-generation milestone messages shown as individual rooms stream in. */
 const ROOM_MILESTONES = [
-    'Detailing the environment...',
-    'Scanning for biosignatures...',
-    'Recovering crew logs...',
-    'Analyzing environmental hazards...',
-    'Charting the deepest corridors...',
+    'Mapping system failures...',
+    'Scanning environmental readings...',
+    'Recovering engineering logs...',
+    'Analyzing cascade patterns...',
+    'Charting the deepest sections...',
 ];
 
 /** Build progress phases dynamically, using unique room IDs as milestones. */
@@ -262,7 +272,7 @@ function buildProgressPhases(skeleton: StationSkeleton): Array<{ pattern: string
     const phases: Array<{ pattern: string; message: string }> = [
         { pattern: '"stationName"', message: 'Naming the station...' },
         { pattern: '"briefing"', message: 'Writing mission briefing...' },
-        { pattern: '"backstory"', message: 'Uncovering what happened...' },
+        { pattern: '"backstory"', message: 'Uncovering what went wrong...' },
         { pattern: '"crewRoster"', message: 'Assembling the crew manifest...' },
         { pattern: '"rooms"', message: 'Mapping station corridors...' },
     ];
@@ -277,8 +287,8 @@ function buildProgressPhases(skeleton: StationSkeleton): Array<{ pattern: string
     }
 
     phases.push(
-        { pattern: '"enemies"', message: 'Spawning threats...' },
-        { pattern: '"items"', message: 'Placing equipment...' },
+        { pattern: '"enemies"', message: 'Identifying malfunctioning systems...' },
+        { pattern: '"items"', message: 'Placing equipment and materials...' },
     );
 
     return phases;
@@ -297,7 +307,7 @@ export async function generateCreativeContent(
 ${summary}
 </station_skeleton>
 
-Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each. Enemy appearances: 1-2 sentences each. Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry.`;
+Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each focusing on engineering state. engineeringNotes: 1-2 sentences of technical readings. Enemy appearances: 1-2 sentences (malfunctioning hardware). Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis.`;
 
     try {
         const stream = await run(creativeAgent, userPrompt, {
@@ -335,8 +345,8 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
         onProgress?.('Generation failed — using fallback content...');
         return validateCreative({
             stationName: 'Station Omega',
-            briefing: 'Board the station. Complete the mission. Escape alive.',
-            backstory: 'The station went dark three months ago. Nobody\'s sure why yet.',
+            briefing: 'Board the station. Fix the cascade. Escape alive.',
+            backstory: 'The station went dark three days ago. Systems are failing in sequence.',
             crewRoster: [],
             rooms: [],
             enemies: [],

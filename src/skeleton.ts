@@ -1,6 +1,5 @@
 import type {
     RunConfig,
-    StoryArc,
     Difficulty,
     RoomArchetype,
     RoomSkeleton,
@@ -10,7 +9,10 @@ import type {
     ObjectiveStep,
     StationSkeleton,
     NPCBehaviorFlag,
+    SystemFailureSkeleton,
+    ActionDifficulty,
 } from './types.js';
+import { SYSTEM_FAILURE_POOLS, ENGINEERING_ITEMS, OBJECTIVE_TEMPLATES } from './data.js';
 
 // ─── Seeded PRNG (LCG) ─────────────────────────────────────────────────────
 
@@ -66,11 +68,12 @@ const TIER_STATS: ReadonlyMap<1 | 2 | 3 | 4, { hp: number; damage: [number, numb
     [4, { hp: 90, damage: [14, 24] }],
 ]);
 
+// Reframed for engineering context: malfunctioning systems, not creatures
 const BEHAVIOR_PRESETS: ReadonlyMap<1 | 2 | 3 | 4, { behaviors: NPCBehaviorFlag[]; hint: string; personality: string; fleeThreshold: number }> = new Map([
-    [1, { behaviors: ['can_flee', 'can_beg'], hint: 'startled wildlife', personality: 'Territorial and reactive. More scared of you than you are of it. Probably.', fleeThreshold: 0.3 }],
-    [2, { behaviors: ['can_negotiate', 'is_intelligent', 'can_beg', 'can_trade'], hint: 'malfunctioning crew', personality: 'Station crew member, heavily affected by whatever went wrong here. Alternates between coherent and not.', fleeThreshold: 0.25 }],
-    [3, { behaviors: ['can_reinforce', 'can_ambush'], hint: 'automated security', personality: 'Station security system running on outdated protocols. Very literal, very persistent.', fleeThreshold: 0 }],
-    [4, { behaviors: ['can_negotiate', 'is_intelligent', 'can_ally'], hint: 'station authority', personality: 'Former station director. Knows more than they should. Can be reasoned with if you bring the right arguments.', fleeThreshold: 0 }],
+    [1, { behaviors: ['can_flee'], hint: 'malfunctioning maintenance drone', personality: 'A maintenance drone running corrupted firmware. Moves erratically, occasionally sparks. More of a hazard than a threat.', fleeThreshold: 0.3 }],
+    [2, { behaviors: ['can_negotiate', 'is_intelligent'], hint: 'damaged security system', personality: 'Station security system with degraded friend-or-foe identification. Can be reasoned with if you know the right access codes.', fleeThreshold: 0.25 }],
+    [3, { behaviors: ['can_reinforce', 'can_ambush'], hint: 'automated defense grid', personality: 'Automated defense grid running on emergency protocols. Methodical, persistent, and unfortunately well-armed.', fleeThreshold: 0 }],
+    [4, { behaviors: ['can_negotiate', 'is_intelligent', 'can_ally'], hint: 'station AI fragment', personality: 'A fragment of the station AI still running on isolated hardware. Knows the station intimately. Can be negotiated with or — if you\'re clever — reprogrammed.', fleeThreshold: 0 }],
 ]);
 
 // ─── Archetype Selection ────────────────────────────────────────────────────
@@ -85,78 +88,29 @@ function archetypesForDepth(depth: number, maxDepth: number): RoomArchetype[] {
     return ['command', 'restricted'];
 }
 
-// ─── Enemy Tier by Depth ────────────────────────────────────────────────────
+// ─── System Failure Severity by Depth ───────────────────────────────────────
 
-function tierForDepth(depth: number, maxDepth: number, isObjective: boolean): 1 | 2 | 3 | 4 {
-    if (isObjective) return 4;
+function severityForDepth(depth: number, maxDepth: number): 1 | 2 | 3 {
     const pct = depth / maxDepth;
     if (pct <= 0.3) return 1;
-    if (pct <= 0.55) return 2;
-    if (pct <= 0.8) return 3;
-    return 3; // tier 4 reserved for bosses
+    if (pct <= 0.6) return 2;
+    return 3;
 }
 
-// ─── Objective Templates ────────────────────────────────────────────────────
-
-interface ObjTemplate {
-    title: string;
-    steps: Array<{ description: string; archetype: RoomArchetype; needsItem: boolean }>;
+function difficultyForSeverity(severity: 1 | 2 | 3): ActionDifficulty {
+    if (severity === 1) return 'easy';
+    if (severity === 2) return 'moderate';
+    return 'hard';
 }
 
-const OBJECTIVE_TEMPLATES: ReadonlyMap<StoryArc, ObjTemplate> = new Map([
-    ['parasite_outbreak', {
-        title: 'Contain the Outbreak',
-        steps: [
-            { description: 'Collect bio-sample from infected area', archetype: 'science', needsItem: false },
-            { description: 'Collect second bio-sample from medical bay', archetype: 'medical', needsItem: false },
-            { description: 'Collect third bio-sample from cargo hold', archetype: 'cargo', needsItem: false },
-            { description: 'Jettison samples from the airlock', archetype: 'escape', needsItem: true },
-        ],
-    }],
-    ['ai_mutiny', {
-        title: 'Override the AI',
-        steps: [
-            { description: 'Input override code at science terminal', archetype: 'science', needsItem: false },
-            { description: 'Input override code at reactor terminal', archetype: 'reactor', needsItem: false },
-            { description: 'Input override code at restricted terminal', archetype: 'restricted', needsItem: false },
-            { description: 'Execute shutdown at command bridge', archetype: 'command', needsItem: true },
-        ],
-    }],
-    ['dimensional_rift', {
-        title: 'Close the Rift',
-        steps: [
-            { description: 'Collect the dimensional stabilizer', archetype: 'science', needsItem: false },
-            { description: 'Activate the stabilizer at the reactor core', archetype: 'reactor', needsItem: true },
-            { description: 'Escape before the rift collapses', archetype: 'escape', needsItem: false },
-        ],
-    }],
-    ['corporate_betrayal', {
-        title: 'Expose the Conspiracy',
-        steps: [
-            { description: 'Find classified documents in restricted area', archetype: 'restricted', needsItem: false },
-            { description: 'Find whistleblower recording in quarters', archetype: 'quarters', needsItem: false },
-            { description: 'Broadcast evidence from command bridge comms', archetype: 'command', needsItem: true },
-            { description: 'Escape the station', archetype: 'escape', needsItem: false },
-        ],
-    }],
-    ['time_anomaly', {
-        title: 'Anchor the Timeline',
-        steps: [
-            { description: 'Collect temporal anchor from science lab', archetype: 'science', needsItem: false },
-            { description: 'Collect temporal anchor from reactor core', archetype: 'reactor', needsItem: false },
-            { description: 'Collect temporal anchor from medical bay', archetype: 'medical', needsItem: false },
-            { description: 'Seal the anomaly source or enter it', archetype: 'restricted', needsItem: true },
-        ],
-    }],
-    ['first_contact', {
-        title: 'The Signal',
-        steps: [
-            { description: 'Find the alien translator device', archetype: 'science', needsItem: false },
-            { description: 'Locate the signal source', archetype: 'restricted', needsItem: true },
-            { description: 'Choose: communicate or destroy', archetype: 'command', needsItem: false },
-        ],
-    }],
-]);
+// ─── Enemy Tier by Depth (rare enemies) ─────────────────────────────────────
+
+function tierForDepth(depth: number, maxDepth: number): 1 | 2 | 3 | 4 {
+    const pct = depth / maxDepth;
+    if (pct <= 0.4) return 1;
+    if (pct <= 0.7) return 2;
+    return 3; // tier 4 reserved for special encounters
+}
 
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
@@ -186,6 +140,7 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
             enemySlot: null,
             isObjectiveRoom: false,
             secretConnection: null,
+            systemFailures: [],
         });
     }
 
@@ -213,6 +168,7 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
             enemySlot: null,
             isObjectiveRoom: false,
             secretConnection: null,
+            systemFailures: [],
         });
         parentRoom.connections.push(branchId);
 
@@ -256,19 +212,74 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
         keyItems.push(keyItem);
     }
 
-    // 4. Place enemies on difficulty curve
+    // 4. Place system failures on ~80% of non-entry/escape rooms
     const items: ItemSkeleton[] = [...keyItems];
-    const enemies: EnemySkeleton[] = [];
-    const enemyRooms = rooms.filter(r => r.id !== entryRoomId && r.id !== escapeRoomId);
-    const enemyRoomsSorted = [...enemyRooms].sort((a, b) => a.depth - b.depth);
+    const failureRooms = rooms.filter(r => r.id !== entryRoomId && r.id !== escapeRoomId);
+    const failureCount = Math.ceil(failureRooms.length * 0.8);
+    const failureTargets = rng.shuffle([...failureRooms]).slice(0, failureCount);
 
-    // Place enemies on ~60% of non-entry/escape rooms
-    const enemyCount = Math.ceil(enemyRoomsSorted.length * 0.6);
-    const enemyTargets = rng.shuffle(enemyRoomsSorted).slice(0, enemyCount);
+    // Track all required materials for placement
+    const materialsNeeded = new Map<string, number>();
+
+    for (const room of failureTargets) {
+        const pool = SYSTEM_FAILURE_POOLS.get(room.archetype);
+        if (!pool || pool.length === 0) continue;
+
+        const severity = severityForDepth(room.depth, maxDepth);
+        const difficulty = difficultyForSeverity(severity);
+
+        // Pick 1-2 failures for this room
+        const numFailures = severity >= 2 && rng.next() < 0.3 ? 2 : 1;
+        const shuffledPool = rng.shuffle([...pool]);
+        const selected = shuffledPool.slice(0, numFailures);
+
+        for (const template of selected) {
+            const failureMode = rng.pick(template.failureModes);
+            const turnsUntilCascade = severity === 1 ? 0 : (severity === 2 ? rng.nextInt(6, 10) : rng.nextInt(3, 6));
+            const hazardPerTurn = severity === 1 ? 0 : (severity === 2 ? 2 : 5);
+
+            // Pick a cascade target (adjacent room, if cascade timer is set)
+            let cascadeTarget: string | null = null;
+            if (turnsUntilCascade > 0 && room.connections.length > 0) {
+                const candidates = room.connections.filter(id => id !== entryRoomId);
+                if (candidates.length > 0) {
+                    cascadeTarget = rng.pick(candidates);
+                }
+            }
+
+            const failure: SystemFailureSkeleton = {
+                systemId: template.systemId,
+                failureMode,
+                severity,
+                requiredMaterials: [...template.requiredMaterials],
+                requiredSkill: template.requiredSkill,
+                difficulty,
+                turnsUntilCascade,
+                cascadeTarget,
+                hazardPerTurn,
+                diagnosisHint: template.diagnosisHint,
+                mitigationPaths: [...template.mitigationPaths],
+            };
+
+            room.systemFailures.push(failure);
+
+            // Track materials needed
+            for (const mat of template.requiredMaterials) {
+                materialsNeeded.set(mat, (materialsNeeded.get(mat) ?? 0) + 1);
+            }
+        }
+    }
+
+    // 5. Place enemies on ~15% of non-entry/escape rooms (rare, malfunctioning systems)
+    const enemies: EnemySkeleton[] = [];
+    const enemyCandidates = rooms.filter(r =>
+        r.id !== entryRoomId && r.id !== escapeRoomId && !r.enemySlot
+    );
+    const enemyCount = Math.max(1, Math.min(2, Math.ceil(enemyCandidates.length * 0.15)));
+    const enemyTargets = rng.shuffle([...enemyCandidates]).slice(0, enemyCount);
 
     for (const room of enemyTargets) {
-        const isObj = room.isObjectiveRoom;
-        const tier = tierForDepth(room.depth, maxDepth, isObj);
+        const tier = tierForDepth(room.depth, maxDepth);
         const stats = TIER_STATS.get(tier);
         if (!stats) continue;
 
@@ -280,17 +291,14 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
         const dmgLow = Math.round(stats.damage[0] * mult);
         const dmgHigh = Math.round(stats.damage[1] * mult);
 
-        // Enemy drops
+        // Enemy drops (engineering materials instead of combat loot)
         let dropId: string | null = null;
-        if (tier <= 2 && rng.next() < 0.6) {
+        if (rng.next() < 0.5) {
             dropId = `drop_${room.id}`;
-            const dropEffect = rng.next() < 0.5
-                ? { type: 'heal' as const, value: tier === 1 ? 20 : 30, description: tier === 1 ? 'Minor healing' : 'Moderate healing' }
-                : { type: 'damage_boost' as const, value: 15, description: 'Boost next attack damage' };
             const dropItem: ItemSkeleton = {
                 id: dropId,
-                category: dropEffect.type === 'heal' ? 'medical' : 'weapon',
-                effect: dropEffect,
+                category: 'material',
+                effect: { type: 'material', value: 1, description: 'Salvaged component' },
                 isKeyItem: false,
             };
             items.push(dropItem);
@@ -312,53 +320,63 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
         enemies.push(enemy);
     }
 
-    // 5. Place items — ensure healing before first combat, weapon boost before tier 3+
-    // Place a healing item in entry room if no loot there yet
+    // 6. Place engineering materials — ensure all required materials are reachable
+    const emptyRooms = rooms.filter(r => !r.lootSlot && r.id !== entryRoomId && r.id !== escapeRoomId);
+
+    // Place a starting supply in the entry room
     if (!rooms[0].lootSlot) {
-        const healItem: ItemSkeleton = {
+        const firstAidItem: ItemSkeleton = {
             id: 'emergency_medkit',
             category: 'medical',
             effect: { type: 'heal', value: 30, description: 'Emergency medkit' },
             isKeyItem: false,
         };
-        rooms[0].lootSlot = healItem;
-        items.push(healItem);
+        rooms[0].lootSlot = firstAidItem;
+        items.push(firstAidItem);
     }
 
-    // Place a shield or damage boost before tier 3 enemies
-    const tier3Rooms = rooms.filter(r => r.enemySlot && r.enemySlot.tier >= 3);
-    if (tier3Rooms.length > 0) {
-        const minTier3Depth = Math.min(...tier3Rooms.map(r => r.depth));
-        const boostCandidates = rooms.filter(r => r.depth < minTier3Depth && !r.lootSlot && r.id !== entryRoomId);
-        if (boostCandidates.length > 0) {
-            const boostRoom = rng.pick(boostCandidates);
-            const boostItem: ItemSkeleton = {
-                id: 'energy_shield',
-                category: 'weapon',
-                effect: { type: 'shield', value: 20, description: 'Energy shield absorbs damage' },
+    // Place required materials in reachable rooms before the failures that need them
+    for (const [matId, count] of materialsNeeded) {
+        for (let i = 0; i < count; i++) {
+            if (emptyRooms.length === 0) break;
+            const roomIdx = rng.nextInt(0, emptyRooms.length - 1);
+            const targetRoom = emptyRooms[roomIdx];
+
+            const engItem = ENGINEERING_ITEMS.get(matId);
+            const itemId = `${matId}_${String(items.length)}`;
+            const matItem: ItemSkeleton = {
+                id: itemId,
+                category: engItem?.category ?? 'material',
+                effect: engItem?.effect ?? { type: 'material', value: 1, description: matId.replace(/_/g, ' ') },
                 isKeyItem: false,
             };
-            boostRoom.lootSlot = boostItem;
-            items.push(boostItem);
+            targetRoom.lootSlot = matItem;
+            items.push(matItem);
+            emptyRooms.splice(roomIdx, 1);
         }
     }
 
-    // Scatter additional utility items in empty rooms
-    const emptyRooms = rooms.filter(r => !r.lootSlot && r.id !== entryRoomId && r.id !== escapeRoomId);
-    const utilityItems: ItemSkeleton[] = [
-        { id: 'heal_stim', category: 'medical', effect: { type: 'heal', value: 20, description: 'Stim pack — quick heal' }, isKeyItem: false },
-        { id: 'plasma_cell', category: 'weapon', effect: { type: 'damage_boost', value: 25, description: 'Plasma cell — supercharge next attack' }, isKeyItem: false },
-    ];
-
-    for (const uItem of utilityItems) {
+    // Scatter additional engineering materials and medical supplies in remaining empty rooms
+    const scatterItems: string[] = ['sealant_patch', 'insulated_wire', 'stim_injector', 'solvent', 'structural_epoxy'];
+    for (const itemKey of scatterItems) {
         if (emptyRooms.length === 0) break;
         const roomIdx = rng.nextInt(0, emptyRooms.length - 1);
-        emptyRooms[roomIdx].lootSlot = uItem;
-        items.push(uItem);
+        const engItem = ENGINEERING_ITEMS.get(itemKey);
+        if (!engItem) continue;
+
+        const itemId = `${itemKey}_${String(items.length)}`;
+        const scatterItem: ItemSkeleton = {
+            id: itemId,
+            category: engItem.category,
+            effect: { ...engItem.effect },
+            isKeyItem: false,
+        };
+        emptyRooms[roomIdx].lootSlot = scatterItem;
+        items.push(scatterItem);
         emptyRooms.splice(roomIdx, 1);
     }
 
-    // 6. Place objectives
+    // 7. Place objectives
     const template = OBJECTIVE_TEMPLATES.get(config.storyArc);
     if (!template) throw new Error(`Unknown story arc: ${config.storyArc}`);
 
@@ -405,11 +423,12 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
             description: stepDef.description,
             roomId: targetRoom.id,
             requiredItemId,
+            requiredSystemRepair: stepDef.requiredSystemRepair,
             completed: false,
         });
     }
 
-    // 7. Secret connections (for hacker/engineer)
+    // 8. Secret connections (for engineer class)
     const secretCandidates = rooms.filter(r => r.connections.length <= 2 && r.depth > 0);
     if (secretCandidates.length >= 2 && rng.next() < 0.5) {
         const a = rng.pick(secretCandidates);
@@ -418,30 +437,6 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
             const b = rng.pick(others);
             a.secretConnection = b.id;
             b.secretConnection = a.id;
-        }
-    }
-
-    // 8. Boss in escape-adjacent room (if no tier 4 placed yet)
-    if (!enemies.some(e => e.tier === 4)) {
-        const bossRoom = rooms.find(r => r.depth === maxDepth - 1 && !r.enemySlot);
-        if (bossRoom) {
-            const stats = TIER_STATS.get(4);
-            const presets = BEHAVIOR_PRESETS.get(4);
-            if (stats && presets) {
-                const boss: EnemySkeleton = {
-                    id: `enemy_boss`,
-                    tier: 4,
-                    hp: Math.round(stats.hp * mult),
-                    damage: [Math.round(stats.damage[0] * mult), Math.round(stats.damage[1] * mult)],
-                    dropItemId: null,
-                    behaviorHint: presets.hint,
-                    behaviors: [...presets.behaviors],
-                    personality: presets.personality,
-                    fleeThreshold: presets.fleeThreshold,
-                };
-                bossRoom.enemySlot = boss;
-                enemies.push(boss);
-            }
         }
     }
 

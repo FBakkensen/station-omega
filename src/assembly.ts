@@ -77,9 +77,9 @@ export function assembleStation(
             fleeThreshold: skEnemy.fleeThreshold,
             personality: cr?.personality ?? skEnemy.personality,
             isAlly: false,
-            appearance: cr?.appearance ?? 'A twisted form in the shadows.',
-            deathDescription: cr?.deathDescription ?? 'It falls silent.',
-            soundSignature: cr?.soundSignature ?? 'A low growl.',
+            appearance: cr?.appearance ?? 'Something that definitely shouldn\'t be here.',
+            deathDescription: cr?.deathDescription ?? 'It stops. That was more stressful than it needed to be.',
+            soundSignature: cr?.soundSignature ?? 'An unexpected sound.',
             tier: skEnemy.tier,
         });
     }

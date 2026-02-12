@@ -95,7 +95,7 @@ function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
             return [bold(fg(HEADER_COLORS.dialogue)(name)), fg('#5a6a7a')('\n')];
         }
         case 'thought':
-            return [italic(fg(HEADER_COLORS.thought)('\u00AB Inner Voice \u00BB')), fg('#5a6a7a')('\n')];
+            return [italic(fg(HEADER_COLORS.thought)('\u00AB Thinking... \u00BB')), fg('#5a6a7a')('\n')];
         case 'station_pa':
             return [bold(fg(HEADER_COLORS.station_pa)('[STATION PA]')), fg('#5a6a7a')('\n')];
         case 'crew_echo': {

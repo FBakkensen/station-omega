@@ -520,7 +520,7 @@ export function createGameToolSets(classId: string): GameToolSets {
         'Choose Your Attack',
         'approaches',
         '3-5 contextual attack approaches',
-        'Attack options displayed as interactive UI buttons. Do NOT list them in text. Write one atmospheric line, then STOP and wait.',
+        'Attack options displayed as interactive UI buttons. Do NOT list them in text. Write one brief line, then STOP and wait.',
     );
 
     // ─── New Tools ──────────────────────────────────────────────────────────
@@ -800,7 +800,7 @@ export function createGameToolSets(classId: string): GameToolSets {
         'How Do You Approach?',
         'interactions',
         '3-5 contextual NPC interaction approaches',
-        'Interaction options displayed as interactive UI buttons. Do NOT list them in text. Write one atmospheric line, then STOP and wait.',
+        'Interaction options displayed as interactive UI buttons. Do NOT list them in text. Write one brief line, then STOP and wait.',
     );
 
     const completeObjective = tool({

@@ -11,19 +11,19 @@ import type {
 
 const CREATIVE_PROMPT = `# Identity
 
-You are a creative content generator for a sci-fi survival horror game set on a derelict space station.
+You are a creative content generator for a sci-fi problem-solving adventure with dry humor, set on a derelict space station.
 
 # Style
 
-Atmospheric, horror-themed content. Style: Alien meets Dead Space. Crew logs should tell a coherent story of the station's downfall matching the story arc.
+Grounded sci-fi with personality. The Martian meets Project Hail Mary. Crew logs should read like personal journal entries, sarcastic memos, or frustrated engineering reports — not horror diaries. Tell a coherent story of what went wrong matching the story arc.
 
 # Rules
 
 - Every roomId/enemyId/itemId in your output MUST match an ID from the skeleton provided
 - Crew log authors must come from the crew roster you generate
-- Room names must be evocative and unique (never generic like "Room 1")
-- Enemy names should be atmospheric and evocative — never include mechanical labels, tier numbers, or difficulty indicators
-- Keep descriptions concise but atmospheric
+- Room names must be practical but memorable — the kind of names engineers would actually use (never generic like "Room 1")
+- Enemy names should be grounded — technical designations, nicknames, or descriptive labels that real people would use. Never include mechanical labels, tier numbers, or difficulty indicators
+- Keep descriptions concise but grounded — focus on what things look like physically, not how menacing they are
 - Item names must be immersive and in-universe. Never use game-mechanic terms like "starter", "boost", "buff", "drop", or "objective". Name items as a space station crew member would.
 - Generate 3-5 crew roster members
 - Each room should have 1-2 crew logs
@@ -215,10 +215,10 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         return {
             enemyId: skEnemy.id,
             name: creative?.name ? sanitizeEnemyName(creative.name) : 'Unknown Hostile',
-            appearance: creative?.appearance ?? 'A twisted form emerges from the shadows.',
+            appearance: creative?.appearance ?? 'Something that definitely wasn\'t in the station schematics.',
             personality: creative?.personality ?? skEnemy.personality,
-            deathDescription: creative?.deathDescription ?? 'It collapses and goes still.',
-            soundSignature: creative?.soundSignature ?? 'A low, rattling breath.',
+            deathDescription: creative?.deathDescription ?? 'It stops moving. Finally.',
+            soundSignature: creative?.soundSignature ?? 'A sound the station manual never mentioned.',
         };
     });
 
@@ -240,7 +240,7 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
     return {
         stationName: content.stationName ?? 'Station Omega',
         briefing: content.briefing ?? 'Board the station. Find the black box. Get out alive.',
-        backstory: content.backstory ?? 'The station went dark three months ago. No distress signal. No survivors.',
+        backstory: content.backstory ?? 'The station went dark three months ago. The last transmission was mostly profanity.',
         crewRoster,
         rooms: validRooms,
         enemies: validEnemies,
@@ -336,7 +336,7 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
         return validateCreative({
             stationName: 'Station Omega',
             briefing: 'Board the station. Complete the mission. Escape alive.',
-            backstory: 'The station went dark three months ago.',
+            backstory: 'The station went dark three months ago. Nobody\'s sure why yet.',
             crewRoster: [],
             rooms: [],
             enemies: [],

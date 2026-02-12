@@ -67,10 +67,10 @@ const TIER_STATS: ReadonlyMap<1 | 2 | 3 | 4, { hp: number; damage: [number, numb
 ]);
 
 const BEHAVIOR_PRESETS: ReadonlyMap<1 | 2 | 3 | 4, { behaviors: NPCBehaviorFlag[]; hint: string; personality: string; fleeThreshold: number }> = new Map([
-    [1, { behaviors: ['can_flee', 'can_beg'], hint: 'frightened creature', personality: 'Skittish, animal-like. Attacks from fear.', fleeThreshold: 0.3 }],
-    [2, { behaviors: ['can_negotiate', 'is_intelligent', 'can_beg', 'can_trade'], hint: 'tragic half-human', personality: 'Mutated crew member. Flickers between rage and lucidity.', fleeThreshold: 0.25 }],
-    [3, { behaviors: ['can_reinforce', 'can_ambush'], hint: 'relentless machine', personality: 'Mechanical. No negotiation. Follows protocol.', fleeThreshold: 0 }],
-    [4, { behaviors: ['can_negotiate', 'is_intelligent', 'can_ally'], hint: 'station authority', personality: 'Former director. Corrupted but aware. Can be reasoned with.', fleeThreshold: 0 }],
+    [1, { behaviors: ['can_flee', 'can_beg'], hint: 'startled wildlife', personality: 'Territorial and reactive. More scared of you than you are of it. Probably.', fleeThreshold: 0.3 }],
+    [2, { behaviors: ['can_negotiate', 'is_intelligent', 'can_beg', 'can_trade'], hint: 'malfunctioning crew', personality: 'Station crew member, heavily affected by whatever went wrong here. Alternates between coherent and not.', fleeThreshold: 0.25 }],
+    [3, { behaviors: ['can_reinforce', 'can_ambush'], hint: 'automated security', personality: 'Station security system running on outdated protocols. Very literal, very persistent.', fleeThreshold: 0 }],
+    [4, { behaviors: ['can_negotiate', 'is_intelligent', 'can_ally'], hint: 'station authority', personality: 'Former station director. Knows more than they should. Can be reasoned with if you bring the right arguments.', fleeThreshold: 0 }],
 ]);
 
 // ─── Archetype Selection ────────────────────────────────────────────────────

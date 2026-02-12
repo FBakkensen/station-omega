@@ -52,18 +52,18 @@ const INWORLD_CHANNELS = 1;
 
 // ─── Voice Pool (Inworld voice IDs) ───────────────────────────────────────
 
-const NARRATOR_VOICE = 'Hades';
+const NARRATOR_VOICE = 'Shaun';
 
 const NPC_VOICE_POOL: string[] = [
     'Alex', 'Ashley', 'Craig', 'Deborah', 'Dennis',
     'Edward', 'Julia', 'Mark', 'Olivia', 'Priya',
-    'Ronald', 'Sarah', 'Shaun', 'Theodore', 'Timothy',
+    'Ronald', 'Sarah', 'Luna', 'Theodore', 'Hades',
     'Wendy', 'Hana', 'Clive', 'Carter', 'Blake',
 ];
 
 const BOSS_VOICE = 'Dominus';
 
-const INNER_VOICE = 'Luna';
+const INNER_VOICE = 'Timothy';
 
 const STATION_PA_VOICE = 'Elizabeth';
 
@@ -75,10 +75,10 @@ interface VoiceTuning {
 }
 
 const TUNING_DEFAULT: VoiceTuning = { temperature: 1.1, speakingRate: 1.0 };
-const TUNING_BOSS: VoiceTuning = { temperature: 1.3, speakingRate: 0.9 };
-const TUNING_INNER: VoiceTuning = { temperature: 0.9, speakingRate: 0.9 };
+const TUNING_BOSS: VoiceTuning = { temperature: 1.0, speakingRate: 0.95 };
+const TUNING_INNER: VoiceTuning = { temperature: 1.0, speakingRate: 1.05 };
 const TUNING_PA: VoiceTuning = { temperature: 0.7, speakingRate: 1.0 };
-const TUNING_CREW_ECHO: VoiceTuning = { temperature: 1.0, speakingRate: 0.95 };
+const TUNING_CREW_ECHO: VoiceTuning = { temperature: 1.0, speakingRate: 1.0 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -394,15 +394,16 @@ export class TTSEngine {
                     return '';
                 }
                 // Narrator mood based on game context
-                if (this.narratorContext.inCombat) return '[fearful] ';
+                if (this.narratorContext.inCombat) return '';
                 if (this.narratorContext.hpPercent < 25) return '[sad] ';
-                if (this.narratorContext.isNewRoom) return '[surprised] ';
+                if (this.narratorContext.isNewRoom) return '';
                 return '';
             }
             case 'thought':
-                return '[whispering] ';
+                if (this.narratorContext.hpPercent < 25) return '[sigh] ';
+                return '';
             case 'crew_echo':
-                return '[whispering] ';
+                return '';
             case 'station_pa':
                 return '';
             default:

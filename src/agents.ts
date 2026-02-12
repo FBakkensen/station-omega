@@ -5,15 +5,15 @@ import type { GameContext, GameToolSets } from './tools.js';
 import type { GeneratedStation, CharacterBuild } from './types.js';
 import {
     buildOrchestratorPrompt,
-    buildCombatPrompt,
-    buildDialoguePrompt,
+    buildEngineeringPrompt,
+    buildDiagnosticsPrompt,
     buildExplorationPrompt,
 } from './prompt.js';
 
 export interface GameAgents {
     gameMaster: Agent<GameContext, typeof GameResponseSchema>;
-    combatAgent: Agent<GameContext, typeof GameResponseSchema>;
-    dialogueAgent: Agent<GameContext, typeof GameResponseSchema>;
+    engineeringAgent: Agent<GameContext, typeof GameResponseSchema>;
+    diagnosticsAgent: Agent<GameContext, typeof GameResponseSchema>;
     explorationAgent: Agent<GameContext, typeof GameResponseSchema>;
 }
 
@@ -23,11 +23,11 @@ export function createAgents(
     toolSets: GameToolSets,
     guardrail: OutputGuardrail<typeof GameResponseSchema>,
 ): GameAgents {
-    const combatAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'CombatNarrator',
+    const engineeringAgent = new Agent<GameContext, typeof GameResponseSchema>({
+        name: 'EngineeringNarrator',
         model: 'gpt-5.2',
-        instructions: buildCombatPrompt(station, build),
-        tools: toolSets.combat,
+        instructions: buildEngineeringPrompt(station, build),
+        tools: toolSets.engineering,
         outputType: GameResponseSchema,
         outputGuardrails: [guardrail],
         modelSettings: {
@@ -38,11 +38,11 @@ export function createAgents(
         },
     });
 
-    const dialogueAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'DialogueNarrator',
+    const diagnosticsAgent = new Agent<GameContext, typeof GameResponseSchema>({
+        name: 'DiagnosticsNarrator',
         model: 'gpt-5-mini',
-        instructions: buildDialoguePrompt(station, build),
-        tools: toolSets.dialogue,
+        instructions: buildDiagnosticsPrompt(station, build),
+        tools: toolSets.diagnostics,
         outputType: GameResponseSchema,
         outputGuardrails: [guardrail],
         modelSettings: {
@@ -52,15 +52,18 @@ export function createAgents(
     });
 
     // Handoffs — defined before agents that reference them
-    const combatHandoff = handoff(combatAgent, {
-        toolNameOverride: 'transfer_to_combat',
-        toolDescriptionOverride: 'Hand off to combat narrator when the player engages an enemy or is in active combat.',
+    const engineeringHandoff = handoff(engineeringAgent, {
+        toolNameOverride: 'transfer_to_engineering',
+        toolDescriptionOverride: 'Hand off to engineering narrator when the player repairs, modifies, or improvises with systems. Also handles rare combat-as-engineering encounters.',
         isEnabled: ({ runContext }) => {
             const { state, station: s } = runContext.context;
             const room = s.rooms.get(state.currentRoom);
-            if (!room?.threat) return false;
-            const npc = s.npcs.get(room.threat);
-            return npc !== undefined && npc.disposition !== 'dead';
+            if (!room) return false;
+            // Enable if room has unresolved system failures
+            const hasFailures = room.systemFailures.some(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
+            // Or if there's a threat (combat-as-engineering)
+            const hasThreat = room.threat !== null && s.npcs.get(room.threat)?.disposition !== 'dead';
+            return hasFailures || hasThreat;
         },
     });
 
@@ -69,7 +72,7 @@ export function createAgents(
         model: 'gpt-5-mini',
         instructions: buildExplorationPrompt(station, build),
         tools: toolSets.exploration,
-        handoffs: [combatHandoff],
+        handoffs: [engineeringHandoff],
         outputType: GameResponseSchema,
         outputGuardrails: [guardrail],
         modelSettings: {
@@ -78,12 +81,17 @@ export function createAgents(
         },
     });
 
-    const dialogueHandoff = handoff(dialogueAgent, {
-        toolNameOverride: 'transfer_to_dialogue',
-        toolDescriptionOverride: 'Hand off to dialogue narrator when the player wants to interact with an NPC non-violently.',
+    const diagnosticsHandoff = handoff(diagnosticsAgent, {
+        toolNameOverride: 'transfer_to_diagnostics',
+        toolDescriptionOverride: 'Hand off to diagnostics narrator when the player examines terminals, reads sensors, analyzes problems, or interacts with NPCs.',
         isEnabled: ({ runContext }) => {
             const { state, station: s } = runContext.context;
-            return [...s.npcs.values()].some(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+            const room = s.rooms.get(state.currentRoom);
+            if (!room) return false;
+            // Enable if room has system failures to investigate, or NPCs present
+            const hasFailures = room.systemFailures.some(f => f.challengeState !== 'resolved');
+            const hasNpcs = [...s.npcs.values()].some(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+            return hasFailures || hasNpcs || room.crewLogs.length > 0;
         },
     });
 
@@ -100,7 +108,7 @@ export function createAgents(
         tools: toolSets.all,
         outputType: GameResponseSchema,
         outputGuardrails: [guardrail],
-        handoffs: [combatHandoff, dialogueHandoff, explorationHandoff],
+        handoffs: [engineeringHandoff, diagnosticsHandoff, explorationHandoff],
         modelSettings: {
             store: true,
             promptCacheRetention: '24h',
@@ -109,5 +117,5 @@ export function createAgents(
         },
     });
 
-    return { gameMaster, combatAgent, dialogueAgent, explorationAgent };
+    return { gameMaster, engineeringAgent, diagnosticsAgent, explorationAgent };
 }

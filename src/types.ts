@@ -3,12 +3,12 @@ import type { TextChunk } from '@opentui/core';
 // ─── Story & World Configuration ────────────────────────────────────────────
 
 export type StoryArc =
-    | 'parasite_outbreak'
-    | 'ai_mutiny'
-    | 'dimensional_rift'
-    | 'corporate_betrayal'
-    | 'time_anomaly'
-    | 'first_contact';
+    | 'cascade_failure'
+    | 'atmosphere_breach'
+    | 'reactor_meltdown'
+    | 'contamination_crisis'
+    | 'power_death_spiral'
+    | 'orbital_decay';
 
 export type Difficulty = 'normal' | 'hard' | 'nightmare';
 
@@ -20,7 +20,7 @@ export interface RunConfig {
 
 // ─── Character System ───────────────────────────────────────────────────────
 
-export type CharacterClassId = 'engineer' | 'soldier' | 'medic' | 'hacker';
+export type CharacterClassId = 'engineer' | 'scientist' | 'medic' | 'commander';
 
 export type ActionDomain = 'combat' | 'tech' | 'medical' | 'social' | 'survival' | 'science';
 
@@ -58,10 +58,63 @@ export interface RoomSensory {
 }
 
 export interface CrewLog {
-    type: 'datapad' | 'wall_scrawl' | 'audio_recording' | 'terminal_entry';
+    type: 'datapad' | 'wall_scrawl' | 'audio_recording' | 'terminal_entry' | 'engineering_report' | 'calibration_record' | 'failure_analysis';
     author: string;
     content: string;
     condition: string;
+}
+
+// ─── Engineering System ─────────────────────────────────────────────────────
+
+export type SystemId =
+    | 'life_support'
+    | 'pressure_seal'
+    | 'power_relay'
+    | 'coolant_loop'
+    | 'atmosphere_processor'
+    | 'gravity_generator'
+    | 'radiation_shielding'
+    | 'communications'
+    | 'fire_suppression'
+    | 'water_recycler'
+    | 'thermal_regulator'
+    | 'structural_integrity';
+
+export type SystemStatus = 'nominal' | 'degraded' | 'failing' | 'critical' | 'offline' | 'repaired';
+
+export type FailureMode = 'leak' | 'overload' | 'contamination' | 'structural' | 'blockage' | 'corrosion' | 'software' | 'mechanical';
+
+export type ChallengeState = 'detected' | 'characterized' | 'stabilized' | 'resolved' | 'failed';
+
+export interface SystemFailure {
+    systemId: SystemId;
+    status: SystemStatus;
+    failureMode: FailureMode;
+    severity: 1 | 2 | 3;
+    challengeState: ChallengeState;
+    requiredMaterials: string[];
+    requiredSkill: ActionDomain;
+    difficulty: ActionDifficulty;
+    turnsUntilCascade: number;
+    cascadeTarget: string | null;
+    hazardPerTurn: number;
+    diagnosisHint: string;
+    technicalDetail: string;
+    mitigationPaths: string[];
+}
+
+export interface SystemFailureSkeleton {
+    systemId: SystemId;
+    failureMode: FailureMode;
+    severity: 1 | 2 | 3;
+    requiredMaterials: string[];
+    requiredSkill: ActionDomain;
+    difficulty: ActionDifficulty;
+    turnsUntilCascade: number;
+    cascadeTarget: string | null;
+    hazardPerTurn: number;
+    diagnosisHint: string;
+    mitigationPaths: string[];
 }
 
 // ─── NPC System ─────────────────────────────────────────────────────────────
@@ -90,7 +143,7 @@ export interface NPCMemory {
 
 // ─── Item System ────────────────────────────────────────────────────────────
 
-export type ItemEffectType = 'heal' | 'damage_boost' | 'shield' | 'key' | 'objective' | 'utility' | 'trade';
+export type ItemEffectType = 'heal' | 'key' | 'objective' | 'utility' | 'trade' | 'material' | 'tool' | 'component' | 'chemical';
 
 export interface ItemEffect {
     type: ItemEffectType;
@@ -111,6 +164,7 @@ export interface RoomSkeleton {
     enemySlot: EnemySkeleton | null;
     isObjectiveRoom: boolean;
     secretConnection: string | null;
+    systemFailures: SystemFailureSkeleton[];
 }
 
 export interface EnemySkeleton {
@@ -137,6 +191,7 @@ export interface ObjectiveStep {
     description: string;
     roomId: string;
     requiredItemId: string | null;
+    requiredSystemRepair: SystemId | null;
     completed: boolean;
 }
 
@@ -175,6 +230,7 @@ export interface RoomCreative {
     descriptionSeed: string;
     sensory: RoomSensory;
     crewLogs: CrewLog[];
+    engineeringNotes: string;
 }
 
 export interface EnemyCreative {
@@ -184,6 +240,7 @@ export interface EnemyCreative {
     personality: string;
     deathDescription: string;
     soundSignature: string;
+    failureMode: string;
 }
 
 export interface ItemCreative {
@@ -226,6 +283,8 @@ export interface Room {
     isObjectiveRoom: boolean;
     secretConnection: string | null;
     roomModifiers: string[];
+    systemFailures: SystemFailure[];
+    engineeringNotes: string;
 }
 
 export interface NPC {
@@ -305,7 +364,7 @@ export interface ActionResult {
 
 // ─── Random Events ──────────────────────────────────────────────────────────
 
-export type EventType = 'hull_breach' | 'power_failure' | 'distress_signal' | 'radiation_spike' | 'supply_cache';
+export type EventType = 'hull_breach' | 'power_failure' | 'distress_signal' | 'radiation_spike' | 'supply_cache' | 'cascade_failure' | 'atmosphere_alarm' | 'coolant_leak' | 'structural_alert';
 
 export interface ActiveEvent {
     type: EventType;
@@ -338,13 +397,18 @@ export interface RunMetrics {
     deathCause: string | null;
     won: boolean;
     endingId: string | null;
+    systemsDiagnosed: number;
+    systemsRepaired: number;
+    systemsCascaded: number;
+    itemsCrafted: number;
+    improvizedSolutions: number;
 }
 
 export type ScoreGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 
 export interface RunScore {
     speed: number;
-    combatEfficiency: number;
+    engineeringEfficiency: number;
     exploration: number;
     resourcefulness: number;
     completion: number;
@@ -370,6 +434,9 @@ export interface RunHistoryEntry {
 export interface GameState {
     hp: number;
     maxHp: number;
+    oxygen: number;
+    maxOxygen: number;
+    suitIntegrity: number;
     damage: [number, number];
     inventory: string[];
     maxInventory: number;
@@ -381,8 +448,10 @@ export interface GameState {
     hasObjectiveItem: boolean;
     gameOver: boolean;
     won: boolean;
-    plasmaBoost: boolean;
-    shieldActive: boolean;
+    repairedSystems: Set<string>;
+    craftedItems: string[];
+    systemsCascaded: number;
+    improvizedSolutions: number;
     roomVisitCount: Map<string, number>;
     turnCount: number;
     moveCount: number;
@@ -407,6 +476,9 @@ export interface NPCDisplayInfo {
 export interface GameStatus {
     hp: number;
     maxHp: number;
+    oxygen: number;
+    maxOxygen: number;
+    suitIntegrity: number;
     roomName: string;
     roomIndex: number;
     totalRooms: number;
@@ -417,8 +489,6 @@ export interface GameStatus {
     turnCount: number;
     damage: [number, number];
     maxInventory: number;
-    shieldActive: boolean;
-    plasmaBoost: boolean;
     activeEvents: Array<{ type: string; turnsRemaining: number; effect: string }>;
     objectiveTitle: string;
     objectiveStep: number;
@@ -427,6 +497,7 @@ export interface GameStatus {
     objectivesComplete: boolean;
     objectiveSteps: Array<{ description: string; completed: boolean }>;
     mapText: TextChunk[];
+    systemFailures: Array<{ systemId: SystemId; status: SystemStatus; challengeState: ChallengeState; severity: 1 | 2 | 3 }>;
 }
 
 // ─── Slash Commands (for TUI) ───────────────────────────────────────────────

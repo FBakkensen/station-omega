@@ -4,57 +4,59 @@ import type {
     CharacterClassId,
     Difficulty,
     Disposition,
+    FailureMode,
     ItemEffect,
     ItemSkeleton,
     RoomArchetype,
     StoryArc,
+    SystemId,
 } from './types.js';
 
 // ─── Character Builds ───────────────────────────────────────────────────────
 
 export const CHARACTER_BUILDS: ReadonlyMap<CharacterClassId, CharacterBuild> = new Map<CharacterClassId, CharacterBuild>([
-    ['soldier', {
-        id: 'soldier',
-        name: 'Soldier',
-        description: 'A hardened combat specialist trained for frontline engagement and survival in hostile environments.',
-        baseHp: 120,
-        baseDamage: [18, 30],
-        proficiencies: ['combat', 'survival'],
-        weaknesses: ['tech', 'science'],
-        startingItem: null,
-        maxInventory: 5,
-    }],
     ['engineer', {
         id: 'engineer',
-        name: 'Engineer',
-        description: 'A resourceful technician skilled at repairing systems, bypassing locks, and improvising solutions.',
-        baseHp: 90,
-        baseDamage: [12, 22],
-        proficiencies: ['tech', 'science'],
-        weaknesses: ['combat', 'social'],
+        name: 'Systems Engineer',
+        description: 'A resourceful technician who can bypass failing systems with duct tape, wire, and sheer stubbornness.',
+        baseHp: 100,
+        baseDamage: [10, 18],
+        proficiencies: ['tech', 'survival'],
+        weaknesses: ['medical', 'social'],
         startingItem: 'multitool',
         maxInventory: 6,
     }],
-    ['medic', {
-        id: 'medic',
-        name: 'Medic',
-        description: 'A field medic capable of stabilizing wounds, synthesizing treatments, and negotiating under pressure.',
-        baseHp: 100,
-        baseDamage: [13, 23],
-        proficiencies: ['medical', 'social'],
-        weaknesses: ['combat', 'tech'],
-        startingItem: 'medkit',
+    ['scientist', {
+        id: 'scientist',
+        name: 'Research Scientist',
+        description: 'An analytical mind who synthesizes solutions from first principles. Needs fewer materials to craft.',
+        baseHp: 85,
+        baseDamage: [8, 16],
+        proficiencies: ['science', 'tech'],
+        weaknesses: ['combat', 'survival'],
+        startingItem: 'diagnostic_scanner',
         maxInventory: 5,
     }],
-    ['hacker', {
-        id: 'hacker',
-        name: 'Hacker',
-        description: 'A digital infiltrator who exploits station systems and manipulates NPCs through social engineering.',
-        baseHp: 85,
-        baseDamage: [10, 20],
-        proficiencies: ['tech', 'social'],
-        weaknesses: ['combat', 'survival'],
-        startingItem: 'data_spike',
+    ['medic', {
+        id: 'medic',
+        name: 'Flight Surgeon',
+        description: 'A field medic who keeps everyone alive through creative medicine and an alarming willingness to improvise.',
+        baseHp: 110,
+        baseDamage: [8, 16],
+        proficiencies: ['medical', 'science'],
+        weaknesses: ['tech', 'combat'],
+        startingItem: 'first_aid_kit',
+        maxInventory: 5,
+    }],
+    ['commander', {
+        id: 'commander',
+        name: 'Station Commander',
+        description: 'A crisis leader who sees the big picture. Can assess cascade timers in adjacent rooms and rally under pressure.',
+        baseHp: 100,
+        baseDamage: [10, 18],
+        proficiencies: ['survival', 'social'],
+        weaknesses: ['science', 'tech'],
+        startingItem: null,
         maxInventory: 5,
     }],
 ]);
@@ -92,68 +94,70 @@ export function ROOM_ARCHETYPE_BY_DEPTH(depth: number, maxDepth: number): RoomAr
 
 // ─── Objective Templates ────────────────────────────────────────────────────
 
-export const OBJECTIVE_TEMPLATES: ReadonlyMap<StoryArc, {
+export interface ObjectiveTemplate {
     title: string;
-    steps: Array<{ description: string; archetype: RoomArchetype; needsItem: boolean }>;
-}> = new Map([
-    ['parasite_outbreak', {
-        title: 'Contain the Outbreak',
+    steps: Array<{ description: string; archetype: RoomArchetype; needsItem: boolean; requiredSystemRepair: SystemId | null }>;
+}
+
+export const OBJECTIVE_TEMPLATES: ReadonlyMap<StoryArc, ObjectiveTemplate> = new Map<StoryArc, ObjectiveTemplate>([
+    ['cascade_failure', {
+        title: 'Cascade Recovery',
         steps: [
-            { description: 'Investigate the source of the biological contamination in the science lab', archetype: 'science' as RoomArchetype, needsItem: false },
-            { description: 'Retrieve the biocontainment agent from the medical bay', archetype: 'medical' as RoomArchetype, needsItem: false },
-            { description: 'Access the restricted quarantine zone to deploy the containment protocol', archetype: 'restricted' as RoomArchetype, needsItem: true },
-            { description: 'Purge the reactor coolant system to eliminate remaining parasite traces', archetype: 'reactor' as RoomArchetype, needsItem: true },
-            { description: 'Reach the escape pod and evacuate the station', archetype: 'escape' as RoomArchetype, needsItem: false },
+            { description: 'Diagnose the primary power relay failure', archetype: 'utility', needsItem: false, requiredSystemRepair: 'power_relay' },
+            { description: 'Restore auxiliary power to the science lab', archetype: 'science', needsItem: false, requiredSystemRepair: 'power_relay' },
+            { description: 'Repair the primary coolant loop', archetype: 'reactor', needsItem: true, requiredSystemRepair: 'coolant_loop' },
+            { description: 'Restore station communications', archetype: 'command', needsItem: true, requiredSystemRepair: 'communications' },
+            { description: 'Reach the escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
         ],
     }],
-    ['ai_mutiny', {
-        title: 'Override AEGIS',
+    ['atmosphere_breach', {
+        title: 'Losing Air',
         steps: [
-            { description: 'Find evidence of the AI rebellion in the command center logs', archetype: 'command' as RoomArchetype, needsItem: false },
-            { description: 'Locate the manual override codes in the utility maintenance tunnels', archetype: 'utility' as RoomArchetype, needsItem: false },
-            { description: 'Disable the AI security lockdown in the restricted server room', archetype: 'restricted' as RoomArchetype, needsItem: true },
-            { description: 'Shut down the AI core processor at the reactor level', archetype: 'reactor' as RoomArchetype, needsItem: true },
-            { description: 'Escape the station before the AI triggers self-destruct', archetype: 'escape' as RoomArchetype, needsItem: false },
+            { description: 'Locate and seal the hull breach in cargo', archetype: 'cargo', needsItem: false, requiredSystemRepair: 'pressure_seal' },
+            { description: 'Restore the atmosphere processor', archetype: 'science', needsItem: false, requiredSystemRepair: 'atmosphere_processor' },
+            { description: 'Synthesize a CO2 scrubber catalyst', archetype: 'medical', needsItem: true, requiredSystemRepair: null },
+            { description: 'Rebuild the CO2 scrubber assembly', archetype: 'utility', needsItem: true, requiredSystemRepair: 'life_support' },
+            { description: 'Evacuate to the escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
         ],
     }],
-    ['dimensional_rift', {
-        title: 'Seal the Breach',
+    ['reactor_meltdown', {
+        title: 'Critical Mass',
         steps: [
-            { description: 'Investigate anomalous readings in the science laboratory', archetype: 'science' as RoomArchetype, needsItem: false },
-            { description: 'Recover the dimensional stabilizer from the cargo hold', archetype: 'cargo' as RoomArchetype, needsItem: false },
-            { description: 'Calibrate the stabilizer at the reactor power junction', archetype: 'reactor' as RoomArchetype, needsItem: true },
-            { description: 'Seal the primary rift in the restricted anomaly chamber', archetype: 'restricted' as RoomArchetype, needsItem: true },
-            { description: 'Evacuate before the dimensional collapse', archetype: 'escape' as RoomArchetype, needsItem: false },
+            { description: 'Assess reactor containment status', archetype: 'reactor', needsItem: false, requiredSystemRepair: null },
+            { description: 'Repair the radiation shielding', archetype: 'restricted', needsItem: false, requiredSystemRepair: 'radiation_shielding' },
+            { description: 'Restore the coolant pumps', archetype: 'reactor', needsItem: true, requiredSystemRepair: 'coolant_loop' },
+            { description: 'Reinsert the control rods manually', archetype: 'command', needsItem: true, requiredSystemRepair: null },
+            { description: 'Reach the escape pod before meltdown', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
         ],
     }],
-    ['corporate_betrayal', {
-        title: 'Expose Nexus Corp',
+    ['contamination_crisis', {
+        title: 'Quarantine Protocol',
         steps: [
-            { description: 'Search crew quarters for evidence of corporate sabotage', archetype: 'quarters' as RoomArchetype, needsItem: false },
-            { description: 'Access encrypted corporate files in the command terminal', archetype: 'command' as RoomArchetype, needsItem: false },
-            { description: 'Recover the black box from the restricted vault', archetype: 'restricted' as RoomArchetype, needsItem: true },
-            { description: 'Transmit evidence through the science lab communications array', archetype: 'science' as RoomArchetype, needsItem: true },
-            { description: 'Escape the station before Nexus security arrives', archetype: 'escape' as RoomArchetype, needsItem: false },
+            { description: 'Identify the contaminant in the water recycler', archetype: 'utility', needsItem: false, requiredSystemRepair: null },
+            { description: 'Synthesize a neutralizing agent', archetype: 'science', needsItem: false, requiredSystemRepair: null },
+            { description: 'Deploy neutralizer to the water recycler', archetype: 'medical', needsItem: true, requiredSystemRepair: 'water_recycler' },
+            { description: 'Purge the atmospheric filters', archetype: 'restricted', needsItem: true, requiredSystemRepair: 'atmosphere_processor' },
+            { description: 'Evacuate the station', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
         ],
     }],
-    ['time_anomaly', {
-        title: 'Restore the Timeline',
+    ['power_death_spiral', {
+        title: 'Going Dark',
         steps: [
-            { description: 'Document the temporal distortions in the crew quarters', archetype: 'quarters' as RoomArchetype, needsItem: false },
-            { description: 'Retrieve the chrono-anchor device from the science lab', archetype: 'science' as RoomArchetype, needsItem: false },
-            { description: 'Stabilize the temporal field at the reactor core', archetype: 'reactor' as RoomArchetype, needsItem: true },
-            { description: 'Activate the chrono-anchor in the command center to reset the timeline', archetype: 'command' as RoomArchetype, needsItem: true },
-            { description: 'Reach the escape pod before the temporal wave collapses', archetype: 'escape' as RoomArchetype, needsItem: false },
+            { description: 'Locate the primary power fault', archetype: 'utility', needsItem: false, requiredSystemRepair: null },
+            { description: 'Restore emergency power to critical systems', archetype: 'cargo', needsItem: false, requiredSystemRepair: 'power_relay' },
+            { description: 'Repair the backup generator', archetype: 'reactor', needsItem: true, requiredSystemRepair: 'power_relay' },
+            { description: 'Re-energize the escape pod launch system', archetype: 'command', needsItem: true, requiredSystemRepair: 'power_relay' },
+            { description: 'Launch the escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
         ],
     }],
-    ['first_contact', {
-        title: 'Establish Contact',
+    ['orbital_decay', {
+        title: 'Terminal Velocity',
         steps: [
-            { description: 'Investigate the alien signal source in the cargo bay', archetype: 'cargo' as RoomArchetype, needsItem: false },
-            { description: 'Analyze the alien artifact in the science laboratory', archetype: 'science' as RoomArchetype, needsItem: false },
-            { description: 'Decode the alien communication protocols in the command center', archetype: 'command' as RoomArchetype, needsItem: true },
-            { description: 'Establish a secure channel through the restricted communications array', archetype: 'restricted' as RoomArchetype, needsItem: true },
-            { description: 'Evacuate with the contact data before station systems fail', archetype: 'escape' as RoomArchetype, needsItem: false },
+            { description: 'Check orbital telemetry at the command console', archetype: 'command', needsItem: false, requiredSystemRepair: null },
+            { description: 'Repair fuel line integrity', archetype: 'cargo', needsItem: false, requiredSystemRepair: 'structural_integrity' },
+            { description: 'Restore the navigation computer', archetype: 'science', needsItem: true, requiredSystemRepair: 'communications' },
+            { description: 'Execute orbital correction burn', archetype: 'reactor', needsItem: true, requiredSystemRepair: null },
+            { description: 'Evacuate via escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
         ],
     }],
 ]);
@@ -163,22 +167,122 @@ export const OBJECTIVE_TEMPLATES: ReadonlyMap<StoryArc, {
 export const STARTING_ITEMS: ReadonlyMap<string, ItemSkeleton> = new Map([
     ['multitool', {
         id: 'multitool',
-        category: 'utility',
-        effect: { type: 'utility', value: 1, description: 'A versatile tool for bypassing locks, repairing systems, and prying open panels.' } satisfies ItemEffect,
+        category: 'tool',
+        effect: { type: 'tool', value: 1, description: 'A versatile tool for bypassing locks, repairing systems, and prying open panels. Reusable.' } satisfies ItemEffect,
         isKeyItem: false,
     }],
-    ['medkit', {
-        id: 'medkit',
+    ['diagnostic_scanner', {
+        id: 'diagnostic_scanner',
+        category: 'tool',
+        effect: { type: 'tool', value: 1, description: 'A handheld scanner that reads environmental sensors and diagnoses system failures. Reusable.' } satisfies ItemEffect,
+        isKeyItem: false,
+    }],
+    ['first_aid_kit', {
+        id: 'first_aid_kit',
         category: 'medical',
         effect: { type: 'heal', value: 30, description: 'A standard-issue medical kit that restores 30 HP when used.' } satisfies ItemEffect,
         isKeyItem: false,
     }],
-    ['data_spike', {
-        id: 'data_spike',
-        category: 'tech',
-        effect: { type: 'utility', value: 1, description: 'A hacking module that can breach encrypted terminals and override electronic locks.' } satisfies ItemEffect,
-        isKeyItem: false,
-    }],
+]);
+
+// ─── Engineering Items Catalog ──────────────────────────────────────────────
+
+export interface EngineeringItemDef {
+    id: string;
+    category: string;
+    effect: ItemEffect;
+    isKeyItem: boolean;
+}
+
+export const ENGINEERING_ITEMS: ReadonlyMap<string, EngineeringItemDef> = new Map([
+    // Materials (consumed on use)
+    ['sealant_patch', { id: 'sealant_patch', category: 'material', effect: { type: 'material', value: 1, description: 'Quick-set polymer sealant for hull breaches and pipe leaks.' }, isKeyItem: false }],
+    ['insulated_wire', { id: 'insulated_wire', category: 'material', effect: { type: 'material', value: 1, description: 'High-gauge insulated wiring for electrical repairs.' }, isKeyItem: false }],
+    ['coolant_canister', { id: 'coolant_canister', category: 'material', effect: { type: 'material', value: 1, description: 'Pressurized coolant for thermal regulation systems.' }, isKeyItem: false }],
+    ['structural_epoxy', { id: 'structural_epoxy', category: 'material', effect: { type: 'material', value: 1, description: 'Industrial-strength adhesive rated for vacuum and thermal stress.' }, isKeyItem: false }],
+    ['bio_filter', { id: 'bio_filter', category: 'material', effect: { type: 'material', value: 1, description: 'Biological filtration membrane for atmosphere and water systems.' }, isKeyItem: false }],
+    ['replacement_valve', { id: 'replacement_valve', category: 'component', effect: { type: 'component', value: 1, description: 'Standard-fit valve assembly for fluid and gas systems.' }, isKeyItem: false }],
+
+    // Tools (reusable, never consumed)
+    ['welding_rig', { id: 'welding_rig', category: 'tool', effect: { type: 'tool', value: 1, description: 'Portable arc welder for structural repairs. Reusable.' }, isKeyItem: false }],
+
+    // Chemicals (consumed on use)
+    ['lithium_hydroxide', { id: 'lithium_hydroxide', category: 'chemical', effect: { type: 'chemical', value: 1, description: 'CO2 scrubbing agent. Critical for life support repairs.' }, isKeyItem: false }],
+    ['neutralizer_agent', { id: 'neutralizer_agent', category: 'chemical', effect: { type: 'chemical', value: 1, description: 'Broad-spectrum chemical neutralizer for contamination cleanup.' }, isKeyItem: false }],
+    ['solvent', { id: 'solvent', category: 'chemical', effect: { type: 'chemical', value: 1, description: 'Industrial solvent for dissolving corrosion and clearing blockages.' }, isKeyItem: false }],
+
+    // Medical (consumed on use)
+    ['stim_injector', { id: 'stim_injector', category: 'medical', effect: { type: 'heal', value: 20, description: 'Adrenaline stimulant — quick heal.' }, isKeyItem: false }],
+    ['anti_rad_dose', { id: 'anti_rad_dose', category: 'medical', effect: { type: 'heal', value: 15, description: 'Potassium iodide treatment for radiation exposure.' }, isKeyItem: false }],
+]);
+
+// ─── Crafting Recipes ───────────────────────────────────────────────────────
+
+export interface CraftRecipe {
+    resultId: string;
+    resultName: string;
+    ingredients: string[];
+    requiredTool: string | null;
+    difficulty: ActionDifficulty;
+}
+
+export const CRAFT_RECIPES: readonly CraftRecipe[] = [
+    { resultId: 'improvised_sealant', resultName: 'Improvised Sealant', ingredients: ['structural_epoxy', 'solvent'], requiredTool: null, difficulty: 'easy' },
+    { resultId: 'rewired_relay', resultName: 'Rewired Relay Module', ingredients: ['insulated_wire', 'insulated_wire'], requiredTool: 'multitool', difficulty: 'moderate' },
+    { resultId: 'co2_scrubber_cartridge', resultName: 'CO2 Scrubber Cartridge', ingredients: ['lithium_hydroxide', 'bio_filter'], requiredTool: null, difficulty: 'moderate' },
+    { resultId: 'radiation_patch', resultName: 'Radiation Shielding Patch', ingredients: ['sealant_patch', 'structural_epoxy'], requiredTool: 'welding_rig', difficulty: 'hard' },
+    { resultId: 'coolant_bypass', resultName: 'Coolant Bypass Assembly', ingredients: ['replacement_valve', 'coolant_canister'], requiredTool: 'multitool', difficulty: 'moderate' },
+    { resultId: 'contamination_filter', resultName: 'Contamination Filter', ingredients: ['bio_filter', 'neutralizer_agent'], requiredTool: null, difficulty: 'easy' },
+] as const;
+
+// ─── System Failure Pools by Room Archetype ─────────────────────────────────
+
+export interface SystemFailureTemplate {
+    systemId: SystemId;
+    failureModes: FailureMode[];
+    requiredMaterials: string[];
+    requiredSkill: 'tech' | 'science' | 'medical' | 'survival';
+    diagnosisHint: string;
+    mitigationPaths: string[];
+}
+
+export const SYSTEM_FAILURE_POOLS: ReadonlyMap<RoomArchetype, SystemFailureTemplate[]> = new Map([
+    ['quarters', [
+        { systemId: 'life_support', failureModes: ['leak', 'blockage'], requiredMaterials: ['bio_filter'], requiredSkill: 'tech', diagnosisHint: 'Elevated CO2 readings; recycler fan noise irregular', mitigationPaths: ['Replace bio_filter in air handler', 'Improvise filter from available textiles'] },
+        { systemId: 'fire_suppression', failureModes: ['mechanical', 'software'], requiredMaterials: ['replacement_valve'], requiredSkill: 'tech', diagnosisHint: 'Suppression system armed but valve response delayed', mitigationPaths: ['Replace stuck valve', 'Bypass electronic trigger with manual pull'] },
+    ]],
+    ['utility', [
+        { systemId: 'power_relay', failureModes: ['overload', 'corrosion'], requiredMaterials: ['insulated_wire'], requiredSkill: 'tech', diagnosisHint: 'Bus voltage fluctuating; smell of burnt insulation', mitigationPaths: ['Replace damaged wiring section', 'Reroute through backup bus'] },
+        { systemId: 'water_recycler', failureModes: ['contamination', 'blockage'], requiredMaterials: ['bio_filter', 'solvent'], requiredSkill: 'science', diagnosisHint: 'Water output cloudy; bacterial count above safe limits', mitigationPaths: ['Replace filter and flush with solvent', 'UV sterilize and manually filter'] },
+        { systemId: 'structural_integrity', failureModes: ['structural', 'corrosion'], requiredMaterials: ['structural_epoxy'], requiredSkill: 'survival', diagnosisHint: 'Hairline fractures visible along stress seam', mitigationPaths: ['Apply structural epoxy to fractures', 'Weld reinforcement plates over weak points'] },
+    ]],
+    ['science', [
+        { systemId: 'atmosphere_processor', failureModes: ['contamination', 'mechanical'], requiredMaterials: ['bio_filter'], requiredSkill: 'science', diagnosisHint: 'Trace gas composition anomalous; processor motor vibration pattern wrong', mitigationPaths: ['Replace contaminated filter element', 'Clean intake manifold and recalibrate'] },
+        { systemId: 'radiation_shielding', failureModes: ['structural', 'corrosion'], requiredMaterials: ['sealant_patch', 'structural_epoxy'], requiredSkill: 'science', diagnosisHint: 'Dosimeter climbing; shielding material degraded', mitigationPaths: ['Patch shielding gaps with sealant and epoxy', 'Reroute shielding from decommissioned area'] },
+        { systemId: 'coolant_loop', failureModes: ['leak', 'blockage'], requiredMaterials: ['coolant_canister', 'replacement_valve'], requiredSkill: 'tech', diagnosisHint: 'Floor wet with coolant; temperature rising in adjacent systems', mitigationPaths: ['Replace leaking valve and refill coolant', 'Bypass damaged section and reroute flow'] },
+    ]],
+    ['command', [
+        { systemId: 'communications', failureModes: ['software', 'overload'], requiredMaterials: ['insulated_wire'], requiredSkill: 'tech', diagnosisHint: 'Comms array powered but transmitting noise; signal processor overloaded', mitigationPaths: ['Replace burned signal processor wiring', 'Reset firmware and recalibrate antenna'] },
+        { systemId: 'power_relay', failureModes: ['overload', 'mechanical'], requiredMaterials: ['insulated_wire'], requiredSkill: 'tech', diagnosisHint: 'Primary relay tripped; backup struggling under load', mitigationPaths: ['Replace relay coil wiring', 'Shed non-critical loads and bypass'] },
+    ]],
+    ['medical', [
+        { systemId: 'life_support', failureModes: ['contamination', 'leak'], requiredMaterials: ['bio_filter', 'sealant_patch'], requiredSkill: 'medical', diagnosisHint: 'Air quality alarms; trace chemicals in atmosphere', mitigationPaths: ['Replace contaminated filter and seal leak', 'Activate emergency air scrubbers and isolate source'] },
+        { systemId: 'water_recycler', failureModes: ['contamination', 'mechanical'], requiredMaterials: ['neutralizer_agent', 'bio_filter'], requiredSkill: 'medical', diagnosisHint: 'Medical water supply contaminated; automated testing flagged anomalies', mitigationPaths: ['Neutralize contaminant and replace filter', 'Switch to emergency sealed water reserves'] },
+    ]],
+    ['cargo', [
+        { systemId: 'pressure_seal', failureModes: ['structural', 'leak'], requiredMaterials: ['sealant_patch', 'structural_epoxy'], requiredSkill: 'survival', diagnosisHint: 'Pressure dropping slowly; whistling from cargo bay wall seam', mitigationPaths: ['Seal breach with sealant and reinforce with epoxy', 'Improvise pressure barrier from cargo materials'] },
+        { systemId: 'gravity_generator', failureModes: ['mechanical', 'overload'], requiredMaterials: ['replacement_valve'], requiredSkill: 'tech', diagnosisHint: 'Intermittent gravity fluctuations; generator humming at wrong frequency', mitigationPaths: ['Replace worn bearing assembly', 'Reduce to 0.5g and stabilize'] },
+    ]],
+    ['restricted', [
+        { systemId: 'radiation_shielding', failureModes: ['structural', 'corrosion'], requiredMaterials: ['sealant_patch', 'structural_epoxy'], requiredSkill: 'science', diagnosisHint: 'Radiation levels above normal; shielding integrity compromised', mitigationPaths: ['Patch degraded shielding sections', 'Deploy temporary lead barriers'] },
+        { systemId: 'fire_suppression', failureModes: ['software', 'mechanical'], requiredMaterials: ['replacement_valve'], requiredSkill: 'tech', diagnosisHint: 'Fire suppression offline; control panel showing fault codes', mitigationPaths: ['Replace faulty actuator valve', 'Bypass electronic controls with manual override'] },
+    ]],
+    ['reactor', [
+        { systemId: 'coolant_loop', failureModes: ['leak', 'overload'], requiredMaterials: ['coolant_canister', 'replacement_valve'], requiredSkill: 'tech', diagnosisHint: 'Coolant pressure dropping; temperature rising above nominal', mitigationPaths: ['Replace valve and refill coolant', 'Open emergency venting and bypass damaged section'] },
+        { systemId: 'power_relay', failureModes: ['overload', 'mechanical'], requiredMaterials: ['insulated_wire'], requiredSkill: 'tech', diagnosisHint: 'Main bus arcing; load distribution uneven', mitigationPaths: ['Replace damaged relay wiring', 'Shed reactor load and redistribute'] },
+        { systemId: 'radiation_shielding', failureModes: ['structural', 'leak'], requiredMaterials: ['sealant_patch', 'structural_epoxy'], requiredSkill: 'science', diagnosisHint: 'Neutron flux readings elevated; containment showing micro-fractures', mitigationPaths: ['Apply sealant to micro-fractures', 'Reduce reactor output to lower radiation levels'] },
+        { systemId: 'thermal_regulator', failureModes: ['mechanical', 'blockage'], requiredMaterials: ['coolant_canister', 'solvent'], requiredSkill: 'tech', diagnosisHint: 'Heat exchanger efficiency dropping; flow rate below spec', mitigationPaths: ['Flush blockage with solvent and refill coolant', 'Switch to backup heat exchanger'] },
+    ]],
 ]);
 
 // ─── NPC Interaction ────────────────────────────────────────────────────────

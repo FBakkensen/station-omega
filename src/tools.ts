@@ -12,6 +12,7 @@ import type {
     NPC,
 } from './types.js';
 import { getProficiencyModifier } from './character.js';
+import { CRAFT_RECIPES } from './data.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -103,11 +104,11 @@ function defineSuggestTool(
 
 export interface GameToolSets {
     all: Tool<GameContext>[];           // All tools (orchestrator)
-    combat: Tool<GameContext>[];        // attack, suggest_attacks, use_item, [tactical_scan]
-    dialogue: Tool<GameContext>[];      // interact_npc, suggest_interactions, record_moral_choice, use_item
+    engineering: Tool<GameContext>[];   // diagnose, stabilize, repair, improvise, craft, attack, use_item
+    diagnostics: Tool<GameContext>[];   // check_environment, analyze_item, look_around, suggest_diagnostics
     exploration: Tool<GameContext>[];   // look_around, move_to, pick_up_item, attempt_action,
                                         // suggest_actions, complete_objective, field_surgery,
-                                        // [bypass_system], [system_hack]
+                                        // [bypass_system], [crisis_assessment]
 }
 
 export function createGameToolSets(classId: string): GameToolSets {
@@ -168,6 +169,20 @@ export function createGameToolSets(classId: string): GameToolSets {
                 },
                 objective_hint: isObjectiveHere ? currentStep.description : null,
                 active_events: state.activeEvents.map(e => ({ type: e.type, effect: e.effect, turns_remaining: e.turnsRemaining })),
+                system_failures: room.systemFailures
+                    .filter(f => f.challengeState !== 'resolved')
+                    .map(f => ({
+                        system_id: f.systemId,
+                        status: f.status,
+                        state: f.challengeState,
+                        severity: f.severity,
+                        visible_symptoms: f.diagnosisHint,
+                    })),
+                engineering_notes: room.engineeringNotes || null,
+                atmosphere: {
+                    player_oxygen: state.oxygen,
+                    suit_integrity: state.suitIntegrity,
+                },
             });
         },
     });
@@ -251,6 +266,13 @@ export function createGameToolSets(classId: string): GameToolSets {
                 sensory: room?.sensory ?? null,
                 is_revisit: (state.roomVisitCount.get(targetId) ?? 0) > 1,
                 enemy_defeated_here: room?.threat !== null && getRoomThreat(targetId, station) === null,
+                system_warnings: room?.systemFailures
+                    .filter(f => f.challengeState !== 'resolved')
+                    .map(f => ({ system_id: f.systemId, severity: f.severity, status: f.status })) ?? [],
+                atmosphere_safe: !(room?.systemFailures.some(f =>
+                    (f.systemId === 'atmosphere_processor' || f.systemId === 'life_support' || f.systemId === 'pressure_seal')
+                    && f.challengeState !== 'resolved'
+                ) ?? false),
             });
         },
     });
@@ -380,7 +402,11 @@ export function createGameToolSets(classId: string): GameToolSets {
                 return JSON.stringify({ success: false, reason: 'key_item', item_name: item.name });
             }
 
-            state.inventory.splice(foundIdx, 1);
+            // Tools are reusable — don't consume them
+            const isReusable = item.effect.type === 'tool';
+            if (!isReusable) {
+                state.inventory.splice(foundIdx, 1);
+            }
             state.metrics.itemsUsed.push(foundId);
 
             switch (item.effect.type) {
@@ -391,14 +417,12 @@ export function createGameToolSets(classId: string): GameToolSets {
                     state.metrics.totalDamageHealed += healed;
                     return JSON.stringify({ success: true, item_name: item.name, effect_type: 'heal', healed, player_hp: state.hp, player_maxHp: state.maxHp });
                 }
-                case 'damage_boost': {
-                    state.plasmaBoost = true;
-                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'damage_boost', bonus: item.effect.value });
-                }
-                case 'shield': {
-                    state.shieldActive = true;
-                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'shield', absorb: item.effect.value });
-                }
+                case 'tool':
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'tool', reusable: true, description: item.effect.description });
+                case 'material':
+                case 'component':
+                case 'chemical':
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type, note: 'Material consumed. Primarily used for repairs and crafting.' });
                 default:
                     return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type });
             }
@@ -423,10 +447,6 @@ export function createGameToolSets(classId: string): GameToolSets {
 
             // Player attacks
             let playerDamage = randInt(build.baseDamage[0], build.baseDamage[1]);
-            if (state.plasmaBoost) {
-                playerDamage += 25;
-                state.plasmaBoost = false;
-            }
             if (state.activeEvents.some(e => e.type === 'radiation_spike')) {
                 playerDamage = Math.max(1, Math.floor(playerDamage * 0.75));
             }
@@ -435,14 +455,8 @@ export function createGameToolSets(classId: string): GameToolSets {
 
             // Enemy attacks back (if alive)
             let enemyDamage = 0;
-            let shieldAbsorbed = 0;
             if (npc.currentHp > 0) {
                 enemyDamage = randInt(npc.damage[0], npc.damage[1]);
-                if (state.shieldActive) {
-                    shieldAbsorbed = Math.min(20, enemyDamage);
-                    enemyDamage -= shieldAbsorbed;
-                    state.shieldActive = false;
-                }
                 state.hp -= enemyDamage;
                 state.metrics.totalDamageTaken += enemyDamage;
             }
@@ -483,7 +497,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                     enemy_id: npc.id,
                     enemy_name: npc.name,
                     enemy_damage_dealt: enemyDamage,
-                    shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
                     enemy_defeated: defeated,
                     player_died: true,
                     game_over: true,
@@ -496,7 +509,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                 enemy_id: npc.id,
                 enemy_name: npc.name,
                 enemy_damage_dealt: enemyDamage,
-                shield_absorbed: shieldAbsorbed > 0 ? shieldAbsorbed : undefined,
                 enemy_defeated: defeated,
                 enemy_remaining_hp: defeated ? 0 : npc.currentHp,
                 player_hp: state.hp,
@@ -826,6 +838,17 @@ export function createGameToolSets(classId: string): GameToolSets {
                 return JSON.stringify({ success: false, reason: 'missing_item', required_item: itemName });
             }
 
+            // Check system repair requirement
+            if (currentStep.requiredSystemRepair) {
+                const room = station.rooms.get(state.currentRoom);
+                const repaired = room?.systemFailures.some(f =>
+                    f.systemId === currentStep.requiredSystemRepair && f.challengeState === 'resolved'
+                ) ?? false;
+                if (!repaired) {
+                    return JSON.stringify({ success: false, reason: 'system_not_repaired', required_system: currentStep.requiredSystemRepair });
+                }
+            }
+
             currentStep.completed = true;
             objectives.currentStepIndex++;
 
@@ -850,39 +873,452 @@ export function createGameToolSets(classId: string): GameToolSets {
         },
     });
 
+    // ─── Engineering Tools ─────────────────────────────────────────────────
+
+    const diagnoseSystem = tool({
+        name: 'diagnose_system',
+        description: 'Scan a failing system in the current room to determine root cause, required materials, and repair difficulty. Transitions system from detected → characterized.',
+        parameters: z.object({
+            system: z.string().describe('System ID to diagnose (e.g. "coolant_loop", "power_relay")'),
+        }),
+        execute: (args: { system: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
+            const room = station.rooms.get(state.currentRoom);
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
+
+            const failure = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'detected');
+            if (!failure) {
+                const existing = room.systemFailures.find(f => f.systemId === args.system);
+                if (existing) return JSON.stringify({ error: `System ${args.system} is already ${existing.challengeState}.` });
+                return JSON.stringify({ error: `No ${args.system} failure detected in this room.` });
+            }
+
+            failure.challengeState = 'characterized';
+            failure.technicalDetail = `${failure.failureMode} failure in ${failure.systemId}: severity ${String(failure.severity)}`;
+            state.metrics.systemsDiagnosed++;
+
+            return JSON.stringify({
+                success: true,
+                system_id: failure.systemId,
+                failure_mode: failure.failureMode,
+                severity: failure.severity,
+                status: failure.status,
+                required_materials: failure.requiredMaterials,
+                required_skill: failure.requiredSkill,
+                difficulty: failure.difficulty,
+                diagnosis_hint: failure.diagnosisHint,
+                cascade_timer: failure.turnsUntilCascade > 0 ? failure.turnsUntilCascade : null,
+                cascade_target: failure.cascadeTarget,
+                hazard_per_turn: failure.hazardPerTurn,
+                mitigation_paths: failure.mitigationPaths,
+            });
+        },
+    });
+
+    const stabilizeHazard = tool({
+        name: 'stabilize_hazard',
+        description: 'Apply temporary mitigation to a diagnosed system failure. Buys time by doubling the cascade timer but does not fix the root cause. Easier than full repair.',
+        parameters: z.object({
+            system: z.string().describe('System ID to stabilize'),
+            method: z.string().describe('How you are stabilizing it'),
+        }),
+        execute: (args: { system: string; method: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            const room = station.rooms.get(state.currentRoom);
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
+
+            const failure = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'characterized');
+            if (!failure) return JSON.stringify({ error: `No characterized ${args.system} failure to stabilize. Diagnose it first.` });
+
+            const target = Math.max(5, Math.min(98,
+                (failure.severity === 1 ? 85 : failure.severity === 2 ? 65 : 45)
+                + getProficiencyModifier(build, failure.requiredSkill)
+            ));
+            const roll = randInt(1, 100);
+
+            if (roll <= target) {
+                failure.challengeState = 'stabilized';
+                failure.turnsUntilCascade *= 2;
+                failure.status = 'degraded';
+                return JSON.stringify({
+                    success: true, system_id: failure.systemId, method: args.method,
+                    roll, target, new_cascade_timer: failure.turnsUntilCascade,
+                });
+            }
+
+            return JSON.stringify({ success: false, system_id: failure.systemId, method: args.method, roll, target });
+        },
+    });
+
+    const repairSystem = tool({
+        name: 'repair_system',
+        description: 'Perform a full repair on a diagnosed or stabilized system failure. Requires correct materials (consumed) and a skill check. Tools are reusable.',
+        parameters: z.object({
+            system: z.string().describe('System ID to repair'),
+            materials_used: z.array(z.string()).describe('Names of materials from inventory to use'),
+        }),
+        execute: (args: { system: string; materials_used: string[] }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            const room = station.rooms.get(state.currentRoom);
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
+
+            const failure = room.systemFailures.find(f =>
+                f.systemId === args.system && (f.challengeState === 'characterized' || f.challengeState === 'stabilized')
+            );
+            if (!failure) {
+                const detected = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'detected');
+                if (detected) return JSON.stringify({ error: 'Diagnose the system first before attempting repair.' });
+                return JSON.stringify({ error: `No repairable ${args.system} failure in this room.` });
+            }
+
+            // Check required materials are in inventory
+            const missing: string[] = [];
+            for (const mat of failure.requiredMaterials) {
+                const found = state.inventory.some(id =>
+                    id === mat || station.items.get(id)?.name.toLowerCase() === mat.replace(/_/g, ' ')
+                );
+                if (!found) missing.push(mat);
+            }
+            if (missing.length > 0) {
+                return JSON.stringify({ error: 'Missing required materials.', missing, required: failure.requiredMaterials });
+            }
+
+            // Skill check
+            const TARGETS: Record<ActionDifficulty, number> = {
+                trivial: 95, easy: 80, moderate: 60, hard: 40, extreme: 20, impossible: 5,
+            };
+            let target = TARGETS[failure.difficulty] + getProficiencyModifier(build, failure.requiredSkill);
+            if (failure.challengeState === 'stabilized') target += 10;
+            target = Math.max(5, Math.min(98, target));
+
+            const roll = randInt(1, 100);
+            let outcome: ActionOutcome;
+            if (roll <= Math.floor(target * 0.15)) outcome = 'critical_success';
+            else if (roll <= target) outcome = 'success';
+            else if (roll <= target + 15) outcome = 'partial_success';
+            else if (roll >= 96) outcome = 'critical_failure';
+            else outcome = 'failure';
+
+            // Consume materials (tools are reusable)
+            for (const mat of failure.requiredMaterials) {
+                const idx = state.inventory.findIndex(id => {
+                    const item = station.items.get(id);
+                    if (item?.effect.type === 'tool') return false;
+                    return id === mat || item?.name.toLowerCase() === mat.replace(/_/g, ' ');
+                });
+                if (idx >= 0) state.inventory.splice(idx, 1);
+            }
+
+            if (outcome === 'critical_success' || outcome === 'success') {
+                failure.challengeState = 'resolved';
+                failure.status = 'repaired';
+                state.repairedSystems.add(`${failure.systemId}:${state.currentRoom}`);
+                state.metrics.systemsRepaired++;
+                return JSON.stringify({
+                    success: true, outcome, system_id: failure.systemId, roll, target,
+                    inventory: state.inventory.map(id => getItemName(id, station)),
+                });
+            }
+            if (outcome === 'partial_success') {
+                if (failure.challengeState !== 'stabilized') {
+                    failure.challengeState = 'stabilized';
+                    failure.turnsUntilCascade += 3;
+                }
+                return JSON.stringify({
+                    success: false, partial: true, outcome, system_id: failure.systemId, roll, target,
+                    note: 'Repair incomplete but system stabilized.',
+                    inventory: state.inventory.map(id => getItemName(id, station)),
+                });
+            }
+            // Failure or critical failure
+            let dmg = 0;
+            if (outcome === 'critical_failure') {
+                dmg = randInt(5, 15);
+                state.hp = Math.max(0, state.hp - dmg);
+                state.metrics.totalDamageTaken += dmg;
+                if (state.hp <= 0) {
+                    state.gameOver = true;
+                    state.metrics.deathCause = `Critical repair failure: ${failure.systemId}`;
+                }
+            }
+            return JSON.stringify({
+                success: false, outcome, system_id: failure.systemId, roll, target,
+                damage_taken: dmg > 0 ? dmg : undefined,
+                player_hp: state.hp,
+                inventory: state.inventory.map(id => getItemName(id, station)),
+            });
+        },
+    });
+
+    const improviseRepair = tool({
+        name: 'improvise_repair',
+        description: '"Science the hell out of it" — fix a system failure with non-standard materials and creative reasoning. Higher difficulty but always possible.',
+        parameters: z.object({
+            system: z.string().describe('System ID to repair'),
+            approach: z.string().describe('How you plan to improvise the repair'),
+            materials_used: z.array(z.string()).describe('Non-standard materials you are using'),
+        }),
+        execute: (args: { system: string; approach: string; materials_used: string[] }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            const room = station.rooms.get(state.currentRoom);
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
+
+            const failure = room.systemFailures.find(f =>
+                f.systemId === args.system && (f.challengeState === 'characterized' || f.challengeState === 'stabilized')
+            );
+            if (!failure) return JSON.stringify({ error: `No diagnosed ${args.system} failure to repair.` });
+
+            // Verify at least one material is in inventory
+            const validMaterials = args.materials_used.filter(name =>
+                state.inventory.some(id => {
+                    const item = station.items.get(id);
+                    return id.toLowerCase() === name.toLowerCase() || (item?.name.toLowerCase() === name.toLowerCase());
+                })
+            );
+            if (validMaterials.length === 0) {
+                return JSON.stringify({ error: 'You need at least one material from your inventory.' });
+            }
+
+            // Higher difficulty than standard repair
+            const TARGETS: Record<ActionDifficulty, number> = {
+                trivial: 95, easy: 80, moderate: 60, hard: 40, extreme: 20, impossible: 5,
+            };
+            const harderDifficulty: ActionDifficulty =
+                failure.difficulty === 'trivial' ? 'easy' :
+                failure.difficulty === 'easy' ? 'moderate' :
+                failure.difficulty === 'moderate' ? 'hard' :
+                failure.difficulty === 'hard' ? 'extreme' : 'extreme';
+
+            let target = TARGETS[harderDifficulty]
+                + getProficiencyModifier(build, failure.requiredSkill)
+                + Math.min(validMaterials.length * 5, 15);
+            target = Math.max(5, Math.min(98, target));
+
+            const roll = randInt(1, 100);
+            const success = roll <= target;
+
+            // Consume materials (except tools)
+            for (const name of validMaterials) {
+                const idx = state.inventory.findIndex(id => {
+                    const item = station.items.get(id);
+                    if (item?.effect.type === 'tool') return false;
+                    return id.toLowerCase() === name.toLowerCase() || (item?.name.toLowerCase() === name.toLowerCase());
+                });
+                if (idx >= 0) state.inventory.splice(idx, 1);
+            }
+
+            if (success) {
+                failure.challengeState = 'resolved';
+                failure.status = 'repaired';
+                state.repairedSystems.add(`${failure.systemId}:${state.currentRoom}`);
+                state.metrics.systemsRepaired++;
+                state.metrics.improvizedSolutions++;
+                state.improvizedSolutions++;
+                return JSON.stringify({
+                    success: true, system_id: failure.systemId, approach: args.approach,
+                    roll, target, improvised: true,
+                    inventory: state.inventory.map(id => getItemName(id, station)),
+                });
+            }
+
+            return JSON.stringify({
+                success: false, system_id: failure.systemId, approach: args.approach, roll, target,
+                inventory: state.inventory.map(id => getItemName(id, station)),
+            });
+        },
+    });
+
+    const craftItem = tool({
+        name: 'craft_item',
+        description: 'Combine inventory materials to create a new component. Uses known recipes. Consumes ingredients on success.',
+        parameters: z.object({
+            ingredients: z.array(z.string()).describe('Names of materials to combine'),
+            intended_result: z.string().describe('What you are trying to create'),
+        }),
+        execute: (args: { ingredients: string[]; intended_result: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station, build } = getCtx(ctx);
+            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
+
+            const normalizedIngredients = args.ingredients.map(n => n.toLowerCase());
+            const recipe = CRAFT_RECIPES.find(r => {
+                const ri = r.ingredients.map(i => i.toLowerCase());
+                return ri.length === normalizedIngredients.length &&
+                    ri.every(i => normalizedIngredients.includes(i));
+            });
+
+            if (!recipe) {
+                return JSON.stringify({
+                    success: false, reason: 'no_recipe', ingredients: args.ingredients,
+                    intended: args.intended_result,
+                    note: 'No known recipe for this combination. Try different materials or use improvise_repair for non-standard fixes.',
+                });
+            }
+
+            // Verify ingredients in inventory
+            const missing: string[] = [];
+            for (const ingredient of recipe.ingredients) {
+                const found = state.inventory.some(id =>
+                    id === ingredient || station.items.get(id)?.name.toLowerCase() === ingredient.replace(/_/g, ' ')
+                );
+                if (!found) missing.push(ingredient);
+            }
+            if (missing.length > 0) return JSON.stringify({ error: 'Missing ingredients.', missing });
+
+            // Check required tool
+            if (recipe.requiredTool) {
+                const reqTool = recipe.requiredTool;
+                const hasTool = state.inventory.some(id =>
+                    id === reqTool || station.items.get(id)?.name.toLowerCase() === reqTool.replace(/_/g, ' ')
+                );
+                if (!hasTool) return JSON.stringify({ error: `Requires ${reqTool} tool.` });
+            }
+
+            // Skill check
+            const TARGETS: Record<ActionDifficulty, number> = {
+                trivial: 95, easy: 80, moderate: 60, hard: 40, extreme: 20, impossible: 5,
+            };
+            let target = TARGETS[recipe.difficulty] + getProficiencyModifier(build, 'tech');
+            if (build.id === 'scientist') target += 15; // Scientist class bonus
+            target = Math.max(5, Math.min(98, target));
+
+            const roll = randInt(1, 100);
+            if (roll > target) {
+                return JSON.stringify({ success: false, intended: recipe.resultName, roll, target, note: 'Crafting failed. Materials not consumed.' });
+            }
+
+            // Consume ingredients (not tools)
+            for (const ingredient of recipe.ingredients) {
+                const idx = state.inventory.findIndex(id =>
+                    id === ingredient || station.items.get(id)?.name.toLowerCase() === ingredient.replace(/_/g, ' ')
+                );
+                if (idx >= 0) state.inventory.splice(idx, 1);
+            }
+
+            // Add crafted item
+            if (!station.items.has(recipe.resultId)) {
+                station.items.set(recipe.resultId, {
+                    id: recipe.resultId,
+                    name: recipe.resultName,
+                    description: `Crafted: ${recipe.resultName}`,
+                    category: 'component',
+                    effect: { type: 'component', value: 1, description: recipe.resultName },
+                    isKeyItem: false,
+                    useNarration: `You use the ${recipe.resultName}.`,
+                });
+            }
+            state.inventory.push(recipe.resultId);
+            state.craftedItems.push(recipe.resultId);
+            state.metrics.itemsCrafted++;
+
+            return JSON.stringify({
+                success: true, crafted: recipe.resultName, roll, target,
+                inventory: state.inventory.map(id => getItemName(id, station)),
+            });
+        },
+    });
+
+    const analyzeItem = tool({
+        name: 'analyze_item',
+        description: 'Examine an inventory item to understand its properties, repair applications, and combination potential.',
+        parameters: z.object({
+            item: z.string().describe('Name of the item to analyze'),
+        }),
+        execute: (args: { item: string }, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
+            const itemName = args.item.toLowerCase();
+
+            let itemId: string | null = null;
+            for (const id of state.inventory) {
+                const item = station.items.get(id);
+                if (id.toLowerCase() === itemName || item?.name.toLowerCase() === itemName) {
+                    itemId = id;
+                    break;
+                }
+            }
+            if (!itemId) return JSON.stringify({ error: `"${args.item}" not in inventory.` });
+
+            const item = station.items.get(itemId);
+            if (!item) return JSON.stringify({ error: 'Item data missing.' });
+
+            const recipes = CRAFT_RECIPES.filter(r => r.ingredients.includes(itemId));
+            const room = station.rooms.get(state.currentRoom);
+            const applicableFailures = room?.systemFailures
+                .filter(f => f.requiredMaterials.includes(itemId) && f.challengeState !== 'resolved' && f.challengeState !== 'failed')
+                .map(f => ({ systemId: f.systemId, state: f.challengeState })) ?? [];
+
+            return JSON.stringify({
+                item_id: itemId,
+                item_name: item.name,
+                description: item.description,
+                category: item.category,
+                effect_type: item.effect.type,
+                is_reusable: item.effect.type === 'tool',
+                is_key_item: item.isKeyItem,
+                craft_recipes: recipes.map(r => ({
+                    result: r.resultName,
+                    other_ingredients: r.ingredients.filter(i => i !== itemId),
+                    tool_required: r.requiredTool,
+                })),
+                applicable_repairs: applicableFailures,
+            });
+        },
+    });
+
+    const checkEnvironment = tool({
+        name: 'check_environment',
+        description: 'Read environmental sensors in the current room: atmosphere composition, pressure, temperature, radiation, and structural data. Returns raw numbers for assessment.',
+        parameters: z.object({}),
+        execute: (_args, ctx?: RunContext<GameContext>) => {
+            const { state, station } = getCtx(ctx);
+            const room = station.rooms.get(state.currentRoom);
+            if (!room) return JSON.stringify({ error: 'Invalid room.' });
+
+            const failures = room.systemFailures.filter(f => f.challengeState !== 'resolved');
+            const hasAtmo = failures.some(f => f.systemId === 'atmosphere_processor' || f.systemId === 'life_support');
+            const hasPressure = failures.some(f => f.systemId === 'pressure_seal');
+            const hasRad = failures.some(f => f.systemId === 'radiation_shielding');
+            const hasThermal = failures.some(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop');
+            const hasStructural = failures.some(f => f.systemId === 'structural_integrity');
+
+            return JSON.stringify({
+                room_name: room.name,
+                atmosphere: {
+                    oxygen_pct: hasAtmo ? Math.max(14, 21 - failures.filter(f => f.systemId === 'atmosphere_processor' || f.systemId === 'life_support').length * 3) : 21,
+                    co2_ppm: hasAtmo ? 2200 + failures.filter(f => f.systemId === 'life_support').length * 800 : 400,
+                    pressure_kpa: hasPressure ? 85 - failures.filter(f => f.systemId === 'pressure_seal').length * 8 : 101,
+                    contaminants: failures.some(f => f.failureMode === 'contamination') ? 'detected' : 'nominal',
+                },
+                temperature_c: hasThermal ? 38 + failures.filter(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop').length * 5 : 22,
+                radiation_msv: hasRad ? 2.5 + failures.filter(f => f.systemId === 'radiation_shielding').length * 3.5 : 0.1,
+                structural_integrity_pct: hasStructural ? 70 - failures.filter(f => f.systemId === 'structural_integrity').length * 15 : 98,
+                gravity_g: failures.some(f => f.systemId === 'gravity_generator') ? 0.6 : 1.0,
+                power_status: failures.some(f => f.systemId === 'power_relay') ? 'intermittent' : 'nominal',
+                system_failures_detected: failures.length,
+                player_oxygen: state.oxygen,
+                player_suit_integrity: state.suitIntegrity,
+            });
+        },
+    });
+
+    const suggestDiagnostics = defineSuggestTool(
+        'suggest_diagnostics',
+        'Present 3-5 contextual engineering diagnostic actions. Call when the player wants to investigate or repair systems but hasn\'t specified a specific action.',
+        'Engineering Assessment',
+        'diagnostics',
+        '3-5 contextual engineering actions',
+        'Diagnostic options displayed as interactive UI buttons. Focus on engineering: characterize failures, check sensors, analyze components. Do NOT list in text.',
+    );
+
     // ─── Class-Specific Tools ───────────────────────────────────────────────
 
-    let tacticalScan: Tool<GameContext> | null = null;
     let bypassSystem: Tool<GameContext> | null = null;
     let fieldSurgery: Tool<GameContext> | null = null;
-    let systemHack: Tool<GameContext> | null = null;
-
-    if (classId === 'soldier') {
-        tacticalScan = tool({
-            name: 'tactical_scan',
-            description: 'Reveal enemy stats and weaknesses before combat. Soldier class ability.',
-            parameters: z.object({}),
-            execute: (_args, ctx?: RunContext<GameContext>) => {
-                const { state, station } = getCtx(ctx);
-                const threat = getRoomThreat(state.currentRoom, station);
-                if (!threat) return JSON.stringify({ error: 'No enemy to scan.' });
-                return JSON.stringify({
-                    id: threat.id,
-                    name: threat.name,
-                    hp: `${String(threat.currentHp)}/${String(threat.maxHp)}`,
-                    damage_range: `${String(threat.damage[0])}-${String(threat.damage[1])}`,
-                    behaviors: [...threat.behaviors],
-                    flee_threshold: threat.fleeThreshold > 0 ? `Will flee below ${String(Math.round(threat.fleeThreshold * 100))}% HP` : 'Will not flee',
-                    personality: threat.personality,
-                });
-            },
-        }) as Tool<GameContext>;
-    }
+    let crisisAssessment: Tool<GameContext> | null = null;
 
     if (classId === 'engineer') {
         bypassSystem = tool({
             name: 'bypass_system',
-            description: 'Bypass a locked door without a keycard, or repair a system. Engineer class ability. Requires multitool in inventory.',
+            description: 'Bypass a locked door without a keycard, repair severity-1 failures without materials, or reveal secret passages. Engineer class ability. Requires multitool.',
             parameters: z.object({
                 target: z.string().describe('What to bypass or repair'),
             }),
@@ -890,6 +1326,23 @@ export function createGameToolSets(classId: string): GameToolSets {
                 const { state, station } = getCtx(ctx);
                 if (!state.inventory.some(id => id === 'multitool' || station.items.get(id)?.name.toLowerCase().includes('multitool'))) {
                     return JSON.stringify({ error: 'You need a multitool for this.' });
+                }
+
+                // Check for severity-1 system failures to auto-repair
+                const room = station.rooms.get(state.currentRoom);
+                if (room) {
+                    const minorFailure = room.systemFailures.find(f =>
+                        f.severity === 1 &&
+                        f.challengeState !== 'resolved' && f.challengeState !== 'failed' &&
+                        f.systemId.includes(args.target.toLowerCase().replace(/ /g, '_'))
+                    );
+                    if (minorFailure) {
+                        minorFailure.challengeState = 'resolved';
+                        minorFailure.status = 'repaired';
+                        state.repairedSystems.add(`${minorFailure.systemId}:${state.currentRoom}`);
+                        state.metrics.systemsRepaired++;
+                        return JSON.stringify({ success: true, action: 'bypass_repair', system: minorFailure.systemId, note: 'Minor failure bypassed with multitool.' });
+                    }
                 }
 
                 // Check adjacent rooms for locked doors
@@ -902,8 +1355,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                     }
                 }
 
-                // Check for secret connections to reveal
-                const room = station.rooms.get(state.currentRoom);
+                // Check for secret connections
                 if (room?.secretConnection) {
                     const secretRoom = station.rooms.get(room.secretConnection);
                     if (secretRoom && !room.connections.includes(room.secretConnection)) {
@@ -937,55 +1389,31 @@ export function createGameToolSets(classId: string): GameToolSets {
         }) as Tool<GameContext>;
     }
 
-    if (classId === 'hacker') {
-        systemHack = tool({
-            name: 'system_hack',
-            description: 'Hack station systems: reveal all crew logs in current room, disable enemy buffs, or reveal the station map. Hacker class ability. Requires data_spike in inventory.',
-            parameters: z.object({
-                target: z.enum(['crew_logs', 'enemy_debuff', 'reveal_map', 'secret_passage']).describe('What to hack'),
-            }),
-            execute: (args: { target: string }, ctx?: RunContext<GameContext>) => {
+    if (classId === 'commander') {
+        crisisAssessment = tool({
+            name: 'crisis_assessment',
+            description: 'Reveal cascade timers and failure states in all adjacent rooms. Commander class ability.',
+            parameters: z.object({}),
+            execute: (_args, ctx?: RunContext<GameContext>) => {
                 const { state, station } = getCtx(ctx);
-                if (!state.inventory.some(id => id === 'data_spike' || station.items.get(id)?.name.toLowerCase().includes('data spike'))) {
-                    return JSON.stringify({ error: 'You need a data spike for this.' });
-                }
-
-                switch (args.target) {
-                    case 'crew_logs': {
-                        const room = station.rooms.get(state.currentRoom);
-                        if (!room) return JSON.stringify({ error: 'Invalid room.' });
-                        state.metrics.crewLogsFound += room.crewLogs.length;
-                        return JSON.stringify({ success: true, hack_type: 'crew_logs', logs: room.crewLogs });
-                    }
-                    case 'enemy_debuff': {
-                        const threat = getRoomThreat(state.currentRoom, station);
-                        if (!threat) return JSON.stringify({ error: 'No enemy to debuff.' });
-                        threat.damage = [Math.floor(threat.damage[0] * 0.7), Math.floor(threat.damage[1] * 0.7)];
-                        return JSON.stringify({ success: true, hack_type: 'enemy_debuff', target_name: threat.name, new_damage: threat.damage });
-                    }
-                    case 'reveal_map': {
-                        const mapData = [...station.rooms.entries()].map(([id, r]) => ({
-                            name: r.name,
-                            visited: state.roomsVisited.has(id),
-                            has_threat: r.threat !== null && getRoomThreat(id, station) !== null,
-                            has_loot: r.loot !== null && !state.roomLootTaken.has(id),
-                        }));
-                        return JSON.stringify({ success: true, hack_type: 'reveal_map', map: mapData });
-                    }
-                    case 'secret_passage': {
-                        const room = station.rooms.get(state.currentRoom);
-                        if (!room?.secretConnection) return JSON.stringify({ error: 'No hidden passages detected.' });
-                        const secretRoom = station.rooms.get(room.secretConnection);
-                        if (secretRoom && !room.connections.includes(room.secretConnection)) {
-                            room.connections.push(room.secretConnection);
-                            secretRoom.connections.push(state.currentRoom);
-                            return JSON.stringify({ success: true, hack_type: 'secret_passage', target_room: secretRoom.name });
-                        }
-                        return JSON.stringify({ error: 'Passage already revealed.' });
-                    }
-                    default:
-                        return JSON.stringify({ error: `Unknown hack target: ${args.target}` });
-                }
+                const adjacent = getAdjacentRooms(state, station);
+                const assessments = adjacent.map(id => {
+                    const room = station.rooms.get(id);
+                    if (!room) return { room_id: id, failures: [] };
+                    return {
+                        room_name: room.name,
+                        failures: room.systemFailures
+                            .filter(f => f.challengeState !== 'resolved')
+                            .map(f => ({
+                                system_id: f.systemId,
+                                severity: f.severity,
+                                state: f.challengeState,
+                                cascade_timer: f.turnsUntilCascade > 0 ? f.turnsUntilCascade : null,
+                                cascade_target: f.cascadeTarget,
+                            })),
+                    };
+                });
+                return JSON.stringify({ success: true, adjacent_assessments: assessments });
             },
         }) as Tool<GameContext>;
     }
@@ -994,18 +1422,24 @@ export function createGameToolSets(classId: string): GameToolSets {
 
     const all: Tool<GameContext>[] = [
         lookAround, moveTo, pickUpItem, useItem, attackTool,
-        suggestAttacks, attemptAction, interactNPC, suggestInteractions,
-        recordMoralChoice, suggestActions, completeObjective,
+        diagnoseSystem, stabilizeHazard, repairSystem, improviseRepair,
+        craftItem, analyzeItem, checkEnvironment,
+        suggestDiagnostics, suggestAttacks, suggestActions, suggestInteractions,
+        attemptAction, interactNPC, recordMoralChoice, completeObjective,
     ];
-    if (tacticalScan) all.push(tacticalScan);
     if (bypassSystem) all.push(bypassSystem);
     if (fieldSurgery) all.push(fieldSurgery);
-    if (systemHack) all.push(systemHack);
+    if (crisisAssessment) all.push(crisisAssessment);
 
-    const combat: Tool<GameContext>[] = [attackTool, suggestAttacks, useItem];
-    if (tacticalScan) combat.push(tacticalScan);
+    const engineering: Tool<GameContext>[] = [
+        diagnoseSystem, stabilizeHazard, repairSystem, improviseRepair,
+        craftItem, attemptAction, suggestDiagnostics, attackTool, useItem,
+    ];
+    if (bypassSystem) engineering.push(bypassSystem);
 
-    const dialogue: Tool<GameContext>[] = [interactNPC, suggestInteractions, recordMoralChoice, useItem];
+    const diagnostics: Tool<GameContext>[] = [
+        checkEnvironment, analyzeItem, lookAround, suggestDiagnostics, useItem,
+    ];
 
     const exploration: Tool<GameContext>[] = [
         lookAround, moveTo, pickUpItem, attemptAction,
@@ -1013,9 +1447,9 @@ export function createGameToolSets(classId: string): GameToolSets {
     ];
     if (fieldSurgery) exploration.push(fieldSurgery);
     if (bypassSystem) exploration.push(bypassSystem);
-    if (systemHack) exploration.push(systemHack);
+    if (crisisAssessment) exploration.push(crisisAssessment);
 
-    return { all, combat, dialogue, exploration };
+    return { all, engineering, diagnostics, exploration };
 }
 
 // ─── Tone Matching ──────────────────────────────────────────────────────────

@@ -48,8 +48,8 @@ function debugLog(label: string, content: string): void {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const STORY_ARCS: StoryArc[] = [
-    'parasite_outbreak', 'ai_mutiny', 'dimensional_rift',
-    'corporate_betrayal', 'time_anomaly', 'first_contact',
+    'cascade_failure', 'atmosphere_breach', 'reactor_meltdown',
+    'contamination_crisis', 'power_death_spiral', 'orbital_decay',
 ];
 
 function randomStoryArc(): StoryArc {
@@ -84,8 +84,9 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
         turnCount: state.turnCount,
         damage: state.damage,
         maxInventory: state.maxInventory,
-        shieldActive: state.shieldActive,
-        plasmaBoost: state.plasmaBoost,
+        oxygen: state.oxygen,
+        maxOxygen: state.maxOxygen,
+        suitIntegrity: state.suitIntegrity,
         activeEvents: state.activeEvents.map(e => ({ type: e.type, turnsRemaining: e.turnsRemaining, effect: e.effect })),
         objectiveTitle: station.objectives.title,
         objectiveStep: station.objectives.currentStepIndex,
@@ -95,6 +96,12 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
         objectiveSteps: station.objectives.steps.map(s => ({
             description: s.description,
             completed: s.completed,
+        })),
+        systemFailures: (room?.systemFailures ?? []).map(f => ({
+            systemId: f.systemId,
+            status: f.status,
+            challengeState: f.challengeState,
+            severity: f.severity,
         })),
         mapText: renderMapStyled(
             station,
@@ -277,6 +284,26 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
         parts.push(`PLAYER CONDITION: HP ${String(state.hp)}/${String(state.maxHp)} (${String(Math.round(hpPct * 100))}%)`);
     }
 
+    // Oxygen and suit integrity
+    if (state.oxygen < state.maxOxygen) {
+        parts.push(`OXYGEN: ${String(state.oxygen)}/${String(state.maxOxygen)}`);
+    }
+    if (state.suitIntegrity < 100) {
+        parts.push(`SUIT INTEGRITY: ${String(state.suitIntegrity)}%`);
+    }
+
+    // System failures in current room
+    const currentRoom = station.rooms.get(state.currentRoom);
+    if (currentRoom) {
+        const activeFailures = currentRoom.systemFailures.filter(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
+        if (activeFailures.length > 0) {
+            const failureLines = activeFailures.map(f =>
+                `- ${f.systemId} [${f.status}/${f.challengeState}] sev=${String(f.severity)} cascade=${String(f.turnsUntilCascade)}T`
+            );
+            parts.push(`SYSTEM FAILURES:\n${failureLines.join('\n')}`);
+        }
+    }
+
     return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
@@ -412,11 +439,11 @@ async function runGameplay(
     };
 
     // Create orchestrator + specialist agents with handoffs
-    const { gameMaster, combatAgent } = createAgents(station, build, toolSets, gameRulesGuardrail);
+    const { gameMaster, engineeringAgent } = createAgents(station, build, toolSets, gameRulesGuardrail);
 
     // Post-tool-use hook: check for game over after attack (on both agents that have the attack tool)
-    for (const agent of [gameMaster, combatAgent]) {
-        agent.on('agent_tool_end', (_ctx, toolDef) => {
+    for (const agent of [gameMaster, engineeringAgent]) {
+        agent.on('agent_tool_end', (_ctx: unknown, toolDef: { name: string }) => {
             if (toolDef.name === 'attack' && state.hp <= 0) {
                 state.gameOver = true;
             }
@@ -439,6 +466,10 @@ async function runGameplay(
             state.activeEvents.push(newEvent);
             eventContext.push(`NEW EVENT: ${newEvent.type.replace(/_/g, ' ').toUpperCase()} — ${newEvent.effect}`);
         }
+
+        // Tick cascade timers on system failures across the station
+        const cascadeContext = eventTracker.tickCascadeTimers(state, station);
+        eventContext.push(...cascadeContext);
 
         // Log event context for debugging
         if (eventContext.length > 0) {

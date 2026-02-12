@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const GameSegmentSchema = z.object({
-    type: z.enum(['narration', 'dialogue', 'thought', 'station_pa', 'crew_echo']),
+    type: z.enum(['narration', 'dialogue', 'thought', 'station_pa', 'crew_echo', 'diagnostic_readout']),
     text: z.string(),
     npcId: z.string().nullable().describe('NPC internal ID from the NPC list (e.g. "enemy_room_1"), or null'),
     crewName: z.string().nullable().describe('Crew member full name from the crew roster, or null'),
@@ -35,5 +35,7 @@ export function segmentToMarkdown(seg: GameSegment): string {
             return `\`[STATION] ${seg.text}\``;
         case 'crew_echo':
             return `> **${seg.crewName ?? 'Unknown'}**: "${seg.text}"`;
+        case 'diagnostic_readout':
+            return `\`[DIAGNOSTIC] ${seg.text}\``;
     }
 }

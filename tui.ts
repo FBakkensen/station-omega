@@ -127,9 +127,12 @@ function formatDuration(ms: number): string {
 function alertEffectHint(type: string, effect: string): string {
     // Keep this short; the alerts panel has limited width and height.
     switch (type) {
-        case 'hull_breach': return '-5 HP/T';
-        case 'radiation_spike': return '-25% DMG';
+        case 'hull_breach': return '-5 SUIT/T';
+        case 'radiation_spike': return '-3 HP/T';
         case 'power_failure': return 'SENSORS DOWN';
+        case 'atmosphere_alarm': return '-2 O2/T';
+        case 'coolant_leak': return 'CASCADE';
+        case 'structural_alert': return '-5 SUIT/T';
         case 'distress_signal': return 'NEW PATH';
         case 'supply_cache': return 'SUPPLIES';
         default: return effect ? effect.toUpperCase() : '';
@@ -138,10 +141,10 @@ function alertEffectHint(type: string, effect: string): string {
 
 function classIcon(cls: CharacterClassId): string {
     switch (cls) {
-        case 'soldier': return '[S]';
         case 'engineer': return '[E]';
+        case 'scientist': return '[S]';
         case 'medic': return '[M]';
-        case 'hacker': return '[H]';
+        case 'commander': return '[C]';
     }
 }
 
@@ -1012,7 +1015,7 @@ export class GameUI {
 
         const bars = [
             { label: 'Speed         ', value: score.speed },
-            { label: 'Combat        ', value: score.combatEfficiency },
+            { label: 'Engineering   ', value: score.engineeringEfficiency },
             { label: 'Exploration   ', value: score.exploration },
             { label: 'Resourceful   ', value: score.resourcefulness },
             { label: 'Completion    ', value: score.completion },
@@ -1028,7 +1031,7 @@ export class GameUI {
 
         const statsText = new TextRenderable(this.renderer, {
             id: 'summary-stats',
-            content: t`${fg(COLORS.textDim)('Turns:')} ${fg(COLORS.text)(String(metrics.turnCount))}  ${fg(COLORS.textDim)('Time:')} ${fg(COLORS.text)(formatDuration(duration))}  ${fg(COLORS.textDim)('Kills:')} ${fg(COLORS.text)(String(metrics.enemiesDefeated.length))}  ${fg(COLORS.textDim)('Rooms:')} ${fg(COLORS.text)(String(metrics.roomsVisited.size))}`,
+            content: t`${fg(COLORS.textDim)('Turns:')} ${fg(COLORS.text)(String(metrics.turnCount))}  ${fg(COLORS.textDim)('Time:')} ${fg(COLORS.text)(formatDuration(duration))}  ${fg(COLORS.textDim)('Repaired:')} ${fg(COLORS.text)(String(metrics.systemsRepaired))}  ${fg(COLORS.textDim)('Rooms:')} ${fg(COLORS.text)(String(metrics.roomsVisited.size))}`,
         });
 
         const hint = new TextRenderable(this.renderer, {
@@ -1404,12 +1407,12 @@ export class GameUI {
         const cls = classIcon(status.characterClass);
         const dmg = `${String(status.damage[0])}-${String(status.damage[1])}`;
 
-        const buffs: string[] = [];
-        if (status.shieldActive) buffs.push('\u25C6SH');
-        if (status.plasmaBoost) buffs.push('\u25B2PL');
-        const buffStr = buffs.length > 0 ? `  ${buffs.join(' ')}` : '';
+        // Oxygen and suit integrity indicators
+        const o2Pct = status.maxOxygen > 0 ? status.oxygen / status.maxOxygen : 1;
+        const o2Color = o2Pct >= 0.6 ? COLORS.hpGood : o2Pct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
+        const suitColor = status.suitIntegrity >= 60 ? COLORS.hpGood : status.suitIntegrity >= 25 ? COLORS.hpMid : COLORS.hpLow;
 
-        this.vitalsText.content = t`${fg(COLORS.text)(`${cls} ${hpLabel}`)}\n${fg(hpColor)(`HP ${hpBar} ${String(status.hp)}`)}\n${fg(COLORS.textDim)(`DMG ${dmg}`)}${fg(COLORS.hpMid)(buffStr)}`;
+        this.vitalsText.content = t`${fg(COLORS.text)(`${cls} ${hpLabel}`)}\n${fg(hpColor)(`HP ${hpBar} ${String(status.hp)}`)}\n${fg(o2Color)(`O2 ${String(status.oxygen)}%`)}  ${fg(suitColor)(`Suit ${String(status.suitIntegrity)}%`)}  ${fg(COLORS.textDim)(`DMG ${dmg}`)}`;
     }
 
     private updateLocation(status: GameStatus): void {

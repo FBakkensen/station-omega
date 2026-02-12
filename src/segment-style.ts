@@ -19,6 +19,7 @@ const SEGMENT_COLORS = {
     thought: '#8abfff',
     station_pa: '#ff8844',
     crew_echo: '#6aad8a',
+    diagnostic_readout: '#44ddaa',
 } as const;
 
 /** Per-segment-type header colors. */
@@ -28,6 +29,7 @@ const HEADER_COLORS = {
     thought: '#b08adf',
     station_pa: '#3a8a3a',
     crew_echo: '#7a5a8a',
+    diagnostic_readout: '#22aa88',
 } as const;
 
 // ─── Card Styling ────────────────────────────────────────────────────────────
@@ -51,6 +53,8 @@ export function segmentCardStyle(type: DisplaySegment['type']): CardStyle {
             return { bgColor: '#1a2a1a', borderColor: '#3a8a3a', borderStyle: 'single' };
         case 'crew_echo':
             return { bgColor: '#2a2530', borderColor: '#7a5a8a', borderStyle: 'rounded' };
+        case 'diagnostic_readout':
+            return { bgColor: '#0a2020', borderColor: '#22aa88', borderStyle: 'single' };
     }
 }
 
@@ -102,6 +106,8 @@ function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
             const name = seg.speakerName ?? seg.crewName ?? 'Unknown';
             return [dim(fg(HEADER_COLORS.crew_echo)(`\u25B6 ${name}`)), fg('#5a6a7a')('\n')];
         }
+        case 'diagnostic_readout':
+            return [bold(fg(HEADER_COLORS.diagnostic_readout)('[DIAGNOSTIC]')), fg('#5a6a7a')('\n')];
     }
 }
 

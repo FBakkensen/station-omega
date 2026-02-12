@@ -52,18 +52,19 @@ const INWORLD_CHANNELS = 1;
 
 // ─── Voice Pool (Inworld voice IDs) ───────────────────────────────────────
 
-const NARRATOR_VOICE = 'Shaun';
+const NARRATOR_VOICE = 'Ronald';
 
 const NPC_VOICE_POOL: string[] = [
-    'Alex', 'Ashley', 'Craig', 'Deborah', 'Dennis',
+    'Ashley', 'Craig', 'Deborah', 'Dennis',
     'Edward', 'Julia', 'Mark', 'Olivia', 'Priya',
-    'Ronald', 'Sarah', 'Luna', 'Theodore', 'Hades',
+    'Sarah', 'Luna', 'Theodore', 'Hades',
     'Wendy', 'Hana', 'Clive', 'Carter', 'Blake',
+    'Timothy', 'Shaun',
 ];
 
 const BOSS_VOICE = 'Dominus';
 
-const INNER_VOICE = 'Timothy';
+const INNER_VOICE = 'Alex';
 
 const STATION_PA_VOICE = 'Elizabeth';
 
@@ -74,11 +75,12 @@ interface VoiceTuning {
     speakingRate: number;
 }
 
-const TUNING_DEFAULT: VoiceTuning = { temperature: 1.1, speakingRate: 1.0 };
+const TUNING_DEFAULT: VoiceTuning = { temperature: 1.2, speakingRate: 1.0 };
 const TUNING_BOSS: VoiceTuning = { temperature: 1.0, speakingRate: 0.95 };
-const TUNING_INNER: VoiceTuning = { temperature: 1.0, speakingRate: 1.05 };
-const TUNING_PA: VoiceTuning = { temperature: 0.7, speakingRate: 1.0 };
+const TUNING_INNER: VoiceTuning = { temperature: 1.3, speakingRate: 1.05 };
+const TUNING_PA: VoiceTuning = { temperature: 0.5, speakingRate: 1.0 };
 const TUNING_CREW_ECHO: VoiceTuning = { temperature: 1.0, speakingRate: 1.0 };
+const TUNING_DIAGNOSTIC: VoiceTuning = { temperature: 0.4, speakingRate: 1.1 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -97,6 +99,14 @@ function stripMarkdown(text: string): string {
         .replace(/\u2800/g, '')               // Braille Pattern Blank spacers
         .replace(/[*_~`]/g, '')               // safety: lone formatting chars from chunk splits
         .trim();
+}
+
+/** Patterns that match numbers with units or technical measurements for TTS emphasis. */
+const NUMERIC_EMPHASIS_RE = /\b(\d+(?:\.\d+)?)\s*(degrees?|percent|minutes?|hours?|seconds?|RPM|meters?|kilometers?)\b/g;
+
+/** Wrap numbers-with-units in *emphasis* markers for Inworld TTS prosody steering. */
+function addEmphasisMarkers(text: string): string {
+    return text.replace(NUMERIC_EMPHASIS_RE, '*$1 $2*');
 }
 
 /** Split text into chunks of roughly `maxLen` characters at sentence boundaries. */
@@ -386,25 +396,36 @@ export class TTSEngine {
     /** Get Inworld audio markup prefix for emotional delivery. */
     private getEmotionMarkup(seg: GameSegment): string {
         switch (seg.type) {
+            case 'narration': {
+                // Dry amusement for observational humor — Andy Weir narrator tone
+                if (this.narratorContext.hpPercent < 25) return '[sigh] ';
+                return '[laughing] ';
+            }
             case 'dialogue': {
                 if (seg.npcId) {
                     const npc = this.npcMap.get(seg.npcId);
                     if (npc?.tier === 4) return '[angry] ';
                     if (npc?.disposition === 'hostile') return '[angry] ';
+                    if (npc?.disposition === 'fearful') return '[whispering] ';
                     return '';
                 }
-                // Narrator mood based on game context
-                if (this.narratorContext.inCombat) return '';
-                if (this.narratorContext.hpPercent < 25) return '[sad] ';
-                if (this.narratorContext.isNewRoom) return '';
                 return '';
             }
-            case 'thought':
+            case 'thought': {
+                // Sardonic inner voice — exasperated calculation
                 if (this.narratorContext.hpPercent < 25) return '[sigh] ';
-                return '';
-            case 'crew_echo':
-                return '';
+                if (this.narratorContext.inCombat) return '[sigh] ';
+                return '[sigh] ';
+            }
+            case 'crew_echo': {
+                // Tired engineers leaving log entries
+                return '[sigh] ';
+            }
             case 'station_pa':
+                // Clean institutional delivery — no markup
+                return '';
+            case 'diagnostic_readout':
+                // Pure clinical data — no markup
                 return '';
             default:
                 return '';
@@ -439,6 +460,8 @@ export class TTSEngine {
                 }
                 return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
             }
+            case 'diagnostic_readout':
+                return { voiceId: STATION_PA_VOICE, tuning: TUNING_DIAGNOSTIC };
             default:
                 return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
         }
@@ -474,8 +497,14 @@ export class TTSEngine {
         // Always increment counter to stay aligned with UI card indices
         const segIdx = this.segmentCounter++;
 
-        const clean = stripMarkdown(seg.text);
+        let clean = stripMarkdown(seg.text);
         if (!clean) return;
+
+        // Add *emphasis* markers around numbers with units for prosody steering
+        // Applied to thought (calculations), narration (atmospheric details), and crew echo (technical reports)
+        if (seg.type === 'thought' || seg.type === 'narration' || seg.type === 'crew_echo') {
+            clean = addEmphasisMarkers(clean);
+        }
 
         const { voiceId, tuning } = this.getVoiceConfigForSegment(seg);
         const emotionMarkup = this.getEmotionMarkup(seg);

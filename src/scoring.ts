@@ -8,29 +8,31 @@ export function computeScore(metrics: RunMetrics, totalRooms: number): RunScore 
     const parTurns = metrics.won ? 30 : 15;
     const speed = Math.max(0, Math.min(100, 100 - (metrics.turnCount - parTurns) * 3));
 
-    let combatEfficiency: number;
-    if (metrics.totalDamageTaken === 0) {
-        combatEfficiency = 100;
-    } else {
-        combatEfficiency = Math.min(100, (metrics.totalDamageDealt / metrics.totalDamageTaken) * 50);
-    }
+    // Engineering efficiency: systems diagnosed + repaired, minimal cascades, improvised solutions
+    const totalSystems = metrics.systemsDiagnosed + metrics.systemsRepaired;
+    const cascadePenalty = metrics.systemsCascaded * 15;
+    const improvBonus = metrics.improvizedSolutions * 10;
+    const engineeringEfficiency = Math.max(0, Math.min(100,
+        (totalSystems > 0 ? (metrics.systemsRepaired / Math.max(1, totalSystems)) * 60 : 0)
+        + improvBonus - cascadePenalty + (metrics.itemsCrafted * 5),
+    ));
 
     const exploration = Math.min(100, (metrics.roomsVisited.size / totalRooms) * 100);
 
     const resourcefulness = Math.min(
         100,
-        ((metrics.itemsCollected.length + metrics.itemsUsed.length + metrics.creativeActionsAttempted) / 15) * 100,
+        ((metrics.itemsCollected.length + metrics.itemsUsed.length + metrics.creativeActionsAttempted + metrics.itemsCrafted) / 15) * 100,
     );
 
     const completion = Math.min(
         100,
-        (metrics.won ? 50 : 0) + metrics.enemiesDefeated.length * 10 + Math.min(metrics.crewLogsFound * 2, 10),
+        (metrics.won ? 50 : 0) + metrics.systemsRepaired * 8 + Math.min(metrics.crewLogsFound * 2, 10),
     );
 
-    const total = speed + combatEfficiency + exploration + resourcefulness + completion;
+    const total = speed + engineeringEfficiency + exploration + resourcefulness + completion;
     const grade = computeGrade(total);
 
-    return { speed, combatEfficiency, exploration, resourcefulness, completion, total, grade };
+    return { speed, engineeringEfficiency, exploration, resourcefulness, completion, total, grade };
 }
 
 export function computeGrade(total: number): ScoreGrade {

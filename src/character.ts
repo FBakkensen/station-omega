@@ -93,11 +93,11 @@ function calculateDamage(build: CharacterBuild, outcome: ActionOutcome): number 
 
 function describeOutcome(outcome: ActionOutcome): string {
     switch (outcome) {
-        case 'critical_success': return 'A devastating strike finds its mark perfectly.';
-        case 'success': return 'The attack connects solidly.';
-        case 'partial_success': return 'A glancing blow — some effect, but not ideal.';
-        case 'failure': return 'The attempt fails to connect.';
-        case 'critical_failure': return 'A catastrophic miss that leaves you exposed.';
+        case 'critical_success': return 'A perfect execution — everything aligns.';
+        case 'success': return 'The repair holds. Solid work.';
+        case 'partial_success': return "Partially effective — it'll hold for now, but it's not pretty.";
+        case 'failure': return 'The attempt fails. Back to the drawing board.';
+        case 'critical_failure': return 'Something goes very wrong in the process.';
     }
 }
 
@@ -148,11 +148,19 @@ export function initializePlayerState(
         deathCause: null,
         won: false,
         endingId: null,
+        systemsDiagnosed: 0,
+        systemsRepaired: 0,
+        systemsCascaded: 0,
+        itemsCrafted: 0,
+        improvizedSolutions: 0,
     };
 
     return {
         hp: build.baseHp,
         maxHp: build.baseHp,
+        oxygen: 100,
+        maxOxygen: 100,
+        suitIntegrity: 100,
         damage: [...build.baseDamage],
         inventory: startingInventory,
         maxInventory: build.maxInventory,
@@ -164,8 +172,10 @@ export function initializePlayerState(
         hasObjectiveItem: false,
         gameOver: false,
         won: false,
-        plasmaBoost: false,
-        shieldActive: false,
+        repairedSystems: new Set<string>(),
+        craftedItems: [],
+        systemsCascaded: 0,
+        improvizedSolutions: 0,
         roomVisitCount: new Map<string, number>([[entryRoomId, 1]]),
         turnCount: 0,
         moveCount: 0,

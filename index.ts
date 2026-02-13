@@ -550,31 +550,54 @@ async function runGameplay(
                 let streamStarted = false;
                 let segmentsRendered = 0;
                 const segmentParser = new StreamingSegmentParser();
-                for await (const event of stream as AsyncIterable<RunStreamEvent>) {
-                    // Log agent handoffs for debugging
-                    if (event.type === 'agent_updated_stream_event') {
-                        debugLog('HANDOFF', `Active agent: ${event.agent.name}`);
-                    }
-                    if (event.type === 'raw_model_stream_event') {
-                        const data = event.data as { type: string; delta?: string };
-                        if (data.type === 'output_text_delta' && data.delta) {
-                            rawJson += data.delta;
-                            if (!streamStarted) {
-                                // Set narrator context for dynamic mood steering
-                                const room = station.rooms.get(state.currentRoom);
-                                const inCombat = room?.threat != null && station.npcs.get(room.threat)?.disposition !== 'dead';
-                                const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
-                                ttsEngine.setNarratorContext({
-                                    inCombat,
-                                    hpPercent: (state.hp / state.maxHp) * 100,
-                                    isNewRoom: visitCount <= 1,
-                                });
-                                ttsEngine.beginStream();
-                                streamStarted = true;
+
+                // Wrap stream + lastResponseId in a single try so guardrail
+                // errors thrown during the for-await are caught for retry.
+                try {
+                    for await (const event of stream as AsyncIterable<RunStreamEvent>) {
+                        // Log agent handoffs for debugging
+                        if (event.type === 'agent_updated_stream_event') {
+                            debugLog('HANDOFF', `Active agent: ${event.agent.name}`);
+                        }
+                        if (event.type === 'raw_model_stream_event') {
+                            const data = event.data as { type: string; delta?: string };
+                            if (data.type === 'output_text_delta' && data.delta) {
+                                rawJson += data.delta;
+                                if (!streamStarted) {
+                                    // Set narrator context for dynamic mood steering
+                                    const room = station.rooms.get(state.currentRoom);
+                                    const inCombat = room?.threat != null && station.npcs.get(room.threat)?.disposition !== 'dead';
+                                    const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
+                                    ttsEngine.setNarratorContext({
+                                        inCombat,
+                                        hpPercent: (state.hp / state.maxHp) * 100,
+                                        isNewRoom: visitCount <= 1,
+                                    });
+                                    ttsEngine.beginStream();
+                                    streamStarted = true;
+                                }
+                                // Extract complete segments from incremental JSON
+                                const segments = segmentParser.push(data.delta);
+                                for (const seg of segments) {
+                                    const display = resolveSegment(seg, segmentsRendered, station);
+                                    const chunks = segmentToStyledChunks(display);
+                                    const headerChars = getHeaderCharCount(display);
+                                    const bodyChars = countChunkChars(chunks) - headerChars;
+                                    ui.pushSegmentCard(display, chunks, headerChars);
+                                    ttsEngine.pushSegment(seg, bodyChars);
+                                    segmentsRendered++;
+                                    debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
+                                }
                             }
-                            // Extract complete segments from incremental JSON
-                            const segments = segmentParser.push(data.delta);
-                            for (const seg of segments) {
+                        }
+                    }
+
+                    // Fallback: if streaming yielded no segments, try full parse of rawJson
+                    if (rawJson && segmentsRendered === 0) {
+                        debugLog('WARN', 'No segments extracted during stream — fallback parse');
+                        try {
+                            const parsed = JSON.parse(rawJson) as GameResponse;
+                            for (const seg of parsed.segments) {
                                 const display = resolveSegment(seg, segmentsRendered, station);
                                 const chunks = segmentToStyledChunks(display);
                                 const headerChars = getHeaderCharCount(display);
@@ -582,41 +605,21 @@ async function runGameplay(
                                 ui.pushSegmentCard(display, chunks, headerChars);
                                 ttsEngine.pushSegment(seg, bodyChars);
                                 segmentsRendered++;
-                                debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
                             }
+                        } catch {
+                            // Strip JSON scaffolding and show whatever text we got
+                            const textMatches = rawJson.match(/"text"\s*:\s*"([^"]+)"/gu);
+                            if (textMatches) {
+                                const fallbackText = textMatches
+                                    .map(m => m.replace(/"text"\s*:\s*"/u, '').replace(/"$/u, ''))
+                                    .join('\n\n');
+                                ui.appendNarrative(fallbackText);
+                            }
+                            debugLog('WARN', `Fallback parse failed. Raw: ${rawJson.slice(0, 200)}`);
                         }
                     }
-                }
 
-                // Fallback: if streaming yielded no segments, try full parse of rawJson
-                if (rawJson && segmentsRendered === 0) {
-                    debugLog('WARN', 'No segments extracted during stream — fallback parse');
-                    try {
-                        const parsed = JSON.parse(rawJson) as GameResponse;
-                        for (const seg of parsed.segments) {
-                            const display = resolveSegment(seg, segmentsRendered, station);
-                            const chunks = segmentToStyledChunks(display);
-                            const headerChars = getHeaderCharCount(display);
-                            const bodyChars = countChunkChars(chunks) - headerChars;
-                            ui.pushSegmentCard(display, chunks, headerChars);
-                            ttsEngine.pushSegment(seg, bodyChars);
-                            segmentsRendered++;
-                        }
-                    } catch {
-                        // Strip JSON scaffolding and show whatever text we got
-                        const textMatches = rawJson.match(/"text"\s*:\s*"([^"]+)"/gu);
-                        if (textMatches) {
-                            const fallbackText = textMatches
-                                .map(m => m.replace(/"text"\s*:\s*"/u, '').replace(/"$/u, ''))
-                                .join('\n\n');
-                            ui.appendNarrative(fallbackText);
-                        }
-                        debugLog('WARN', `Fallback parse failed. Raw: ${rawJson.slice(0, 200)}`);
-                    }
-                }
-
-                // Capture response ID — guardrail trips surface here
-                try {
+                    // Capture response ID for conversation chaining
                     lastResponseId = stream.lastResponseId;
                 } catch (err: unknown) {
                     if (err instanceof OutputGuardrailTripwireTriggered && attempt === 0) {

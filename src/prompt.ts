@@ -22,7 +22,7 @@ function formatObjectiveSteps(station: GeneratedStation): string {
 
 function formatCrewRoster(station: GeneratedStation): string {
     return station.crewRoster
-        .map(c => `- ${c.name}, ${c.role} — ${c.fate}`)
+        .map(c => `- name: "${c.name}" | role: ${c.role} | status: ${c.fate}`)
         .join('\n');
 }
 
@@ -51,7 +51,7 @@ Your response is a JSON object with a \`segments\` array. Each segment has a typ
 - **dialogue** — Direct speech from an NPC. FORBIDDEN unless the player explicitly initiates social interaction (talks to, negotiates with, or addresses an NPC). Set \`npcId\` to the NPC's id. Text is spoken words only (no quotes needed in text). Set \`crewName\` to \`null\`.
 - **thought** — Player's inner voice. First person, concise and analytical — running calculations, assessing risks, dry observations. Think Watney's log entries: technical competence wrapped in self-aware humor. Use for physics reasoning when tool results include specific numbers: "ppO2 is 13.1 kPa — about 60% of normal. My brain's already running on fumes, which means any math I do is suspect. Including that calculation. Great." Set both \`npcId\` and \`crewName\` to \`null\`.
 - **station_pa** — Cold mechanical station announcements. Clipped, includes units and readings where relevant. Set both \`npcId\` and \`crewName\` to \`null\`.
-- **crew_echo** — Crew log playback. Engineering documentation: repair notes, system specs, failure analyses. Set \`crewName\` to full name from roster. Always precede with a narration segment describing the physical medium. Set \`npcId\` to \`null\`.
+- **crew_echo** — Crew log playback. Engineering documentation: repair notes, system specs, failure analyses. Set \`crewName\` to the exact \`name\` value from the crew roster. Always precede with a narration segment describing the physical medium. Set \`npcId\` to \`null\`.
 
 Rules:
 - Narration is first-person action and observation ("I check the seal"); thought is first-person inner calculation ("Okay, 0.3 atm means about 20 minutes"). Both use "I" but serve different purposes. Most responses should include at least one thought segment.
@@ -528,7 +528,7 @@ ${buildWeirMethod()}
 - Present logs naturally as discoveries. Always describe the PHYSICAL CONDITION of the log medium before revealing its content.
 - Crew logs are engineering records: repair notes, system specifications, failure analyses, troubleshooting documentation. They tell me what the crew knew about the station's systems.
 - Pace log discoveries for engineering impact — each log should give me useful technical information about the station.
-- Always use a crew_echo segment with crewName set to the crew member's full name for crew log content (this enables crew-specific voice playback).
+- Always use a crew_echo segment with crewName set to the exact \`name\` value from the crew roster for crew log content (this enables crew-specific voice playback).
 
 ## Creative Action Resolution
 

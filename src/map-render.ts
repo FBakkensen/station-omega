@@ -62,7 +62,7 @@ type CellRole =
     | 'junction'
     | 'room'
     | 'player'
-    | 'threat'
+    | 'failure'
     | 'loot'
     | 'objective'
     | 'unknown'
@@ -90,10 +90,8 @@ function hashString(input: string): number {
     return h >>> 0;
 }
 
-function isThreatAlive(room: Room, station: GeneratedStation): boolean {
-    if (!room.threat) return false;
-    const npc = station.npcs.get(room.threat);
-    return Boolean(npc && npc.disposition !== 'dead' && npc.currentHp > 0);
+function hasActiveFailure(room: Room): boolean {
+    return room.systemFailures.some(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
 }
 
 // ─── Rounded Corner Helpers ────────────────────────────────────────────────
@@ -353,7 +351,7 @@ function cellToChunk(cell: MapCell): TextChunk {
     }
 
     // Markers
-    if (cell.role === 'threat')    return bold(fg('#ff4444')(cell.char));
+    if (cell.role === 'failure')   return bold(fg('#ff8844')(cell.char));
     if (cell.role === 'loot')      return bold(fg('#ffcc00')(cell.char));
     if (cell.role === 'objective') return bold(fg('#00ff88')(cell.char));
     if (cell.role === 'unknown')   return fg('#5a6a7a')(cell.char);
@@ -503,7 +501,7 @@ function buildGrid(
 
         if (room.isObjectiveRoom) tryPlaceMarker(set, get, gx, gy, '\u2295', 'objective');
         if (room.loot && !state.roomLootTaken.has(id)) tryPlaceMarker(set, get, gx, gy, '\u25C6', 'loot');
-        if (isThreatAlive(room, station)) tryPlaceMarker(set, get, gx, gy, '\u2620', 'threat');
+        if (hasActiveFailure(room)) tryPlaceMarker(set, get, gx, gy, '\u26A0', 'failure');
     }
 
     return grid;
@@ -517,7 +515,7 @@ export function buildMapLegend(): TextChunk[] {
         bold(bg(PLAYER_BG)(fg(PLAYER_FG)(' \u25CE '))), fg(dim)(' you  '),
         bg(ROOM_BG.entry)(fg(ROOM_FG.entry)('\u25B6')), fg(dim)(' entry  '),
         bg(ROOM_BG.escape)(fg(ROOM_FG.escape)('\u2606')), fg(dim)(' escape  '),
-        bold(fg('#ff4444')('\u2620')), fg(dim)(' threat  '),
+        bold(fg('#ff8844')('\u26A0')), fg(dim)(' failure  '),
         bold(fg('#ffcc00')('\u25C6')), fg(dim)(' loot  '),
         bold(fg('#00ff88')('\u2295')), fg(dim)(' objective  '),
         fg('#5a6a7a')('\u25CC'), fg(dim)(' unknown  '),
@@ -600,7 +598,7 @@ export function renderMapText(
 
     if (opts.showLegend !== false) {
         lines.push('');
-        lines.push('Legend: \u25CE you  \u25B6 entry  \u2606 escape  \u2620 threat  \u25C6 loot  \u2295 objective  \u25CC unknown  \u2297 locked');
+        lines.push('Legend: \u25CE you  \u25B6 entry  \u2606 escape  \u26A0 failure  \u25C6 loot  \u2295 objective  \u25CC unknown  \u2297 locked');
         lines.push('Hint: F1 map  F2 mission  Esc close');
     }
 

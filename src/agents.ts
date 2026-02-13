@@ -54,16 +54,13 @@ export function createAgents(
     // Handoffs — defined before agents that reference them
     const engineeringHandoff = handoff(engineeringAgent, {
         toolNameOverride: 'transfer_to_engineering',
-        toolDescriptionOverride: 'Hand off to engineering voice when the player repairs, modifies, or improvises with systems. Also handles rare combat-as-engineering encounters.',
+        toolDescriptionOverride: 'Hand off to engineering voice when the player repairs, modifies, or improvises with systems.',
         isEnabled: ({ runContext }) => {
             const { state, station: s } = runContext.context;
             const room = s.rooms.get(state.currentRoom);
             if (!room) return false;
             // Enable if room has unresolved system failures
-            const hasFailures = room.systemFailures.some(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
-            // Or if there's a threat (combat-as-engineering)
-            const hasThreat = room.threat !== null && s.npcs.get(room.threat)?.disposition !== 'dead';
-            return hasFailures || hasThreat;
+            return room.systemFailures.some(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
         },
     });
 
@@ -90,7 +87,7 @@ export function createAgents(
             if (!room) return false;
             // Enable if room has system failures to investigate, or NPCs present
             const hasFailures = room.systemFailures.some(f => f.challengeState !== 'resolved');
-            const hasNpcs = [...s.npcs.values()].some(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+            const hasNpcs = [...s.npcs.values()].some(n => n.roomId === state.currentRoom);
             return hasFailures || hasNpcs || room.crewLogs.length > 0;
         },
     });

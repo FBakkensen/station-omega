@@ -34,15 +34,7 @@ function getAdjacentRooms(state: GameState, station: GeneratedStation): string[]
 }
 
 function getNPCsInRoom(roomId: string, station: GeneratedStation): NPC[] {
-    return [...station.npcs.values()].filter(npc => npc.roomId === roomId && npc.disposition !== 'dead');
-}
-
-function getRoomThreat(roomId: string, station: GeneratedStation): NPC | null {
-    const room = station.rooms.get(roomId);
-    if (!room?.threat) return null;
-    const npc = station.npcs.get(room.threat);
-    if (!npc || npc.disposition === 'dead') return null;
-    return npc;
+    return [...station.npcs.values()].filter(npc => npc.roomId === roomId);
 }
 
 function getItemName(itemId: string, station: GeneratedStation): string {
@@ -50,8 +42,6 @@ function getItemName(itemId: string, station: GeneratedStation): string {
 }
 
 // ─── Callbacks ──────────────────────────────────────────────────────────────
-
-export type CombatStartCallback = () => void;
 
 export interface ChoiceSet {
     title: string;
@@ -65,7 +55,6 @@ export interface GameContext {
     state: GameState;
     station: GeneratedStation;
     build: CharacterBuild;
-    onCombatStart: CombatStartCallback;
     onChoices: ChoicesCallback;
 }
 
@@ -123,13 +112,10 @@ export function createGameToolSets(classId: string): GameToolSets {
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
-            const drop = state.roomDrops.get(state.currentRoom) ?? null;
 
             // Reveal items so pick_up_item can validate discovery
             if (lootPresent && room.loot) state.revealedItems.add(room.loot);
-            if (drop) state.revealedItems.add(drop);
 
-            const threat = getRoomThreat(state.currentRoom, station);
             const exits = getAdjacentRooms(state, station).map(id => {
                 const r = station.rooms.get(id);
                 return r ? r.name : id;
@@ -144,10 +130,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                 room_index: `${String([...station.rooms.keys()].indexOf(state.currentRoom) + 1)} of ${String(station.rooms.size)}`,
                 description: room.descriptionSeed,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
-                drop_visible: drop ? getItemName(drop, station) : null,
-                threat: threat
-                    ? { id: threat.id, name: threat.name, demeanor: threat.disposition, appearance: threat.appearance }
-                    : null,
                 npcs_present: getNPCsInRoom(state.currentRoom, station).map(npc => ({
                     id: npc.id,
                     name: npc.name,
@@ -164,7 +146,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                 revisit_context: {
                     visit_count: state.roomVisitCount.get(state.currentRoom) ?? 0,
                     is_revisit: (state.roomVisitCount.get(state.currentRoom) ?? 0) > 1,
-                    enemy_defeated_here: room.threat !== null && getRoomThreat(state.currentRoom, station) === null,
                     loot_taken_here: state.roomLootTaken.has(state.currentRoom),
                 },
                 objective_hint: isObjectiveHere ? currentStep.description : null,
@@ -244,28 +225,21 @@ export function createGameToolSets(classId: string): GameToolSets {
             state.roomVisitCount.set(targetId, (state.roomVisitCount.get(targetId) ?? 0) + 1);
 
             const room = station.rooms.get(targetId);
-            const threat = getRoomThreat(targetId, station);
 
             // Reveal items on room entry
             const lootPresent = room?.loot && !state.roomLootTaken.has(targetId);
-            const drop = state.roomDrops.get(targetId) ?? null;
             if (lootPresent && room.loot) state.revealedItems.add(room.loot);
-            if (drop) state.revealedItems.add(drop);
 
             return JSON.stringify({
                 success: true,
                 room_name: room?.name ?? targetId,
                 room_index: `${String([...station.rooms.keys()].indexOf(targetId) + 1)} of ${String(station.rooms.size)}`,
                 description: room?.descriptionSeed ?? '',
-                threat_present: threat ? threat.name : null,
-                threat_id: threat ? threat.id : null,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
-                drop_visible: drop ? getItemName(drop, station) : null,
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
                 sensory: room?.sensory ?? null,
                 is_revisit: (state.roomVisitCount.get(targetId) ?? 0) > 1,
-                enemy_defeated_here: room?.threat !== null && getRoomThreat(targetId, station) === null,
                 system_warnings: room?.systemFailures
                     .filter(f => f.challengeState !== 'resolved')
                     .map(f => ({ system_id: f.systemId, severity: f.severity, status: f.status })) ?? [],
@@ -298,12 +272,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                     itemId = id;
                     break;
                 }
-            }
-
-            // Threat blocks pickup
-            const threat = getRoomThreat(state.currentRoom, station);
-            if (threat) {
-                return JSON.stringify({ success: false, reason: 'threat_blocking', threat_name: threat.name });
             }
 
             if (state.inventory.length >= state.maxInventory) {
@@ -342,25 +310,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                 });
             }
 
-            // Check enemy drop
-            const drop = state.roomDrops.get(state.currentRoom);
-            if (drop && (drop === itemId || station.items.get(drop)?.name.toLowerCase() === itemName)) {
-                if (!state.revealedItems.has(drop)) {
-                    return JSON.stringify({ success: false, reason: 'not_revealed' });
-                }
-                state.roomDrops.delete(state.currentRoom);
-                state.inventory.push(drop);
-                state.metrics.itemsCollected.push(drop);
-                return JSON.stringify({
-                    success: true,
-                    item_id: drop,
-                    item_name: getItemName(drop, station),
-                    inventory: state.inventory.map(id => getItemName(id, station)),
-                    slots_remaining: state.maxInventory - state.inventory.length,
-                });
-            }
-
-            if (!roomLootAvailable && !drop) {
+            if (!roomLootAvailable) {
                 return JSON.stringify({ success: false, reason: 'nothing_available' });
             }
             return JSON.stringify({ success: false, reason: 'not_found', requested: args.item });
@@ -429,120 +379,14 @@ export function createGameToolSets(classId: string): GameToolSets {
         },
     });
 
-    const attackTool = tool({
-        name: 'attack',
-        description: 'Attack the enemy in the current room with the player\'s chosen approach. Only call this AFTER the player has chosen or described their approach.',
-        parameters: z.object({
-            approach: z.string().describe('How you attack — your strategy or action'),
-        }),
-        execute: (args: { approach: string }, ctx?: RunContext<GameContext>) => {
-            const gameCtx = getCtx(ctx);
-            const { state, station, build } = gameCtx;
-            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
-
-            const npc = getRoomThreat(state.currentRoom, station);
-            if (!npc) return JSON.stringify({ error: 'There is no enemy to fight here.' });
-
-            gameCtx.onCombatStart();
-
-            // Player attacks
-            let playerDamage = randInt(build.baseDamage[0], build.baseDamage[1]);
-            if (state.activeEvents.some(e => e.type === 'radiation_spike')) {
-                playerDamage = Math.max(1, Math.floor(playerDamage * 0.75));
-            }
-            npc.currentHp -= playerDamage;
-            state.metrics.totalDamageDealt += playerDamage;
-
-            // Enemy attacks back (if alive)
-            let enemyDamage = 0;
-            if (npc.currentHp > 0) {
-                enemyDamage = randInt(npc.damage[0], npc.damage[1]);
-                state.hp -= enemyDamage;
-                state.metrics.totalDamageTaken += enemyDamage;
-            }
-
-            const defeated = npc.currentHp <= 0;
-            if (defeated) {
-                npc.currentHp = 0;
-                npc.disposition = 'dead';
-                state.metrics.enemiesDefeated.push(npc.id);
-            }
-
-            // NPC flee check
-            let fled = false;
-            if (!defeated && npc.currentHp > 0 && npc.behaviors.has('can_flee')) {
-                const hpPct = npc.currentHp / npc.maxHp;
-                if (hpPct <= npc.fleeThreshold) {
-                    fled = true;
-                    npc.memory.hasFled = true;
-                    const room = station.rooms.get(state.currentRoom);
-                    const fleeTargets = room?.connections.filter(id => id !== state.currentRoom) ?? [];
-                    if (fleeTargets.length > 0) {
-                        const fleeTarget = fleeTargets[randInt(0, fleeTargets.length - 1)];
-                        npc.roomId = fleeTarget;
-                        npc.memory.fledTo = fleeTarget;
-                        if (room) room.threat = null;
-                    }
-                }
-            }
-
-            // Player death
-            if (state.hp <= 0) {
-                state.hp = 0;
-                state.gameOver = true;
-                state.metrics.deathCause = `Killed by ${npc.name}`;
-                return JSON.stringify({
-                    approach: args.approach,
-                    player_damage_dealt: playerDamage,
-                    enemy_id: npc.id,
-                    enemy_name: npc.name,
-                    enemy_damage_dealt: enemyDamage,
-                    enemy_defeated: defeated,
-                    player_died: true,
-                    game_over: true,
-                });
-            }
-
-            const result: Record<string, unknown> = {
-                approach: args.approach,
-                player_damage_dealt: playerDamage,
-                enemy_id: npc.id,
-                enemy_name: npc.name,
-                enemy_damage_dealt: enemyDamage,
-                enemy_defeated: defeated,
-                enemy_remaining_hp: defeated ? 0 : npc.currentHp,
-                player_hp: state.hp,
-                player_maxHp: state.maxHp,
-                enemy_fled: fled,
-            };
-
-            if (defeated && npc.drop) {
-                result.loot_dropped = getItemName(npc.drop, station);
-                state.roomDrops.set(state.currentRoom, npc.drop);
-                state.revealedItems.add(npc.drop);
-            }
-
-            return JSON.stringify(result);
-        },
-    });
-
-    const suggestAttacks = defineSuggestTool(
-        'suggest_attacks',
-        'Present the player with 3-5 contextual attack approaches to choose from. Call this BEFORE calling attack, when the player wants to fight but hasn\'t described a specific approach.',
-        'Choose Your Attack',
-        'approaches',
-        '3-5 contextual attack approaches',
-        'Attack options displayed as interactive UI buttons. Do NOT list them in text. Write one brief line, then STOP and wait.',
-    );
-
-    // ─── New Tools ──────────────────────────────────────────────────────────
+    // ─── Action Tools ──────────────────────────────────────────────────────────
 
     const attemptAction = tool({
         name: 'attempt_action',
         description: 'Resolve a creative player action through dice roll. The AI assesses domain and difficulty; the game engine resolves outcome. Use for any non-standard action (barricading, hacking, improvising, etc.).',
         parameters: z.object({
             action: z.string().describe('What the player is attempting'),
-            domain: z.enum(['combat', 'tech', 'medical', 'social', 'survival', 'science']).describe('The skill domain'),
+            domain: z.enum(['tech', 'medical', 'social', 'survival', 'science']).describe('The skill domain'),
             difficulty: z.enum(['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible']).describe('How hard this is'),
             relevant_items: z.array(z.string()).default([]).describe('Inventory items that help'),
             environmental_factors: z.array(z.string()).default([]).describe('Room features that help'),
@@ -667,7 +511,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                 }
             }
             if (!npc) return JSON.stringify({ error: `No NPC named "${args.target_npc}" is here.` });
-            if (npc.disposition === 'dead') return JSON.stringify({ error: `${npc.name} is already dead.` });
 
             // Check behavior compatibility
             const approach = args.approach;
@@ -682,7 +525,7 @@ export function createGameToolSets(classId: string): GameToolSets {
             }
 
             // Base chance from disposition
-            const BASE: Record<Disposition, number> = { hostile: 30, neutral: 60, friendly: 85, fearful: 75, dead: 0 };
+            const BASE: Record<Disposition, number> = { neutral: 60, friendly: 85, fearful: 75 };
             let chance = BASE[npc.disposition];
 
             // Social proficiency
@@ -692,11 +535,6 @@ export function createGameToolSets(classId: string): GameToolSets {
             // Tone matching bonus
             const toneBonus = getToneBonus(args.tone, approach, npc.disposition);
             chance += toneBonus;
-
-            // Wound bonus (wounded NPCs easier to influence)
-            const npcHpPct = npc.currentHp / npc.maxHp;
-            if (npcHpPct < 0.5) chance += 20;
-            else if (npcHpPct < 0.75) chance += 10;
 
             // Mercy reputation bonus
             const mercyBonus = state.moralProfile.tendencies.mercy * 3;
@@ -738,14 +576,6 @@ export function createGameToolSets(classId: string): GameToolSets {
                         to: npc.disposition,
                         reason: `Player ${approach} (${args.tone})`,
                     });
-                }
-
-                // Clear threat if NPC was hostile and is now neutral/friendly
-                if (prevDisposition === 'hostile' && npc.disposition !== 'hostile') {
-                    const room = station.rooms.get(state.currentRoom);
-                    if (room?.threat === npc.id) {
-                        room.threat = null;
-                    }
                 }
 
                 return JSON.stringify({
@@ -1470,10 +1300,10 @@ export function createGameToolSets(classId: string): GameToolSets {
     // ─── Assemble Tool Sets ─────────────────────────────────────────────────
 
     const all: Tool<GameContext>[] = [
-        lookAround, moveTo, pickUpItem, useItem, attackTool,
+        lookAround, moveTo, pickUpItem, useItem,
         diagnoseSystem, stabilizeHazard, repairSystem, improviseRepair,
         craftItem, analyzeItem, checkEnvironment,
-        suggestDiagnostics, suggestAttacks, suggestActions, suggestInteractions,
+        suggestDiagnostics, suggestActions, suggestInteractions,
         attemptAction, interactNPC, recordMoralChoice, completeObjective,
     ];
     if (bypassSystem) all.push(bypassSystem);
@@ -1482,7 +1312,7 @@ export function createGameToolSets(classId: string): GameToolSets {
 
     const engineering: Tool<GameContext>[] = [
         diagnoseSystem, stabilizeHazard, repairSystem, improviseRepair,
-        craftItem, attemptAction, suggestDiagnostics, attackTool, useItem,
+        craftItem, attemptAction, suggestDiagnostics, useItem,
     ];
     if (bypassSystem) engineering.push(bypassSystem);
 

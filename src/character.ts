@@ -58,14 +58,12 @@ export function resolveAction(
 
     const outcome = determineOutcome(roll, adjustedTarget);
 
-    const damageDealt = calculateDamage(build, outcome);
-
     return {
         outcome,
         roll,
         target: adjustedTarget,
         modifiers,
-        damageDealt,
+        damageDealt: 0,
         description: describeOutcome(outcome),
     };
 }
@@ -76,19 +74,6 @@ function determineOutcome(roll: number, target: number): ActionOutcome {
     if (roll <= target + 15) return 'partial_success';
     if (roll >= 96) return 'critical_failure';
     return 'failure';
-}
-
-function calculateDamage(build: CharacterBuild, outcome: ActionOutcome): number {
-    const [minDmg, maxDmg] = build.baseDamage;
-    const baseDmg = Math.floor(Math.random() * (maxDmg - minDmg + 1)) + minDmg;
-
-    switch (outcome) {
-        case 'critical_success': return Math.round(baseDmg * 1.75);
-        case 'success': return baseDmg;
-        case 'partial_success': return Math.round(baseDmg * 0.5);
-        case 'failure': return 0;
-        case 'critical_failure': return 0;
-    }
 }
 
 function describeOutcome(outcome: ActionOutcome): string {
@@ -135,10 +120,8 @@ export function initializePlayerState(
         endTime: null,
         turnCount: 0,
         moveCount: 0,
-        totalDamageDealt: 0,
         totalDamageTaken: 0,
         totalDamageHealed: 0,
-        enemiesDefeated: [],
         roomsVisited: new Set<string>([entryRoomId]),
         itemsUsed: [],
         itemsCollected: [...startingInventory],
@@ -161,13 +144,11 @@ export function initializePlayerState(
         oxygen: 100,
         maxOxygen: 100,
         suitIntegrity: 100,
-        damage: [...build.baseDamage],
         inventory: startingInventory,
         maxInventory: build.maxInventory,
         currentRoom: entryRoomId,
         roomsVisited: new Set<string>([entryRoomId]),
         roomLootTaken: new Set<string>(),
-        roomDrops: new Map<string, string>(),
         revealedItems: new Set<string>(),
         hasObjectiveItem: false,
         gameOver: false,

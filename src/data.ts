@@ -20,7 +20,6 @@ export const CHARACTER_BUILDS: ReadonlyMap<CharacterClassId, CharacterBuild> = n
         name: 'Systems Engineer',
         description: 'A resourceful technician who can bypass failing systems with duct tape, wire, and sheer stubbornness.',
         baseHp: 100,
-        baseDamage: [10, 18],
         proficiencies: ['tech', 'survival'],
         weaknesses: ['medical', 'social'],
         startingItem: 'multitool',
@@ -31,9 +30,8 @@ export const CHARACTER_BUILDS: ReadonlyMap<CharacterClassId, CharacterBuild> = n
         name: 'Research Scientist',
         description: 'An analytical mind who synthesizes solutions from first principles. Needs fewer materials to craft.',
         baseHp: 85,
-        baseDamage: [8, 16],
         proficiencies: ['science', 'tech'],
-        weaknesses: ['combat', 'survival'],
+        weaknesses: ['survival', 'social'],
         startingItem: 'diagnostic_scanner',
         maxInventory: 5,
     }],
@@ -42,9 +40,8 @@ export const CHARACTER_BUILDS: ReadonlyMap<CharacterClassId, CharacterBuild> = n
         name: 'Flight Surgeon',
         description: 'A field medic who keeps everyone alive through creative medicine and an alarming willingness to improvise.',
         baseHp: 110,
-        baseDamage: [8, 16],
         proficiencies: ['medical', 'science'],
-        weaknesses: ['tech', 'combat'],
+        weaknesses: ['tech', 'survival'],
         startingItem: 'first_aid_kit',
         maxInventory: 5,
     }],
@@ -53,7 +50,6 @@ export const CHARACTER_BUILDS: ReadonlyMap<CharacterClassId, CharacterBuild> = n
         name: 'Station Commander',
         description: 'A crisis leader who sees the big picture. Can assess cascade timers in adjacent rooms and rally under pressure.',
         baseHp: 100,
-        baseDamage: [10, 18],
         proficiencies: ['survival', 'social'],
         weaknesses: ['science', 'tech'],
         startingItem: null,
@@ -288,9 +284,7 @@ export const SYSTEM_FAILURE_POOLS: ReadonlyMap<RoomArchetype, SystemFailureTempl
 // ─── NPC Interaction ────────────────────────────────────────────────────────
 
 export const NPC_APPROACH_BASE_CHANCE: Readonly<Record<Disposition, number>> = {
-    hostile: 30,
     neutral: 60,
     friendly: 85,
     fearful: 75,
-    dead: 0,
 } as const;

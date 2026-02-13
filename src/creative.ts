@@ -4,7 +4,6 @@ import type {
     StationSkeleton,
     CreativeContent,
     RoomCreative,
-    EnemyCreative,
     ItemCreative,
     CrewMember,
 } from './types.js';
@@ -19,10 +18,9 @@ Grounded sci-fi with personality. The Martian meets Project Hail Mary. The stati
 
 # Rules
 
-- Every roomId/enemyId/itemId in your output MUST match an ID from the skeleton provided
+- Every roomId/itemId in your output MUST match an ID from the skeleton provided
 - Crew log authors must come from the crew roster you generate
 - Room names must be practical engineering labels — the kind of names that would be on actual station bulkhead signs (e.g., "Primary Coolant Junction", "Atmospheric Processing Bay", "Cargo Lock C-7")
-- Enemy names should be technical designations for malfunctioning systems — drones, security turrets, AI fragments. Never include tier numbers or difficulty indicators
 - Keep descriptions concise — focus on what's broken, what's working, what the sensors read. Engineering details, not atmosphere
 - Item names must be immersive and in-universe. Name items as a space station engineer would label equipment
 - engineeringNotes: 1-2 sentences of technical detail about the room's systems — what's nominal, what's degraded, what readings are off
@@ -58,15 +56,6 @@ const CreativeOutputSchema = z.object({
             condition: z.string(),
         })),
     })),
-    enemies: z.array(z.object({
-        enemyId: z.string(),
-        name: z.string(),
-        appearance: z.string(),
-        personality: z.string(),
-        deathDescription: z.string(),
-        soundSignature: z.string(),
-        failureMode: z.string(),
-    })),
     items: z.array(z.object({
         itemId: z.string(),
         name: z.string(),
@@ -99,15 +88,6 @@ interface CreativeSchemaPartial {
             condition?: string;
         }>;
     }>;
-    enemies?: Array<{
-        enemyId: string;
-        name?: string;
-        appearance?: string;
-        personality?: string;
-        deathDescription?: string;
-        soundSignature?: string;
-        failureMode?: string;
-    }>;
     items?: Array<{
         itemId: string;
         name?: string;
@@ -130,17 +110,10 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
         id: r.id,
         archetype: r.archetype,
         depth: r.depth,
-        hasEnemy: r.enemySlot !== null,
         hasLoot: r.lootSlot !== null,
         lootCategory: r.lootSlot?.category ?? null,
         isObjective: r.isObjectiveRoom,
         systemFailures: r.systemFailures.map(f => ({ system: f.systemId, mode: f.failureMode, severity: f.severity })),
-    }));
-
-    const enemySummaries = skeleton.enemies.map(e => ({
-        id: e.id,
-        behaviorHint: e.behaviorHint,
-        personality: e.personality,
     }));
 
     const itemSummaries = skeleton.items.map(i => ({
@@ -155,19 +128,12 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
         objectiveTitle: skeleton.objectives.title,
         objectiveSteps: skeleton.objectives.steps.map(s => s.description),
         rooms: roomSummaries,
-        enemies: enemySummaries,
         items: itemSummaries,
     }, null, 2);
 }
 
-/** Strip leading "Tier N" prefixes that the creative agent may bake into enemy names. */
-function sanitizeEnemyName(name: string): string {
-    return name.replace(/^Tier\s*\d+\s*[-\u2013\u2014*:]\s*/i, '').trim() || name;
-}
-
 function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkeleton): CreativeContent {
     const roomIds = new Set(skeleton.rooms.map(r => r.id));
-    const enemyIds = new Set(skeleton.enemies.map(e => e.id));
     const itemIds = new Set(skeleton.items.map(i => i.id));
 
     const crewRoster: CrewMember[] = (content.crewRoster ?? []).map(c => ({
@@ -219,19 +185,6 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         };
     });
 
-    const enemies: EnemyCreative[] = skeleton.enemies.map(skEnemy => {
-        const creative = (content.enemies ?? []).find(e => e.enemyId === skEnemy.id);
-        return {
-            enemyId: skEnemy.id,
-            name: creative?.name ? sanitizeEnemyName(creative.name) : 'Unknown System',
-            appearance: creative?.appearance ?? 'A piece of station hardware that\'s decided to stop cooperating.',
-            personality: creative?.personality ?? skEnemy.personality,
-            deathDescription: creative?.deathDescription ?? 'It powers down with a descending whine. Finally.',
-            soundSignature: creative?.soundSignature ?? 'Servos and static.',
-            failureMode: creative?.failureMode ?? 'corrupted firmware',
-        };
-    });
-
     const items: ItemCreative[] = skeleton.items.map(skItem => {
         const creative = (content.items ?? []).find(i => i.itemId === skItem.id);
         return {
@@ -242,9 +195,8 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         };
     });
 
-    // Filter out rooms/enemies/items with IDs not in skeleton
+    // Filter out rooms/items with IDs not in skeleton
     const validRooms = rooms.filter(r => roomIds.has(r.roomId));
-    const validEnemies = enemies.filter(e => enemyIds.has(e.enemyId));
     const validItems = items.filter(i => itemIds.has(i.itemId));
 
     return {
@@ -253,7 +205,6 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
         backstory: content.backstory ?? 'The station went dark three days ago. The last transmission was a cascade failure alarm followed by a lot of creative profanity.',
         crewRoster,
         rooms: validRooms,
-        enemies: validEnemies,
         items: validItems,
     };
 }
@@ -287,7 +238,6 @@ function buildProgressPhases(skeleton: StationSkeleton): Array<{ pattern: string
     }
 
     phases.push(
-        { pattern: '"enemies"', message: 'Identifying malfunctioning systems...' },
         { pattern: '"items"', message: 'Placing equipment and materials...' },
     );
 
@@ -307,7 +257,7 @@ export async function generateCreativeContent(
 ${summary}
 </station_skeleton>
 
-Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each focusing on engineering state. engineeringNotes: 1-2 sentences of technical readings. Enemy appearances: 1-2 sentences (malfunctioning hardware). Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis.`;
+Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each focusing on engineering state. engineeringNotes: 1-2 sentences of technical readings. Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis.`;
 
     try {
         const stream = await run(creativeAgent, userPrompt, {
@@ -349,7 +299,6 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
             backstory: 'The station went dark three days ago. Systems are failing in sequence.',
             crewRoster: [],
             rooms: [],
-            enemies: [],
             items: [],
         }, skeleton);
     }

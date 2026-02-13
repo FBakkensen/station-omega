@@ -19,7 +19,6 @@ export class TTSError extends Error {
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface NarratorContext {
-    inCombat: boolean;
     hpPercent: number;
     isNewRoom: boolean;
 }
@@ -62,8 +61,6 @@ const NPC_VOICE_POOL: string[] = [
     'Timothy', 'Shaun',
 ];
 
-const BOSS_VOICE = 'Dominus';
-
 const INNER_VOICE = 'Alex';
 
 const STATION_PA_VOICE = 'Elizabeth';
@@ -76,7 +73,6 @@ interface VoiceTuning {
 }
 
 const TUNING_DEFAULT: VoiceTuning = { temperature: 1.2, speakingRate: 1.0 };
-const TUNING_BOSS: VoiceTuning = { temperature: 1.0, speakingRate: 0.95 };
 const TUNING_INNER: VoiceTuning = { temperature: 1.3, speakingRate: 1.05 };
 const TUNING_PA: VoiceTuning = { temperature: 0.5, speakingRate: 1.0 };
 const TUNING_CREW_ECHO: VoiceTuning = { temperature: 1.0, speakingRate: 1.0 };
@@ -187,7 +183,7 @@ export class TTSEngine {
     private debugLog: (label: string, content: string) => void;
     private npcMap = new Map<string, NPC>();
     private crewRoster: CrewMember[] = [];
-    private narratorContext: NarratorContext = { inCombat: false, hpPercent: 100, isNewRoom: false };
+    private narratorContext: NarratorContext = { hpPercent: 100, isNewRoom: false };
     private tempDir: string | null = null;
     private currentProcess: ChildProcess | null = null;
     private abortController: AbortController | null = null;
@@ -373,13 +369,6 @@ export class TTSEngine {
     }
 
     private getVoiceIdForNPC(npcId: string): string {
-        const npc = this.npcMap.get(npcId);
-
-        // Tier-4 bosses always use the boss voice
-        if (npc?.tier === 4) {
-            return BOSS_VOICE;
-        }
-
         // Deterministic hash into the NPC voice pool
         const idx = hashString(npcId) % NPC_VOICE_POOL.length;
         return NPC_VOICE_POOL[idx];
@@ -404,8 +393,6 @@ export class TTSEngine {
             case 'dialogue': {
                 if (seg.npcId) {
                     const npc = this.npcMap.get(seg.npcId);
-                    if (npc?.tier === 4) return '[angry] ';
-                    if (npc?.disposition === 'hostile') return '[angry] ';
                     if (npc?.disposition === 'fearful') return '[whispering] ';
                     return '';
                 }
@@ -413,8 +400,6 @@ export class TTSEngine {
             }
             case 'thought': {
                 // Sardonic inner voice — exasperated calculation
-                if (this.narratorContext.hpPercent < 25) return '[sigh] ';
-                if (this.narratorContext.inCombat) return '[sigh] ';
                 return '[sigh] ';
             }
             case 'crew_echo': {
@@ -443,10 +428,8 @@ export class TTSEngine {
         switch (seg.type) {
             case 'dialogue': {
                 if (seg.npcId) {
-                    const npc = this.npcMap.get(seg.npcId);
                     const voiceId = this.getVoiceIdForNPC(seg.npcId);
-                    const tuning = npc?.tier === 4 ? TUNING_BOSS : TUNING_DEFAULT;
-                    return { voiceId, tuning };
+                    return { voiceId, tuning: TUNING_DEFAULT };
                 }
                 return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
             }

@@ -2,7 +2,7 @@ import { run, system, user, OutputGuardrailTripwireTriggered } from '@openai/age
 import type { OutputGuardrail, RunStreamEvent } from '@openai/agents';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
-import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, NPCDisplayInfo, GameStatus, StoryArc, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
+import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, GameStatus, StoryArc, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
 import { generateSkeleton } from './src/skeleton.js';
 import { generateCreativeContent } from './src/creative.js';
 import { assembleStation } from './src/assembly.js';
@@ -56,18 +56,6 @@ function randomStoryArc(): StoryArc {
     return STORY_ARCS[Math.floor(Math.random() * STORY_ARCS.length)];
 }
 
-function getNPCsInRoom(roomId: string, station: GeneratedStation): NPCDisplayInfo[] {
-    return [...station.npcs.values()]
-        .filter(npc => npc.roomId === roomId && npc.disposition !== 'dead')
-        .map(npc => ({
-            name: npc.name,
-            disposition: npc.disposition,
-            hpPct: npc.currentHp / npc.maxHp,
-            currentHp: npc.currentHp,
-            maxHp: npc.maxHp,
-        }));
-}
-
 function getStatus(state: GameState, station: GeneratedStation): GameStatus {
     const room = station.rooms.get(state.currentRoom);
     const roomKeys = [...station.rooms.keys()];
@@ -79,10 +67,8 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
         totalRooms: station.rooms.size,
         inventory: state.inventory.map(id => station.items.get(id)?.name ?? id),
         inventoryKeyFlags: state.inventory.map(id => station.items.get(id)?.isKeyItem ?? false),
-        npcs: getNPCsInRoom(state.currentRoom, station),
         characterClass: state.characterClass,
         turnCount: state.turnCount,
-        damage: state.damage,
         maxInventory: state.maxInventory,
         oxygen: state.oxygen,
         maxOxygen: state.maxOxygen,
@@ -102,6 +88,7 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
             status: f.status,
             challengeState: f.challengeState,
             severity: f.severity,
+            turnsUntilCascade: f.turnsUntilCascade,
         })),
         mapText: renderMapStyled(
             station,
@@ -160,11 +147,6 @@ function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine
                     const name = station.items.get(room.loot)?.name ?? room.loot;
                     items.push({ label: name, value: name });
                 }
-                const drop = state.roomDrops.get(state.currentRoom);
-                if (drop) {
-                    const name = station.items.get(drop)?.name ?? drop;
-                    items.push({ label: name, value: name });
-                }
                 return items;
             },
             toPrompt: (t) => t ? `pick up ${t}` : 'pick up',
@@ -181,25 +163,12 @@ function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine
             toPrompt: (t) => t ? `use ${t}` : 'use item',
         },
         {
-            name: 'attack',
-            description: 'Attack the enemy',
-            needsTarget: true,
-            getTargets: () => {
-                const room = station.rooms.get(state.currentRoom);
-                if (!room?.threat) return [];
-                const npc = station.npcs.get(room.threat);
-                if (!npc || npc.disposition === 'dead') return [];
-                return [{ label: npc.name, value: npc.name }];
-            },
-            toPrompt: (t) => t ? `attack the ${t}` : 'attack',
-        },
-        {
             name: 'interact',
             description: 'Interact with an NPC',
             needsTarget: true,
             getTargets: () => {
                 return [...station.npcs.values()]
-                    .filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead')
+                    .filter(n => n.roomId === state.currentRoom)
                     .map(n => ({ label: n.name, value: n.name }));
             },
             toPrompt: (t) => t ? `I want to interact with ${t}. Show me my options.` : 'interact with someone',
@@ -258,17 +227,10 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
     }
 
     // NPC state hints (raw data for AI to interpret)
-    const roomNpcs = [...station.npcs.values()].filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+    const roomNpcs = [...station.npcs.values()].filter(n => n.roomId === state.currentRoom);
     for (const npc of roomNpcs) {
-        const hpPct = npc.currentHp / npc.maxHp;
-        if (npc.behaviors.has('can_flee') && hpPct < npc.fleeThreshold) {
-            parts.push(`NPC STATE: ${npc.name} — HP ${String(Math.round(hpPct * 100))}%, below flee threshold`);
-        }
-        if (npc.behaviors.has('can_beg') && hpPct < 0.3) {
-            parts.push(`NPC STATE: ${npc.name} — HP ${String(Math.round(hpPct * 100))}%, severely wounded`);
-        }
         if (npc.isAlly) {
-            parts.push(`ALLY: ${npc.name} is fighting alongside you.`);
+            parts.push(`ALLY: ${npc.name} is helping you.`);
         }
     }
 
@@ -321,9 +283,9 @@ function buildGuardrailFeedback(
         '',
     ];
 
-    // Valid NPCs in current room (living only)
+    // Valid NPCs in current room
     const roomNpcs = [...station.npcs.values()]
-        .filter(n => n.roomId === state.currentRoom && n.disposition !== 'dead');
+        .filter(n => n.roomId === state.currentRoom);
     if (roomNpcs.length > 0) {
         parts.push('Valid NPCs in current room (use the "id" value for npcId):');
         for (const npc of roomNpcs) {
@@ -389,7 +351,6 @@ async function runGameplay(
         state,
         station,
         build,
-        onCombatStart: () => { ui.enableCombatGlitch(); },
         onChoices: (cs) => { pendingChoices = cs; },
     };
 
@@ -421,7 +382,6 @@ async function runGameplay(
                         }
                     }
                     if (!npc) issues.push(`Unknown NPC ID: ${seg.npcId}`);
-                    else if (npc.disposition === 'dead') issues.push(`Dead NPC speaking: ${seg.npcId}`);
                     else if (npc.roomId !== state.currentRoom) issues.push(`NPC not in room: ${seg.npcId}`);
                 }
                 // Crew echo must reference a roster member
@@ -439,16 +399,7 @@ async function runGameplay(
     };
 
     // Create orchestrator + specialist agents with handoffs
-    const { gameMaster, engineeringAgent } = createAgents(station, build, toolSets, gameRulesGuardrail);
-
-    // Post-tool-use hook: check for game over after attack (on both agents that have the attack tool)
-    for (const agent of [gameMaster, engineeringAgent]) {
-        agent.on('agent_tool_end', (_ctx: unknown, toolDef: { name: string }) => {
-            if (toolDef.name === 'attack' && state.hp <= 0) {
-                state.gameOver = true;
-            }
-        });
-    }
+    const { gameMaster } = createAgents(station, build, toolSets, gameRulesGuardrail);
 
     let lastResponseId: string | undefined;
     let turnId = 0;
@@ -565,11 +516,8 @@ async function runGameplay(
                                 rawJson += data.delta;
                                 if (!streamStarted) {
                                     // Set narrator context for dynamic mood steering
-                                    const room = station.rooms.get(state.currentRoom);
-                                    const inCombat = room?.threat != null && station.npcs.get(room.threat)?.disposition !== 'dead';
                                     const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
                                     ttsEngine.setNarratorContext({
-                                        inCombat,
                                         hpPercent: (state.hp / state.maxHp) * 100,
                                         isNewRoom: visitCount <= 1,
                                     });
@@ -642,7 +590,6 @@ async function runGameplay(
                 }
 
                 // Post-stream finalization
-                ui.disableCombatGlitch();
                 ui.updateStatus(getStatus(state, station));
 
                 const afterStream = () => {
@@ -683,7 +630,6 @@ async function runGameplay(
             ttsEngine.stop();
             ui.discardTurnCards();
             ui.hideTypingIndicator();
-            ui.disableCombatGlitch();
             ui.updateStatus(getStatus(state, station));
             ui.appendNarrative(
                 '*Static crackles through the comms. The station systems are unresponsive. Try again.*'

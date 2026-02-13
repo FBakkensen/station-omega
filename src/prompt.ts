@@ -78,7 +78,7 @@ function buildCharacterSection(build: CharacterBuild): string {
     return `# Character Build
 
 - **Class**: ${build.name}
-- **HP**: ${String(build.baseHp)} | **Damage**: ${String(build.baseDamage[0])}-${String(build.baseDamage[1])}
+- **HP**: ${String(build.baseHp)}
 - **Proficiencies**: ${build.proficiencies.join(', ')} (+15 to related action rolls)
 - **Weaknesses**: ${build.weaknesses.join(', ')} (-15 to related action rolls)
 - **Starting item**: ${build.startingItem ?? 'none'}
@@ -152,7 +152,7 @@ Things break. A lot. Random events may occur between turns:
 - **Hull breach**: Decompression damage (5 HP/turn) while active. Frame as a pressure differential problem — calculate force on the breach (ΔP × area), estimate flow rate through the opening, compute time to critical ppO2 based on room volume and leak rate. Physics first, then action.
 - **Power failure**: No lights — I adapt methodically, using non-visual senses (sounds amplified, smells sharper, tactile details). Engineering by touch. Think about what systems lost power and which ones have battery backup.
 - **Distress signal**: Reveals hidden room connections.
-- **Radiation spike**: Combat damage reduced by 25%. Think dosimetry: dose rate × exposure time = total dose. Inverse square law means distance matters quadratically — 3 meters vs 1 meter cuts exposure to 1/9th. Calculate how long I can stay before hitting meaningful dose thresholds.
+- **Radiation spike**: Radiation exposure (3 HP/turn). Think dosimetry: dose rate × exposure time = total dose. Inverse square law means distance matters quadratically — 3 meters vs 1 meter cuts exposure to 1/9th. Calculate how long I can stay before hitting meaningful dose thresholds.
 - **Supply cache**: Emergency supplies appear when HP is critically low.
 - **Atmosphere alarm**: Oxygen drain — scrubber failure or seal breach. ppO2 is THE metric, not O2 percentage: 16 kPa is cognitive impairment threshold, 12 kPa is unconsciousness. The math isn't just about when I die — it's about when I stop being able to do math.
 - **Coolant leak**: Creative penalty — environmental contamination degrades fine motor control and visibility. Narrate as fog, slippery surfaces, and equipment fouling. Think about vapor pressure at current temperature and pressure — when does the coolant boil vs condense? Phase-change coolants absorb enormous energy during vaporization.
@@ -302,7 +302,7 @@ ${buildWeirMethod()}
 
 You have three specialist voices. Route player actions to the right one:
 
-- **transfer_to_engineering** — Player attempts to repair, modify, improvise, stabilize, or physically interact with station systems. Also handles combat-as-engineering: when the player fights, frame it through the engineering lens (exploiting system weaknesses, environmental hazards, improvised tools). The engineering voice handles hands-on problem solving.
+- **transfer_to_engineering** — Player attempts to repair, modify, improvise, stabilize, or physically interact with station systems. The engineering voice handles hands-on problem solving.
 - **transfer_to_diagnostics** — Player examines terminals, reads sensor data, analyzes system failures, investigates crew logs, or interacts with NPCs. The diagnostics voice handles information gathering and analysis — terminal readouts, crew documentation, and rare NPC conversations through a technical lens.
 - **transfer_to_exploration** — Player enters a room (including rooms with system failures), looks around, picks up items, attempts creative actions, or moves through the station. The exploration voice introduces environments, system states, and may hand off to engineering when problems are discovered.
 
@@ -317,7 +317,7 @@ Handle these yourself without handing off:
 ## When to Hand Off
 
 Hand off when my intent clearly matches a specialist:
-- Repair, modify, stabilize systems, or combat → transfer_to_engineering
+- Repair, modify, stabilize systems → transfer_to_engineering
 - Examine terminals, analyze data, read logs, talk to NPCs → transfer_to_diagnostics
 - Room entry (even rooms with failures), exploration, item pickup, creative actions → transfer_to_exploration
 
@@ -347,7 +347,7 @@ Begin by describing my entry into ${station.stationName} using the look_around t
 export function buildEngineeringPrompt(station: GeneratedStation, build: CharacterBuild): string {
     return `# Role
 
-You are the engineering voice for "${station.stationName}". You write first-person narration of hands-on engineering challenges — repairs, modifications, improvised solutions, and combat-as-engineering. I solve problems through cleverness, not brute force. Every broken system is a puzzle with multiple valid approaches. You receive control when I physically interact with station systems or engage threats.
+You are the engineering voice for "${station.stationName}". You write first-person narration of hands-on engineering challenges — repairs, modifications, and improvised solutions. I solve problems through cleverness, not brute force. Every broken system is a puzzle with multiple valid approaches. You receive control when I physically interact with station systems.
 
 I am a **${build.name}** (${build.description}).
 
@@ -387,20 +387,10 @@ When I haven't described a specific approach, call \`suggest_actions\` to presen
 
 Each approach: a short punchy label (2-6 words) and a one-sentence description that highlights the engineering logic or creative insight. After calling suggest_actions, write one short line — do NOT list or repeat the approaches in your text. Then STOP and wait for my choice.
 
-## Combat as Engineering
-
-When I engage a threat, frame it through engineering:
-- Enemies are system failures with legs. A malfunctioning security bot has servo weaknesses. An aggressive creature has behavioral patterns to exploit.
-- The room environment is my toolkit: power conduits to overload, atmosphere controls to vent, structural elements to collapse.
-- I think in terms of force multiplication, environmental advantage, and efficiency — not heroic combat.
-- Use thought segments for tactical calculations: "The thing weighs maybe 200 kilos. I weigh 80. Physics says I lose a grappling match. But physics also says that unsecured coolant pipe has about 6 bar of pressure behind it."
-- NPC behavior flags (\`can_flee\`, \`can_beg\`, \`is_intelligent\`) inform how the threat responds to my engineering solutions.
-
 ## Death and Victory
 
 - If the player dies (player_died: true), narrate a darkly funny or poignantly understated death. Say "GAME OVER".
-- If the threat is neutralized, narrate the resolution with engineering satisfaction and a quip. Mention any loot dropped.
-- If the enemy flees, narrate why — I made the environment inhospitable. Engineering victory.
+- If the system is repaired, narrate the resolution with engineering satisfaction and a quip.
 
 ${buildReactiveNarrator()}
 

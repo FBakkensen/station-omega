@@ -3,12 +3,10 @@ import type {
     Difficulty,
     RoomArchetype,
     RoomSkeleton,
-    EnemySkeleton,
     ItemSkeleton,
     ObjectiveChain,
     ObjectiveStep,
     StationSkeleton,
-    NPCBehaviorFlag,
     SystemFailureSkeleton,
     ActionDifficulty,
 } from './types.js';
@@ -55,27 +53,6 @@ const ROOM_COUNTS: Record<Difficulty, [number, number]> = {
     nightmare: [12, 15],
 };
 
-const DIFFICULTY_MULT: Record<Difficulty, number> = {
-    normal: 1.0,
-    hard: 1.3,
-    nightmare: 1.6,
-};
-
-const TIER_STATS: ReadonlyMap<1 | 2 | 3 | 4, { hp: number; damage: [number, number] }> = new Map([
-    [1, { hp: 25, damage: [8, 12] }],
-    [2, { hp: 45, damage: [14, 22] }],
-    [3, { hp: 65, damage: [18, 28] }],
-    [4, { hp: 90, damage: [14, 24] }],
-]);
-
-// Reframed for engineering context: malfunctioning systems, not creatures
-const BEHAVIOR_PRESETS: ReadonlyMap<1 | 2 | 3 | 4, { behaviors: NPCBehaviorFlag[]; hint: string; personality: string; fleeThreshold: number }> = new Map([
-    [1, { behaviors: ['can_flee'], hint: 'malfunctioning maintenance drone', personality: 'A maintenance drone running corrupted firmware. Moves erratically, occasionally sparks. More of a hazard than a threat.', fleeThreshold: 0.3 }],
-    [2, { behaviors: ['can_negotiate', 'is_intelligent'], hint: 'damaged security system', personality: 'Station security system with degraded friend-or-foe identification. Can be reasoned with if you know the right access codes.', fleeThreshold: 0.25 }],
-    [3, { behaviors: ['can_reinforce', 'can_ambush'], hint: 'automated defense grid', personality: 'Automated defense grid running on emergency protocols. Methodical, persistent, and unfortunately well-armed.', fleeThreshold: 0 }],
-    [4, { behaviors: ['can_negotiate', 'is_intelligent', 'can_ally'], hint: 'station AI fragment', personality: 'A fragment of the station AI still running on isolated hardware. Knows the station intimately. Can be negotiated with or — if you\'re clever — reprogrammed.', fleeThreshold: 0 }],
-]);
-
 // ─── Archetype Selection ────────────────────────────────────────────────────
 
 function archetypesForDepth(depth: number, maxDepth: number): RoomArchetype[] {
@@ -103,23 +80,12 @@ function difficultyForSeverity(severity: 1 | 2 | 3): ActionDifficulty {
     return 'hard';
 }
 
-// ─── Enemy Tier by Depth (rare enemies) ─────────────────────────────────────
-
-function tierForDepth(depth: number, maxDepth: number): 1 | 2 | 3 | 4 {
-    const pct = depth / maxDepth;
-    if (pct <= 0.4) return 1;
-    if (pct <= 0.7) return 2;
-    return 3; // tier 4 reserved for special encounters
-}
-
 // ─── Main Generator ─────────────────────────────────────────────────────────
 
 export function generateSkeleton(config: RunConfig): StationSkeleton {
     const rng = new SeededRNG(config.seed);
     const [minRooms, maxRooms] = ROOM_COUNTS[config.difficulty];
     const roomCount = rng.nextInt(minRooms, maxRooms);
-    const mult = DIFFICULTY_MULT[config.difficulty];
-
     // 1. Generate main-path spine
     const spineLength = Math.max(5, Math.ceil(roomCount * 0.6));
     const branchCount = roomCount - spineLength;
@@ -137,7 +103,6 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
             connections: [],
             lockedBy: null,
             lootSlot: null,
-            enemySlot: null,
             isObjectiveRoom: false,
             secretConnection: null,
             systemFailures: [],
@@ -165,7 +130,6 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
             connections: [parentRoom.id],
             lockedBy: null,
             lootSlot: null,
-            enemySlot: null,
             isObjectiveRoom: false,
             secretConnection: null,
             systemFailures: [],
@@ -270,57 +234,7 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
         }
     }
 
-    // 5. Place enemies on ~15% of non-entry/escape rooms (rare, malfunctioning systems)
-    const enemies: EnemySkeleton[] = [];
-    const enemyCandidates = rooms.filter(r =>
-        r.id !== entryRoomId && r.id !== escapeRoomId && !r.enemySlot
-    );
-    const enemyCount = Math.max(1, Math.min(2, Math.ceil(enemyCandidates.length * 0.15)));
-    const enemyTargets = rng.shuffle([...enemyCandidates]).slice(0, enemyCount);
-
-    for (const room of enemyTargets) {
-        const tier = tierForDepth(room.depth, maxDepth);
-        const stats = TIER_STATS.get(tier);
-        if (!stats) continue;
-
-        const presets = BEHAVIOR_PRESETS.get(tier);
-        if (!presets) continue;
-
-        const enemyId = `enemy_${room.id}`;
-        const hp = Math.round(stats.hp * mult);
-        const dmgLow = Math.round(stats.damage[0] * mult);
-        const dmgHigh = Math.round(stats.damage[1] * mult);
-
-        // Enemy drops (engineering materials instead of combat loot)
-        let dropId: string | null = null;
-        if (rng.next() < 0.5) {
-            dropId = `drop_${room.id}`;
-            const dropItem: ItemSkeleton = {
-                id: dropId,
-                category: 'material',
-                effect: { type: 'material', value: 1, description: 'Salvaged component' },
-                isKeyItem: false,
-            };
-            items.push(dropItem);
-        }
-
-        const enemy: EnemySkeleton = {
-            id: enemyId,
-            tier,
-            hp,
-            damage: [dmgLow, dmgHigh],
-            dropItemId: dropId,
-            behaviorHint: presets.hint,
-            behaviors: [...presets.behaviors],
-            personality: presets.personality,
-            fleeThreshold: presets.fleeThreshold,
-        };
-
-        room.enemySlot = enemy;
-        enemies.push(enemy);
-    }
-
-    // 6. Place engineering materials — ensure all required materials are reachable
+    // 5. Place engineering materials — ensure all required materials are reachable
     const emptyRooms = rooms.filter(r => !r.lootSlot && r.id !== entryRoomId && r.id !== escapeRoomId);
 
     // Place a starting supply in the entry room
@@ -480,7 +394,6 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
         config,
         rooms,
         items,
-        enemies,
         objectives,
         entryRoomId,
         escapeRoomId,

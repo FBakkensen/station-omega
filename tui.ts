@@ -148,6 +148,41 @@ function classIcon(cls: CharacterClassId): string {
     }
 }
 
+// ─── System Panel Helpers ─────────────────────────────────────────────────────
+
+const SYSTEM_ABBREV: Record<string, string> = {
+    life_support: 'LifeSup',
+    pressure_seal: 'Pressure',
+    power_relay: 'PwrRelay',
+    coolant_loop: 'Coolant',
+    atmosphere_processor: 'AtmoProc',
+    gravity_generator: 'Gravity',
+    radiation_shielding: 'RadShld',
+    communications: 'Comms',
+    fire_suppression: 'FireSup',
+    water_recycler: 'H2ORecyc',
+    thermal_regulator: 'Thermal',
+    structural_integrity: 'Struct',
+};
+
+const STATUS_BADGE: Record<string, string> = {
+    critical: 'CRIT',
+    offline: 'OFF',
+    failing: 'FAIL',
+    degraded: 'DEGR',
+    nominal: 'NOM',
+    repaired: 'OK',
+};
+
+function challengeDots(state: string): string {
+    switch (state) {
+        case 'detected': return '\u25CB\u25CB\u25CB\u25CB';       // ○○○○
+        case 'characterized': return '\u25CF\u25CB\u25CB\u25CB';   // ●○○○
+        case 'stabilized': return '\u25CF\u25CF\u25CB\u25CB';      // ●●○○
+        default: return '\u25CB\u25CB\u25CB\u25CB';
+    }
+}
+
 // ─── GameUI ──────────────────────────────────────────────────────────────────
 
 // ─── Segment Card State ──────────────────────────────────────────────────────
@@ -177,7 +212,7 @@ export class GameUI {
     // Sidebar panel text renderables
     private vitalsText!: TextRenderable;
     private locationText!: TextRenderable;
-    private contactsText!: TextRenderable;
+    private systemsText!: TextRenderable;
     private inventoryText!: TextRenderable;
     private missionText!: TextRenderable;
     private alertsPanel!: BoxRenderable;
@@ -229,6 +264,21 @@ export class GameUI {
             exitOnCtrlC: true,
             useAlternateScreen: true,
             targetFps: 30,
+            // Ghostty + kitty keyboard protocol sends F1–F4 as CSI-letter form
+            // (\x1b[P .. \x1b[S) which @opentui/core's key parser doesn't map.
+            // Intercept these raw sequences before the parser sees them.
+            prependInputHandlers: [
+                (seq: string): boolean => {
+                    const m = /^\x1b\[(?:1(?:;(\d+))?)?([PQRS])$/.exec(seq);
+                    if (!m) return false;
+                    const modBits = m[1] ? parseInt(m[1], 10) - 1 : 0;
+                    if (modBits !== 0) return false; // Only handle unmodified presses
+                    const letter = m[2];
+                    if (letter === 'P') { this.handleF1Action(); return true; }
+                    if (letter === 'Q') { this.handleF2Action(); return true; }
+                    return false; // F3/F4 — pass through
+                },
+            ],
         });
 
         // Create mutable components with the Renderable API
@@ -256,9 +306,9 @@ export class GameUI {
             id: 'location-text',
             content: t`${fg(COLORS.textDim)('...')}`,
         });
-        this.contactsText = new TextRenderable(this.renderer, {
-            id: 'contacts-text',
-            content: t`${fg(COLORS.textDim)('No contacts')}`,
+        this.systemsText = new TextRenderable(this.renderer, {
+            id: 'systems-text',
+            content: t`${fg(COLORS.hpGood)('All nominal')}`,
         });
         this.inventoryText = new TextRenderable(this.renderer, {
             id: 'inventory-text',
@@ -366,21 +416,20 @@ export class GameUI {
         this.inputField.handleKeyPress = (key: KeyEvent): boolean => {
             // Map modal takes top priority
             if (this.mapModalVisible) {
-                const keyName = key.name.toLowerCase();
                 if (key.name === 'escape') { this.dismissMapModal(); return true; }
-                if (keyName === 'f1') { this.dismissMapModal(); return true; }
-                if (keyName === 'f2') { this.dismissMapModal(); this.showMissionModal(); return true; }
-                // Allow scrolling in the modal (arrow keys, page up/down, etc.).
+                const keyName = key.name.toLowerCase();
+                if (keyName === 'f1') { this.handleF1Action(); return true; }
+                if (keyName === 'f2') { this.handleF2Action(); return true; }
                 if (this.mapModalScroll.handleKeyPress(key)) return true;
                 return true; // Block typing while modal is open
             }
 
             // Mission modal takes top priority
             if (this.missionModalVisible) {
-                const keyName = key.name.toLowerCase();
                 if (key.name === 'escape') { this.dismissMissionModal(); return true; }
-                if (keyName === 'f2') { this.dismissMissionModal(); return true; }
-                if (keyName === 'f1') { this.dismissMissionModal(); this.showMapModal(); return true; }
+                const keyName = key.name.toLowerCase();
+                if (keyName === 'f1') { this.handleF1Action(); return true; }
+                if (keyName === 'f2') { this.handleF2Action(); return true; }
                 if (this.missionModalScroll.handleKeyPress(key)) return true;
                 return true; // Block all input while modal is open
             }
@@ -407,18 +456,10 @@ export class GameUI {
                 }
             }
 
-            // F1 opens map modal when input is empty and no popup/choices active
+            // F1/F2 open map/mission modals (guards inside the action methods)
             const keyName = key.name.toLowerCase();
-            if (keyName === 'f1' && !this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
-                this.showMapModal();
-                return true;
-            }
-
-            // F2 opens mission modal when input is empty and no popup/choices active
-            if (keyName === 'f2' && !this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
-                this.showMissionModal();
-                return true;
-            }
+            if (keyName === 'f1') { this.handleF1Action(); return true; }
+            if (keyName === 'f2') { this.handleF2Action(); return true; }
 
             const result = origHandleKey(key);
             this.updatePopupFromInput();
@@ -586,20 +627,20 @@ export class GameUI {
         });
         locationPanel.add(this.locationText);
 
-        const contactsPanel = new BoxRenderable(this.renderer, {
-            id: 'sb-contacts',
+        const systemsPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-systems',
             height: 5,
             width: '100%',
             borderStyle: 'single',
             borderColor: sidebarPanelBorder,
-            title: ' CONTACTS ',
+            title: ' SYSTEMS ',
             titleAlignment: 'center',
             backgroundColor: sidebarPanelBg,
             paddingLeft: 1,
             paddingRight: 1,
             flexDirection: 'column',
         });
-        contactsPanel.add(this.contactsText);
+        systemsPanel.add(this.systemsText);
 
         const inventoryPanel = new BoxRenderable(this.renderer, {
             id: 'sb-inventory',
@@ -656,7 +697,7 @@ export class GameUI {
         });
         this.sidebar.add(vitalsPanel);
         this.sidebar.add(locationPanel);
-        this.sidebar.add(contactsPanel);
+        this.sidebar.add(systemsPanel);
         this.sidebar.add(inventoryPanel);
         this.sidebar.add(this.alertsPanel);
         this.sidebar.add(missionPanel);
@@ -863,11 +904,10 @@ export class GameUI {
             if (!selected) return;
             const build = builds.get(selected.value as CharacterClassId);
             if (!build) return;
-            const dmgRange = `${String(build.baseDamage[0])}-${String(build.baseDamage[1])}`;
             const profs = build.proficiencies.join(', ');
             const weaks = build.weaknesses.join(', ');
             const startItem = build.startingItem ?? 'none';
-            previewText.content = t`${fg(COLORS.text)(`HP: ${String(build.baseHp)}  DMG: ${dmgRange}  INV: ${String(build.maxInventory)} slots`)}\n${fg(COLORS.hpGood)(`+ ${profs}`)}  ${fg(COLORS.hpLow)(`- ${weaks}`)}\n${fg(COLORS.textDim)(`Starting item: ${startItem}`)}`;
+            previewText.content = t`${fg(COLORS.text)(`HP: ${String(build.baseHp)}  INV: ${String(build.maxInventory)} slots`)}\n${fg(COLORS.hpGood)(`+ ${profs}`)}  ${fg(COLORS.hpLow)(`- ${weaks}`)}\n${fg(COLORS.textDim)(`Starting item: ${startItem}`)}`;
         };
 
         // Update preview on selection change via polling approach
@@ -1378,7 +1418,7 @@ export class GameUI {
         }
         this.updateVitals(status);
         this.updateLocation(status);
-        this.updateContacts(status);
+        this.updateSystems(status);
         this.updateInventory(status);
         this.updateMission(status);
         this.updateAlerts(status);
@@ -1405,42 +1445,62 @@ export class GameUI {
         const hpBar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
 
         const cls = classIcon(status.characterClass);
-        const dmg = `${String(status.damage[0])}-${String(status.damage[1])}`;
 
         // Oxygen and suit integrity indicators
         const o2Pct = status.maxOxygen > 0 ? status.oxygen / status.maxOxygen : 1;
         const o2Color = o2Pct >= 0.6 ? COLORS.hpGood : o2Pct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
         const suitColor = status.suitIntegrity >= 60 ? COLORS.hpGood : status.suitIntegrity >= 25 ? COLORS.hpMid : COLORS.hpLow;
 
-        this.vitalsText.content = t`${fg(COLORS.text)(`${cls} ${hpLabel}`)}\n${fg(hpColor)(`HP ${hpBar} ${String(status.hp)}`)}\n${fg(o2Color)(`O2 ${String(status.oxygen)}%`)}  ${fg(suitColor)(`Suit ${String(status.suitIntegrity)}%`)}  ${fg(COLORS.textDim)(`DMG ${dmg}`)}`;
+        this.vitalsText.content = t`${fg(COLORS.text)(`${cls} ${hpLabel}`)}\n${fg(hpColor)(`HP ${hpBar} ${String(status.hp)}`)}\n${fg(o2Color)(`O2 ${String(status.oxygen)}%`)}  ${fg(suitColor)(`Suit ${String(status.suitIntegrity)}%`)}`;
     }
 
     private updateLocation(status: GameStatus): void {
         this.locationText.content = t`${fg(COLORS.text)(status.roomName)}\n${fg(COLORS.textDim)(`Room ${String(status.roomIndex)}/${String(status.totalRooms)}`)}\n${fg(COLORS.textDim)(`Turn ${String(status.turnCount)}`)}`;
     }
 
-    private updateContacts(status: GameStatus): void {
-        if (status.npcs.length === 0) {
-            this.contactsText.content = t`${fg(COLORS.textDim)('No contacts')}`;
+    private updateSystems(status: GameStatus): void {
+        const active = status.systemFailures.filter(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
+        if (active.length === 0) {
+            this.systemsText.content = t`${fg(COLORS.hpGood)('All nominal')}`;
             return;
         }
 
-        // Build each NPC as plain text lines — color the whole block uniformly
-        const maxNpcs = 3;
-        const npcLines: string[] = [];
-        for (let i = 0; i < Math.min(status.npcs.length, maxNpcs); i++) {
-            const npc = status.npcs[i];
-            const icon = npc.disposition === 'hostile' ? '!'
-                : npc.disposition === 'friendly' ? '*'
-                : '?';
-            const barW = 8;
-            const filled = Math.round(npc.hpPct * barW);
-            const npcBar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
-            const name = npc.name.length > 10 ? npc.name.slice(0, 10) : npc.name;
-            npcLines.push(`${icon} ${name}  ${npcBar} ${String(npc.currentHp)}`);
+        const maxSystems = 4;
+        const lines: TextChunk[][] = [];
+        for (let i = 0; i < Math.min(active.length, maxSystems); i++) {
+            const f = active[i];
+            const abbrev = SYSTEM_ABBREV[f.systemId] ?? f.systemId.slice(0, 8);
+            const sev = '\u25B2'.repeat(f.severity);
+            const badge = STATUS_BADGE[f.status] ?? f.status.slice(0, 4).toUpperCase();
+            const badgeColor = f.status === 'critical' || f.status === 'offline'
+                ? COLORS.hpLow
+                : f.status === 'failing'
+                    ? '#ff8844'
+                    : f.status === 'degraded'
+                        ? COLORS.hpMid
+                        : COLORS.hpGood;
+
+            // Cascade timer or challenge progress
+            let trail: string;
+            if (f.turnsUntilCascade <= 3) {
+                trail = `\u26A1${String(f.turnsUntilCascade)}T`;
+            } else {
+                trail = challengeDots(f.challengeState);
+            }
+
+            lines.push([
+                fg(COLORS.text)(abbrev.padEnd(8)),
+                fg(badgeColor)(` ${sev.padEnd(3)} ${badge.padEnd(4)} `),
+                fg(COLORS.textDim)(trail),
+            ]);
         }
 
-        this.contactsText.content = t`${fg(COLORS.text)(npcLines.join('\n'))}`;
+        const chunks: TextChunk[] = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (i > 0) chunks.push(fg(COLORS.text)('\n'));
+            chunks.push(...lines[i]);
+        }
+        this.systemsText.content = new StyledText(chunks);
     }
 
     private updateInventory(status: GameStatus): void {
@@ -1499,6 +1559,32 @@ export class GameUI {
         // Box border consumes 2 rows (top+bottom). Keep enough room for our content lines.
         this.alertsPanel.height = Math.max(4, lines.length + 2);
         this.alertsText.content = t`${fg(COLORS.hpLow)(lines.join('\n'))}`;
+    }
+
+    // ─── F-Key Actions ────────────────────────────────────────────────────
+
+    /** Toggle map modal (F1): close if showing map, switch from mission, or open fresh. */
+    private handleF1Action(): void {
+        if (this.mapModalVisible) {
+            this.dismissMapModal();
+        } else if (this.missionModalVisible) {
+            this.dismissMissionModal();
+            this.showMapModal();
+        } else if (!this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
+            this.showMapModal();
+        }
+    }
+
+    /** Toggle mission modal (F2): close if showing mission, switch from map, or open fresh. */
+    private handleF2Action(): void {
+        if (this.missionModalVisible) {
+            this.dismissMissionModal();
+        } else if (this.mapModalVisible) {
+            this.dismissMapModal();
+            this.showMissionModal();
+        } else if (!this.inputField.value.trim() && this.popupState === 'idle' && !this.inlineChoicesActive) {
+            this.showMissionModal();
+        }
     }
 
     // ─── Mission Modal ─────────────────────────────────────────────────────

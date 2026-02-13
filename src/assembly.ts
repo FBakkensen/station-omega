@@ -5,24 +5,10 @@ import type {
     Room,
     NPC,
     Item,
-    NPCMemory,
-    NPCBehaviorFlag,
     SystemFailure,
     SystemFailureSkeleton,
 } from './types.js';
 import { generateMapLayout } from './map-layout.js';
-
-function makeNPCMemory(): NPCMemory {
-    return {
-        playerActions: [],
-        dispositionHistory: [],
-        wasSpared: false,
-        wasHelped: false,
-        hasFled: false,
-        fledTo: null,
-        tradeInventory: [],
-    };
-}
 
 function assembleFailure(sk: SystemFailureSkeleton): SystemFailure {
     return {
@@ -64,7 +50,6 @@ export function assembleStation(
             connections: [...skRoom.connections],
             lockedBy: skRoom.lockedBy,
             loot: skRoom.lootSlot?.id ?? null,
-            threat: skRoom.enemySlot?.id ?? null,
             sensory: cr?.sensory ?? {
                 sounds: ['Distant hum of machinery'],
                 smells: ['Stale air'],
@@ -77,33 +62,6 @@ export function assembleStation(
             roomModifiers: [],
             systemFailures: skRoom.systemFailures.map(assembleFailure),
             engineeringNotes: cr?.engineeringNotes ?? '',
-        });
-    }
-
-    // Build NPC map from enemy skeletons
-    for (const skEnemy of skeleton.enemies) {
-        const cr = creative.enemies.find(e => e.enemyId === skEnemy.id);
-        // Find which room this enemy is in
-        const hostRoom = skeleton.rooms.find(r => r.enemySlot?.id === skEnemy.id);
-
-        npcs.set(skEnemy.id, {
-            id: skEnemy.id,
-            name: cr?.name ?? 'Unknown Hostile',
-            roomId: hostRoom?.id ?? skeleton.entryRoomId,
-            disposition: 'hostile',
-            maxHp: skEnemy.hp,
-            currentHp: skEnemy.hp,
-            damage: [...skEnemy.damage],
-            drop: skEnemy.dropItemId,
-            behaviors: new Set<NPCBehaviorFlag>(skEnemy.behaviors),
-            memory: makeNPCMemory(),
-            fleeThreshold: skEnemy.fleeThreshold,
-            personality: cr?.personality ?? skEnemy.personality,
-            isAlly: false,
-            appearance: cr?.appearance ?? 'Something that definitely shouldn\'t be here.',
-            deathDescription: cr?.deathDescription ?? 'It stops. That was more stressful than it needed to be.',
-            soundSignature: cr?.soundSignature ?? 'An unexpected sound.',
-            tier: skEnemy.tier,
         });
     }
 

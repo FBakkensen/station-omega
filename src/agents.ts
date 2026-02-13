@@ -24,7 +24,7 @@ export function createAgents(
     guardrail: OutputGuardrail<typeof GameResponseSchema>,
 ): GameAgents {
     const engineeringAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'EngineeringNarrator',
+        name: 'EngineeringVoice',
         model: 'gpt-5.2',
         instructions: buildEngineeringPrompt(station, build),
         tools: toolSets.engineering,
@@ -39,7 +39,7 @@ export function createAgents(
     });
 
     const diagnosticsAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'DiagnosticsNarrator',
+        name: 'DiagnosticsVoice',
         model: 'gpt-5-mini',
         instructions: buildDiagnosticsPrompt(station, build),
         tools: toolSets.diagnostics,
@@ -54,7 +54,7 @@ export function createAgents(
     // Handoffs — defined before agents that reference them
     const engineeringHandoff = handoff(engineeringAgent, {
         toolNameOverride: 'transfer_to_engineering',
-        toolDescriptionOverride: 'Hand off to engineering narrator when the player repairs, modifies, or improvises with systems. Also handles rare combat-as-engineering encounters.',
+        toolDescriptionOverride: 'Hand off to engineering voice when the player repairs, modifies, or improvises with systems. Also handles rare combat-as-engineering encounters.',
         isEnabled: ({ runContext }) => {
             const { state, station: s } = runContext.context;
             const room = s.rooms.get(state.currentRoom);
@@ -68,7 +68,7 @@ export function createAgents(
     });
 
     const explorationAgent = new Agent<GameContext, typeof GameResponseSchema>({
-        name: 'ExplorationNarrator',
+        name: 'ExplorationVoice',
         model: 'gpt-5-mini',
         instructions: buildExplorationPrompt(station, build),
         tools: toolSets.exploration,
@@ -83,7 +83,7 @@ export function createAgents(
 
     const diagnosticsHandoff = handoff(diagnosticsAgent, {
         toolNameOverride: 'transfer_to_diagnostics',
-        toolDescriptionOverride: 'Hand off to diagnostics narrator when the player examines terminals, reads sensors, analyzes problems, or interacts with NPCs.',
+        toolDescriptionOverride: 'Hand off to diagnostics voice when the player examines terminals, reads sensors, analyzes problems, or interacts with NPCs.',
         isEnabled: ({ runContext }) => {
             const { state, station: s } = runContext.context;
             const room = s.rooms.get(state.currentRoom);
@@ -97,7 +97,7 @@ export function createAgents(
 
     const explorationHandoff = handoff(explorationAgent, {
         toolNameOverride: 'transfer_to_exploration',
-        toolDescriptionOverride: 'Hand off to exploration narrator when the player enters a room, explores, picks up items, or attempts creative actions.',
+        toolDescriptionOverride: 'Hand off to exploration voice when the player enters a room, explores, picks up items, or attempts creative actions.',
         // Always enabled — exploration is always available
     });
 

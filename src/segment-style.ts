@@ -93,7 +93,7 @@ function runToChunk(run: ContentRun, baseColor: string): TextChunk {
 function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
     switch (seg.type) {
         case 'narration':
-            return [dim(fg(HEADER_COLORS.narration)('\u2726 Narrator')), fg('#5a6a7a')('\n')];
+            return [dim(fg(HEADER_COLORS.narration)('\u2726')), fg('#5a6a7a')('\n')];
         case 'dialogue': {
             const name = seg.speakerName ?? 'Unknown';
             return [bold(fg(HEADER_COLORS.dialogue)(name)), fg('#5a6a7a')('\n')];

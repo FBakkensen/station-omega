@@ -1266,7 +1266,7 @@ export function createGameToolSets(classId: string): GameToolSets {
 
     const checkEnvironment = tool({
         name: 'check_environment',
-        description: 'Read environmental sensors in the current room: atmosphere composition, pressure, temperature, radiation, and structural data. Returns raw numbers for assessment.',
+        description: 'Read environmental sensors in the current room: atmosphere composition, pressure, temperature, radiation, structural data, and derived physics (partial pressures, boiling points, dose equivalents). Returns raw numbers plus computed values for engineering assessment.',
         parameters: z.object({}),
         execute: (_args, ctx?: RunContext<GameContext>) => {
             const { state, station } = getCtx(ctx);
@@ -1280,22 +1280,71 @@ export function createGameToolSets(classId: string): GameToolSets {
             const hasThermal = failures.some(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop');
             const hasStructural = failures.some(f => f.systemId === 'structural_integrity');
 
+            // Raw sensor values
+            const atmoFailureCount = failures.filter(f => f.systemId === 'atmosphere_processor' || f.systemId === 'life_support').length;
+            const lifeSupportFailureCount = failures.filter(f => f.systemId === 'life_support').length;
+            const pressureFailureCount = failures.filter(f => f.systemId === 'pressure_seal').length;
+            const thermalFailureCount = failures.filter(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop').length;
+            const radFailureCount = failures.filter(f => f.systemId === 'radiation_shielding').length;
+            const structuralFailureCount = failures.filter(f => f.systemId === 'structural_integrity').length;
+
+            const oxygenPct = hasAtmo ? Math.max(14, 21 - atmoFailureCount * 3) : 21;
+            const co2Ppm = hasAtmo ? 2200 + lifeSupportFailureCount * 800 : 400;
+            const pressureKpa = hasPressure ? 85 - pressureFailureCount * 8 : 101;
+            const temperatureC = hasThermal ? 38 + thermalFailureCount * 5 : 22;
+            const radiationMsv = hasRad ? 2.5 + radFailureCount * 3.5 : 0.1;
+            const structuralPct = hasStructural ? 70 - structuralFailureCount * 15 : 98;
+
+            // Derived physics — engine-computed values the AI can reference directly
+            const ppO2 = Math.round(oxygenPct / 100 * pressureKpa * 10) / 10;
+            const hypoxiaRisk: 'nominal' | 'warning' | 'critical' =
+                ppO2 < 12 ? 'critical' : ppO2 < 16 ? 'warning' : 'nominal';
+
+            const ppCO2 = Math.round(co2Ppm / 1e6 * pressureKpa * 1000) / 1000;
+            const co2Risk: 'nominal' | 'elevated' | 'dangerous' | 'critical' =
+                co2Ppm >= 40000 ? 'critical' : co2Ppm >= 20000 ? 'dangerous' :
+                co2Ppm >= 5000 ? 'elevated' : 'nominal';
+
+            // Clausius-Clapeyron approximation: T_boil ≈ 100 - 0.27 * (101.325 - P) for near-atmospheric
+            const boilingPointC = Math.round((100 - 0.27 * (101.325 - pressureKpa)) * 10) / 10;
+
+            const radiationAnnualMsv = Math.round(radiationMsv * 8760 * 10) / 10;
+            const radiationCategory: 'background' | 'elevated' | 'exceeds_annual_limit' | 'lethal_hours' | 'lethal_minutes' =
+                radiationMsv >= 500 ? 'lethal_minutes' : radiationMsv >= 50 ? 'lethal_hours' :
+                radiationAnnualMsv > 50 ? 'exceeds_annual_limit' :
+                radiationAnnualMsv > 1 ? 'elevated' : 'background';
+
+            const pressureDiffKpa = Math.round((101.325 - pressureKpa) * 10) / 10;
+            // Rough suit leak estimate: ~0.5% per minute per 10 kPa differential
+            const suitLeakPctPerMin = Math.round(Math.max(0, pressureDiffKpa / 10 * 0.5) * 100) / 100;
+
             return JSON.stringify({
                 room_name: room.name,
                 atmosphere: {
-                    oxygen_pct: hasAtmo ? Math.max(14, 21 - failures.filter(f => f.systemId === 'atmosphere_processor' || f.systemId === 'life_support').length * 3) : 21,
-                    co2_ppm: hasAtmo ? 2200 + failures.filter(f => f.systemId === 'life_support').length * 800 : 400,
-                    pressure_kpa: hasPressure ? 85 - failures.filter(f => f.systemId === 'pressure_seal').length * 8 : 101,
+                    oxygen_pct: oxygenPct,
+                    co2_ppm: co2Ppm,
+                    pressure_kpa: pressureKpa,
                     contaminants: failures.some(f => f.failureMode === 'contamination') ? 'detected' : 'nominal',
                 },
-                temperature_c: hasThermal ? 38 + failures.filter(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop').length * 5 : 22,
-                radiation_msv: hasRad ? 2.5 + failures.filter(f => f.systemId === 'radiation_shielding').length * 3.5 : 0.1,
-                structural_integrity_pct: hasStructural ? 70 - failures.filter(f => f.systemId === 'structural_integrity').length * 15 : 98,
+                temperature_c: temperatureC,
+                radiation_msv: radiationMsv,
+                structural_integrity_pct: structuralPct,
                 gravity_g: failures.some(f => f.systemId === 'gravity_generator') ? 0.6 : 1.0,
                 power_status: failures.some(f => f.systemId === 'power_relay') ? 'intermittent' : 'nominal',
                 system_failures_detected: failures.length,
                 player_oxygen: state.oxygen,
                 player_suit_integrity: state.suitIntegrity,
+                derived: {
+                    o2_partial_pressure_kpa: ppO2,
+                    hypoxia_risk: hypoxiaRisk,
+                    co2_partial_pressure_kpa: ppCO2,
+                    co2_risk: co2Risk,
+                    water_boiling_point_c: boilingPointC,
+                    radiation_annual_equiv_msv: radiationAnnualMsv,
+                    radiation_category: radiationCategory,
+                    pressure_differential_kpa: pressureDiffKpa,
+                    suit_leak_rate_pct_per_min: suitLeakPctPerMin,
+                },
             });
         },
     });

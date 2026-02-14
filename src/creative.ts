@@ -6,6 +6,8 @@ import type {
     RoomCreative,
     ItemCreative,
     CrewMember,
+    ArrivalScenario,
+    StartingItemCreative,
 } from './types.js';
 
 const CREATIVE_PROMPT = `# Identity
@@ -26,7 +28,23 @@ Grounded sci-fi with personality. The Martian meets Project Hail Mary. The stati
 - engineeringNotes: 1-2 sentences of technical detail about the room's systems — what's nominal, what's degraded, what readings are off
 - Generate 3-5 crew roster members (engineers, scientists, technicians)
 - Each room should have 1-2 crew logs (prefer engineering_report, calibration_record, failure_analysis types)
-- Provide 3 sounds, 2 smells, and 3 visuals per room — focus on diagnostic clues (the sound a pump makes when it's cavitating, the smell of coolant, the flicker pattern of failing lights)`;
+- Provide 3 sounds, 2 smells, and 3 visuals per room — focus on diagnostic clues (the sound a pump makes when it's cavitating, the smell of coolant, the flicker pattern of failing lights)
+
+# Arrival Scenario
+
+The skeleton data includes the starting room archetype (depth 0) and the player's character class. Use these to generate:
+
+- **arrivalScenario**: Why is the player in THIS room type on THIS station?
+  - \`playerBackstory\`: 2-3 sentences — who the player is, why they're here, what they remember. Connect the character class to the station situation
+  - \`arrivalCondition\`: 1 sentence — physical/mental state on arrival (groggy, injured, alert, disoriented)
+  - \`knowledgeLevel\`: "familiar" (was crew, knows layout/people), "partial" (has briefing, first time aboard), or "none" (stranger, no info)
+  - \`openingLine\`: First-person, visceral, sensory. The player's first moment of consciousness in the game. Must reference the starting room environment, not a generic airlock
+
+- **startingItem**: An item the player finds immediately in the starting room. Must fit the scenario and room archetype
+  - Medical items: category "medical", effectType "heal", effectValue 15-40
+  - Tools: category "tool", effectType "tool", effectValue 1
+  - Materials: category "material", effectType "material", effectValue 1
+  - The item must NOT duplicate the character's class starting item (provided in skeleton data)`;
 
 /** Zod schema for structured output — guarantees valid JSON from gpt-5-mini. */
 const CreativeOutputSchema = z.object({
@@ -62,6 +80,21 @@ const CreativeOutputSchema = z.object({
         description: z.string(),
         useNarration: z.string(),
     })),
+    arrivalScenario: z.object({
+        playerBackstory: z.string(),
+        arrivalCondition: z.string(),
+        knowledgeLevel: z.enum(['familiar', 'partial', 'none']),
+        openingLine: z.string(),
+    }),
+    startingItem: z.object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string(),
+        category: z.enum(['medical', 'tool', 'material']),
+        effectType: z.enum(['heal', 'tool', 'material']),
+        effectValue: z.number(),
+        useNarration: z.string(),
+    }),
 });
 
 /** Partial shape accepted by validateCreative for fallback paths. */
@@ -94,6 +127,21 @@ interface CreativeSchemaPartial {
         description?: string;
         useNarration?: string;
     }>;
+    arrivalScenario?: {
+        playerBackstory?: string;
+        arrivalCondition?: string;
+        knowledgeLevel?: 'familiar' | 'partial' | 'none';
+        openingLine?: string;
+    };
+    startingItem?: {
+        id?: string;
+        name?: string;
+        description?: string;
+        category?: 'medical' | 'tool' | 'material';
+        effectType?: 'heal' | 'tool' | 'material';
+        effectValue?: number;
+        useNarration?: string;
+    };
 }
 
 // Module-level creative agent (reusable, stateless)
@@ -123,6 +171,8 @@ function buildSkeletonSummary(skeleton: StationSkeleton): string {
     }));
 
     return JSON.stringify({
+        characterClass: skeleton.config.characterClass,
+        startingRoomArchetype: skeleton.rooms[0].archetype,
         storyArc: skeleton.config.storyArc,
         difficulty: skeleton.config.difficulty,
         objectiveTitle: skeleton.objectives.title,
@@ -199,13 +249,51 @@ function validateCreative(content: CreativeSchemaPartial, skeleton: StationSkele
     const validRooms = rooms.filter(r => roomIds.has(r.roomId));
     const validItems = items.filter(i => itemIds.has(i.itemId));
 
+    const stationName = content.stationName ?? 'Station Omega';
+
+    const arrivalScenario: ArrivalScenario = content.arrivalScenario
+        ? {
+            playerBackstory: content.arrivalScenario.playerBackstory ?? 'The details are hazy. I need to figure out where I am.',
+            arrivalCondition: content.arrivalScenario.arrivalCondition ?? 'Disoriented but functional.',
+            knowledgeLevel: content.arrivalScenario.knowledgeLevel ?? 'none',
+            openingLine: content.arrivalScenario.openingLine ?? `The lights are wrong. That's the first thing I notice aboard ${stationName}.`,
+        }
+        : {
+            playerBackstory: 'The details are hazy. I need to figure out where I am.',
+            arrivalCondition: 'Disoriented but functional.',
+            knowledgeLevel: 'none' as const,
+            openingLine: `The lights are wrong. That's the first thing I notice aboard ${stationName}.`,
+        };
+
+    const startingItem: StartingItemCreative = content.startingItem
+        ? {
+            id: content.startingItem.id ?? 'emergency_medkit',
+            name: content.startingItem.name ?? 'Emergency Medkit',
+            description: content.startingItem.description ?? 'A basic medical kit found nearby.',
+            category: content.startingItem.category ?? 'medical',
+            effectType: content.startingItem.effectType ?? 'heal',
+            effectValue: content.startingItem.effectValue ?? 30,
+            useNarration: content.startingItem.useNarration ?? 'You use the emergency medkit.',
+        }
+        : {
+            id: 'emergency_medkit',
+            name: 'Emergency Medkit',
+            description: 'A basic medical kit found nearby.',
+            category: 'medical' as const,
+            effectType: 'heal' as const,
+            effectValue: 30,
+            useNarration: 'You use the emergency medkit.',
+        };
+
     return {
-        stationName: content.stationName ?? 'Station Omega',
+        stationName,
         briefing: content.briefing ?? 'Board the station. Fix what you can. Get to the escape pod.',
         backstory: content.backstory ?? 'The station went dark three days ago. The last transmission was a cascade failure alarm followed by a lot of creative profanity.',
         crewRoster,
         rooms: validRooms,
         items: validItems,
+        arrivalScenario,
+        startingItem,
     };
 }
 
@@ -239,6 +327,8 @@ function buildProgressPhases(skeleton: StationSkeleton): Array<{ pattern: string
 
     phases.push(
         { pattern: '"items"', message: 'Placing equipment and materials...' },
+        { pattern: '"arrivalScenario"', message: 'Generating arrival scenario...' },
+        { pattern: '"startingItem"', message: 'Selecting starting equipment...' },
     );
 
     return phases;
@@ -257,7 +347,7 @@ export async function generateCreativeContent(
 ${summary}
 </station_skeleton>
 
-Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each focusing on engineering state. engineeringNotes: 1-2 sentences of technical readings. Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis.`;
+Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each focusing on engineering state. engineeringNotes: 1-2 sentences of technical readings. Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis. arrivalScenario: connect the character class to the starting room archetype. startingItem: appropriate for the scenario and starting room (medical heal 15-40, tool/material effectValue 1).`;
 
     try {
         const stream = await run(creativeAgent, userPrompt, {
@@ -300,6 +390,8 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
             crewRoster: [],
             rooms: [],
             items: [],
+            arrivalScenario: undefined,
+            startingItem: undefined,
         }, skeleton);
     }
 }

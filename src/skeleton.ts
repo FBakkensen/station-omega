@@ -56,7 +56,7 @@ const ROOM_COUNTS: Record<Difficulty, [number, number]> = {
 // ─── Archetype Selection ────────────────────────────────────────────────────
 
 function archetypesForDepth(depth: number, maxDepth: number): RoomArchetype[] {
-    if (depth === 0) return ['entry'];
+    if (depth === 0) return ['entry', 'cargo', 'quarters', 'utility', 'medical', 'command'];
     if (depth === maxDepth) return ['escape'];
     const pct = depth / maxDepth;
     if (pct <= 0.3) return ['quarters', 'utility', 'cargo'];
@@ -236,18 +236,6 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
 
     // 5. Place engineering materials — ensure all required materials are reachable
     const emptyRooms = rooms.filter(r => !r.lootSlot && r.id !== entryRoomId && r.id !== escapeRoomId);
-
-    // Place a starting supply in the entry room
-    if (!rooms[0].lootSlot) {
-        const firstAidItem: ItemSkeleton = {
-            id: 'emergency_medkit',
-            category: 'medical',
-            effect: { type: 'heal', value: 30, description: 'Emergency medkit' },
-            isKeyItem: false,
-        };
-        rooms[0].lootSlot = firstAidItem;
-        items.push(firstAidItem);
-    }
 
     // Place required materials in reachable rooms before the failures that need them
     for (const [matId, count] of materialsNeeded) {

@@ -17,6 +17,7 @@ export interface RunConfig {
     seed: number;
     difficulty: Difficulty;
     storyArc: StoryArc;
+    characterClass: CharacterClassId;
 }
 
 // ─── Character System ───────────────────────────────────────────────────────
@@ -204,6 +205,23 @@ export interface MapLayout {
 
 // ─── Creative Types (AI-generated, narrative) ───────────────────────────────
 
+export interface ArrivalScenario {
+    playerBackstory: string;
+    arrivalCondition: string;
+    knowledgeLevel: 'familiar' | 'partial' | 'none';
+    openingLine: string;
+}
+
+export interface StartingItemCreative {
+    id: string;
+    name: string;
+    description: string;
+    category: 'medical' | 'tool' | 'material';
+    effectType: 'heal' | 'tool' | 'material';
+    effectValue: number;
+    useNarration: string;
+}
+
 export interface RoomCreative {
     roomId: string;
     name: string;
@@ -233,6 +251,8 @@ export interface CreativeContent {
     crewRoster: CrewMember[];
     rooms: RoomCreative[];
     items: ItemCreative[];
+    arrivalScenario: ArrivalScenario;
+    startingItem: StartingItemCreative;
 }
 
 // ─── Assembled World (final, used during gameplay) ──────────────────────────
@@ -290,6 +310,7 @@ export interface GeneratedStation {
     entryRoomId: string;
     escapeRoomId: string;
     crewRoster: CrewMember[];
+    arrivalScenario: ArrivalScenario;
     mapLayout: MapLayout;
 }
 

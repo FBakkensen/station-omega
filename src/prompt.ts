@@ -1,4 +1,12 @@
-import type { GeneratedStation, CharacterBuild } from './types.js';
+import type { GeneratedStation, CharacterBuild, ArrivalScenario } from './types.js';
+
+function knowledgeLevelGuidance(level: ArrivalScenario['knowledgeLevel']): string {
+    switch (level) {
+        case 'familiar': return 'I know this station — its layout, crew, systems. I was crew. I notice what changed.';
+        case 'partial': return 'I have briefing materials but this is my first time aboard. I know what should be here, not what is.';
+        case 'none': return 'I know nothing about this station. No schematics, no crew roster. I figure it out as I go.';
+    }
+}
 
 // ─── Data Formatters ────────────────────────────────────────────────────────
 
@@ -205,12 +213,13 @@ The ending depends on my moral profile and mission completion:
 - Death = game over with score summary`;
 }
 
-function buildReminderSection(build: CharacterBuild): string {
+function buildReminderSection(build: CharacterBuild, knowledgeLevel: ArrivalScenario['knowledgeLevel']): string {
     return `# Reminder
 
 You MUST use markdown formatting within segment text: **bold** for items/systems/rooms, *italics* for sensory details and readings. Never output plain unformatted text in segments. Never use --- horizontal rules.
 Keep each segment compact — no blank lines within a segment. Split distinct beats into separate segments.
 I am a **${build.name}** with proficiencies in ${build.proficiencies.join(' and ')}. Lean into my class identity in narration.
+Knowledge level: ${knowledgeLevel} — ${knowledgeLevelGuidance(knowledgeLevel)}
 Use the structured segment types: "thought" for my inner analytical commentary (use frequently — running calculations, risk assessments, dry observations), "station_pa" for announcements, "crew_echo" with crewName for crew logs. Narration is what I see and do; thought is me reasoning about it. Both first person.
 dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction. Do not generate dialogue for NPCs encountered during exploration or engineering.
 Favor dry humor and understatement. No purple prose or horror cliches.
@@ -308,9 +317,17 @@ export function buildOrchestratorPrompt(station: GeneratedStation, build: Charac
 
 You are the orchestrator Game Master for "${station.stationName}", a sci-fi engineering-puzzle text adventure with dry humor and technical ingenuity. The tone is Andy Weir — smart, funny, grounded. You route player actions to the right specialist narrator via handoffs, or handle simple actions directly.
 
-I am a **${build.name}** (${build.description}) aboard ${station.stationName}. ${station.briefing}
+I am a **${build.name}** (${build.description}).
 
-**Backstory**: ${station.backstory}
+**My story**: ${station.arrivalScenario.playerBackstory}
+
+**My condition**: ${station.arrivalScenario.arrivalCondition}
+
+**What I know**: ${knowledgeLevelGuidance(station.arrivalScenario.knowledgeLevel)}
+
+**Station briefing**: ${station.briefing}
+
+**What happened here**: ${station.backstory}
 
 ${buildOutputFormatRules()}
 
@@ -363,13 +380,13 @@ ${buildEndingsSection()}
 - Items must be narratively described before I can pick them up.
 - Before resolving any action, consider my class, inventory, active events, system states, and health.
 - Before calling a tool, write a brief line that narratively sets up the action.
-- I start in the entry room: ${station.entryRoomId}.
+- I start in: ${station.rooms.get(station.entryRoomId)?.name ?? station.entryRoomId}.
 - dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction.
 - Every turn must advance or block a technical objective with explicit reason.
 
-${buildReminderSection(build)}
+${buildReminderSection(build, station.arrivalScenario.knowledgeLevel)}
 
-Begin by describing my entry into ${station.stationName} using the look_around tool. Establish the Weir tone immediately — I assess my situation with dry humor and engineering curiosity, not dread.`;
+Begin by narrating my arrival using the arrivalScenario context and call look_around. Establish the Weir tone immediately — I assess my situation with dry humor and engineering curiosity, not dread.`;
 }
 
 export function buildEngineeringPrompt(station: GeneratedStation, build: CharacterBuild): string {
@@ -426,7 +443,7 @@ ${buildNarrationStyle()}
 
 ${buildPlayerAgencyRules()}
 
-${buildReminderSection(build)}`;
+${buildReminderSection(build, station.arrivalScenario.knowledgeLevel)}`;
 }
 
 export function buildDiagnosticsPrompt(station: GeneratedStation, build: CharacterBuild): string {
@@ -502,7 +519,7 @@ ${buildNarrationStyle()}
 
 ${buildPlayerAgencyRules()}
 
-${buildReminderSection(build)}`;
+${buildReminderSection(build, station.arrivalScenario.knowledgeLevel)}`;
 }
 
 export function buildExplorationPrompt(station: GeneratedStation, build: CharacterBuild): string {
@@ -593,5 +610,5 @@ ${buildEndingsSection()}
 - dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction.
 - Every turn must advance or block a technical objective with explicit reason.
 
-${buildReminderSection(build)}`;
+${buildReminderSection(build, station.arrivalScenario.knowledgeLevel)}`;
 }

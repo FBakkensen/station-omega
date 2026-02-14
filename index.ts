@@ -693,7 +693,7 @@ async function runGameplay(
     }
 
     // Kick off the game
-    const openingPrompt = `I step through the airlock onto ${station.stationName}. What do I see?`;
+    const openingPrompt = `${station.arrivalScenario.openingLine} What do I see?`;
     debugLog('PLAYER', openingPrompt);
     debugLog('SESSION', 'Sending opening prompt...');
     ui.showTypingIndicator();
@@ -873,7 +873,7 @@ async function main() {
         const arc = randomStoryArc();
         ui.showGenerating();
 
-        const skeleton = generateSkeleton({ seed, difficulty: 'normal', storyArc: arc });
+        const skeleton = generateSkeleton({ seed, difficulty: 'normal', storyArc: arc, characterClass: classId });
         const creative = await generateCreativeContent(skeleton, (message) => {
             ui.updateLoadingMessage(message);
         }, debugLog);

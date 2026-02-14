@@ -80,6 +80,27 @@ export function assembleStation(
         });
     }
 
+    // Create AI-generated starting item and place in entry room
+    const startItem = creative.startingItem;
+    items.set(startItem.id, {
+        id: startItem.id,
+        name: startItem.name,
+        description: startItem.description,
+        category: startItem.category,
+        effect: {
+            type: startItem.effectType,
+            value: startItem.effectValue,
+            description: startItem.description,
+        },
+        isKeyItem: false,
+        useNarration: startItem.useNarration,
+    });
+
+    const entryRoom = rooms.get(skeleton.entryRoomId);
+    if (entryRoom && !entryRoom.loot) {
+        entryRoom.loot = startItem.id;
+    }
+
     const mapLayout = generateMapLayout(rooms, skeleton.config.seed, skeleton.entryRoomId);
 
     return {
@@ -94,6 +115,7 @@ export function assembleStation(
         entryRoomId: skeleton.entryRoomId,
         escapeRoomId: skeleton.escapeRoomId,
         crewRoster: [...creative.crewRoster],
+        arrivalScenario: creative.arrivalScenario,
         mapLayout,
     };
 }

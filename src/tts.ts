@@ -1,11 +1,10 @@
 import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
 import type { NPC, CrewMember } from './types.js';
 import { extractCleanText } from './markdown-reveal.js';
 import type { GameSegment } from './schema.js';
+import { initAudioPlayer, isPlayerAvailable, startPlayer, writePlayer, stopPlayer, releasePlayer } from './audio-player.js';
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
@@ -185,10 +184,11 @@ export class TTSEngine {
     private crewRoster: CrewMember[] = [];
     private narratorContext: NarratorContext = { hpPercent: 100, isNewRoom: false };
     private tempDir: string | null = null;
-    private currentProcess: ChildProcess | null = null;
     private abortController: AbortController | null = null;
     private silentPauseTimer: ReturnType<typeof setTimeout> | null = null;
     private silentPauseResolve: (() => void) | null = null;
+    private playbackTimer: ReturnType<typeof setTimeout> | null = null;
+    private playbackResolve: (() => void) | null = null;
 
     // ─── Error accumulation ────────────────────────────────────────────────
     private pipelineError: TTSError | null = null;
@@ -214,20 +214,6 @@ export class TTSEngine {
         this.debugLog = options.debugLog ?? (() => { /* no-op */ });
     }
 
-    /** Verify ffplay is installed and accessible. */
-    private async checkFfplay(): Promise<void> {
-        return new Promise<void>((resolve, reject) => {
-            const proc = spawn('ffplay', ['-version'], { stdio: 'ignore' });
-            proc.on('close', (code) => {
-                if (code === 0) resolve();
-                else reject(new TTSError(`ffplay exited with code ${String(code)}. Install ffmpeg to enable TTS audio.`));
-            });
-            proc.on('error', () => {
-                reject(new TTSError('ffplay not found. Install ffmpeg to enable TTS audio.'));
-            });
-        });
-    }
-
     async init(): Promise<void> {
         // Always create temp directory (needed for audio WAV files when enabled)
         this.tempDir = await mkdtemp(join(tmpdir(), 'station-omega-tts-'));
@@ -238,23 +224,25 @@ export class TTSEngine {
             return;
         }
 
-        try {
-            this.inworldApiKey = process.env['INWORLD_API_KEY'];
-            await this.checkFfplay();
-            this.audioEnabled = true;
+        this.inworldApiKey = process.env['INWORLD_API_KEY'];
 
-            // Check persisted voice preference
-            if (process.env['VOICE_ENABLED'] === 'false') {
-                this.audioEnabled = false;
-                this.debugLog('TTS', 'Voice disabled by VOICE_ENABLED=false setting');
-            }
-
-            this.debugLog('TTS', `Initialized Inworld TTS client (${INWORLD_MODEL}). Temp dir: ${this.tempDir}`);
-        } catch (err: unknown) {
+        // Initialize in-process audio player (audify / RtAudio)
+        const audioReady = await initAudioPlayer(INWORLD_SAMPLE_RATE);
+        if (!audioReady) {
             this.inworldApiKey = null;
-            this.audioEnabled = false;
-            this.debugLog('TTS', `Audio unavailable (${String(err)}) — running in silent typewriter mode`);
+            this.debugLog('TTS', 'Audio player failed to initialize — running in silent typewriter mode');
+            return;
         }
+
+        this.audioEnabled = true;
+
+        // Check persisted voice preference
+        if (process.env['VOICE_ENABLED'] === 'false') {
+            this.audioEnabled = false;
+            this.debugLog('TTS', 'Voice disabled by VOICE_ENABLED=false setting');
+        }
+
+        this.debugLog('TTS', `Initialized Inworld TTS client (${INWORLD_MODEL}). Temp dir: ${this.tempDir}`);
     }
 
     /** Generate speech via Inworld TTS streaming API and save to a WAV file. */
@@ -613,6 +601,9 @@ export class TTSEngine {
         if (this.playbackRunning) return;
         this.playbackRunning = true;
 
+        // Start the audio device for this turn
+        if (this.audioEnabled) startPlayer();
+
         try {
             while (!this.streamAborted) {
                 // Find the next WAV in index order
@@ -628,7 +619,7 @@ export class TTSEngine {
                         if (wav.filePath) {
                             // Audio mode: play the WAV file
                             this.debugLog('TTS-STREAM', `Playing chunk ${String(wav.index)}`);
-                            await this.playWav(wav.filePath);
+                            await this.playWav(wav.filePath, wav.audioDuration);
                             await unlink(wav.filePath).catch(() => { /* ignore */ });
                         } else {
                             // Silent typewriter mode: pause for the computed duration
@@ -656,6 +647,8 @@ export class TTSEngine {
                 await new Promise<void>((r) => setTimeout(r, 30));
             }
         } finally {
+            // Stop the audio stream at end of turn
+            if (this.audioEnabled) stopPlayer();
             this.playbackRunning = false;
         }
     }
@@ -674,27 +667,20 @@ export class TTSEngine {
         });
     }
 
-    private async playWav(filePath: string): Promise<void> {
-        return new Promise<void>((resolve, reject) => {
-            try {
-                const proc = spawn('ffplay', ['-nodisp', '-autoexit', '-loglevel', 'quiet', filePath], {
-                    stdio: 'ignore',
-                });
-                this.currentProcess = proc;
+    private async playWav(filePath: string, durationSec: number): Promise<void> {
+        const wavData = await readFile(filePath);
+        // Strip 44-byte WAV header to get raw PCM
+        const pcmData = wavData.subarray(44) as Buffer;
+        writePlayer(pcmData);
 
-                proc.on('close', () => {
-                    this.currentProcess = null;
-                    resolve();
-                });
-
-                proc.on('error', (err: Error) => {
-                    this.currentProcess = null;
-                    reject(new TTSError(`Playback error: ${err.message}`));
-                });
-            } catch (err: unknown) {
-                this.currentProcess = null;
-                reject(new TTSError(`Playback spawn error: ${String(err)}`));
-            }
+        // Wait for the audio duration (cancellable via stop())
+        return new Promise<void>((resolve) => {
+            this.playbackResolve = resolve;
+            this.playbackTimer = setTimeout(() => {
+                this.playbackTimer = null;
+                this.playbackResolve = null;
+                resolve();
+            }, durationSec * 1000);
         });
     }
 
@@ -716,12 +702,15 @@ export class TTSEngine {
             this.silentPauseResolve = null;
         }
 
-        // Kill current playback
-        if (this.currentProcess) {
-            try {
-                this.currentProcess.kill();
-            } catch { /* ignore */ }
-            this.currentProcess = null;
+        // Stop in-process audio playback instantly (clearOutputQueue + stop)
+        stopPlayer();
+        if (this.playbackTimer) {
+            clearTimeout(this.playbackTimer);
+            this.playbackTimer = null;
+        }
+        if (this.playbackResolve) {
+            this.playbackResolve();
+            this.playbackResolve = null;
         }
 
         // Abort any in-flight API requests
@@ -764,12 +753,14 @@ export class TTSEngine {
         process.env['INWORLD_API_KEY'] = key;
         this.inworldApiKey = key;
 
-        try {
-            await this.checkFfplay();
-        } catch {
-            this.inworldApiKey = null;
-            this.audioEnabled = false;
-            throw new TTSError('ffplay not found. Install ffmpeg to enable TTS audio playback.');
+        if (!isPlayerAvailable()) {
+            // Try initializing now in case it wasn't available at startup
+            const ready = await initAudioPlayer(INWORLD_SAMPLE_RATE);
+            if (!ready) {
+                this.inworldApiKey = null;
+                this.audioEnabled = false;
+                throw new TTSError('Audio player unavailable — PvSpeaker native module failed to load.');
+            }
         }
 
         this.audioEnabled = true;
@@ -840,6 +831,7 @@ export class TTSEngine {
         if (this.generationPromise) await this.generationPromise;
         if (this.playbackPromise) await this.playbackPromise;
         this.inworldApiKey = null;
+        releasePlayer();
         if (this.tempDir) {
             await rm(this.tempDir, { recursive: true, force: true }).catch(() => { /* ignore */ });
             this.tempDir = null;

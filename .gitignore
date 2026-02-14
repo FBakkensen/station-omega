@@ -4,3 +4,4 @@ node_modules/
 .env.local
 debug.log
 run-history.json
+NUL

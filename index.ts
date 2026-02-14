@@ -14,6 +14,7 @@ import { createAgents } from './src/agents.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
+import { hasOpenAiKey, setOpenAiKey } from './src/env.js';
 import { GameResponseSchema } from './src/schema.js';
 import type { DisplaySegment, GameResponse } from './src/schema.js';
 import { StreamingSegmentParser } from './src/json-stream-parser.js';
@@ -754,13 +755,8 @@ async function main() {
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
     while (true) {
-        // TITLE screen — show Voice Setup or Voice Toggle based on API key state
-        const hasKey = globalTTS.hasApiKey();
-        const choice = await ui.showTitleScreen({
-            showVoiceSetup: !hasKey,
-            showVoiceToggle: hasKey,
-            voiceEnabled: globalTTS.isAudioEnabled(),
-        });
+        // TITLE screen
+        const choice = await ui.showTitleScreen();
         if (choice === 'quit') {
             break;
         }
@@ -771,27 +767,61 @@ async function main() {
             continue;
         }
 
-        if (choice === 'voice_setup') {
-            const key = await ui.showApiKeyEntry();
-            if (key) {
-                try {
-                    await globalTTS.setApiKey(key);
-                    await ui.showBriefMessage('Voice narration enabled. API key saved — voice will be enabled automatically next time.');
-                } catch {
-                    // setApiKey failed (e.g. no ffplay) — will stay in silent mode
+        if (choice === 'settings') {
+            // Settings sub-loop
+            let inSettings = true;
+            while (inSettings) {
+                const action = await ui.showSettingsScreen({
+                    hasOpenAiKey: hasOpenAiKey(),
+                    hasInworldKey: !!process.env['INWORLD_API_KEY'],
+                    voiceReady: globalTTS.hasApiKey(),
+                    voiceEnabled: globalTTS.isAudioEnabled(),
+                });
+
+                if (action === 'openai_key') {
+                    const key = await ui.showApiKeyEntry({
+                        title: 'OPENAI API KEY',
+                        description: 'Enter your OpenAI API key (required for the AI game master).',
+                        placeholder: 'sk-...',
+                    });
+                    if (key) {
+                        await setOpenAiKey(key);
+                        await ui.showBriefMessage('OpenAI API key saved.');
+                    }
+                } else if (action === 'inworld_key') {
+                    const key = await ui.showApiKeyEntry({
+                        title: 'INWORLD API KEY',
+                        description: 'Enter your Inworld API key to enable voice narration.',
+                        placeholder: 'base64 credentials...',
+                    });
+                    if (key) {
+                        try {
+                            await globalTTS.setApiKey(key);
+                            await ui.showBriefMessage('Voice narration enabled. API key saved.');
+                        } catch (err: unknown) {
+                            const msg = err instanceof Error ? err.message : String(err);
+                            debugLog('SETTINGS', `Inworld key setup failed: ${msg}`);
+                            await ui.showBriefMessage(`Voice setup failed: ${msg}`);
+                        }
+                    }
+                } else if (action === 'voice_toggle') {
+                    const nowEnabled = !globalTTS.isAudioEnabled();
+                    globalTTS.setAudioEnabled(nowEnabled, true);
+                } else {
+                    inSettings = false;
                 }
             }
             continue;
         }
 
-        if (choice === 'voice_toggle') {
-            const nowEnabled = !globalTTS.isAudioEnabled();
-            globalTTS.setAudioEnabled(nowEnabled, true);
-            continue;
-        }
-
         // CHARACTER SELECT
         const classId = await ui.showCharacterSelect(CHARACTER_BUILDS);
+
+        // Guard: OpenAI key must be set before starting a run
+        if (!hasOpenAiKey()) {
+            await ui.showBriefMessage('OpenAI API key is required. Please configure it in Settings.');
+            continue;
+        }
 
         // GENERATING
         const seed = Math.floor(Math.random() * 2147483647);

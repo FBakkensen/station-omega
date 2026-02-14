@@ -1,12 +1,13 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
+  "configVersion": 1,
   "workspaces": {
     "": {
       "name": "station-omega",
       "dependencies": {
         "@openai/agents": "^0.4.5",
         "@opentui/core": "^0.1.77",
+        "@picovoice/pvspeaker-node": "^1.0.3",
         "marked": "^17.0.1",
         "openai": "^4.90.0",
         "zod": "^4",
@@ -129,6 +130,8 @@
     "@opentui/core-win32-arm64": ["@opentui/core-win32-arm64@0.1.77", "", { "os": "win32", "cpu": "arm64" }, "sha512-HGTscPXc7gdd23Nh1DbzUNjog1I+5IZp95XPtLftGTpjrWs60VcetXcyJqK2rQcXNxewJK5yDyaa5QyMjfEhCQ=="],
 
     "@opentui/core-win32-x64": ["@opentui/core-win32-x64@0.1.77", "", { "os": "win32", "cpu": "x64" }, "sha512-c7GijsbvVgnlzd2murIbwuwrGbcv76KdUw6WlVv7a0vex50z6xJCpv1keGzpe0QfxrZ/6fFEFX7JnwGLno0wjA=="],
+
+    "@picovoice/pvspeaker-node": ["@picovoice/pvspeaker-node@1.0.3", "", {}, "sha512-N26hrnuZVCr3CB6yTsVavdv8zgF6qna/JD3jtMb17JRHXIqrEItNd+ZkfxOWYGHPqla/nJc6yeVfM1495Yd7Aw=="],
 
     "@tokenizer/token": ["@tokenizer/token@0.3.0", "", {}, "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A=="],
 

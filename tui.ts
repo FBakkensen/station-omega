@@ -253,6 +253,7 @@ export class GameUI {
     private inputBar!: BoxRenderable;
     private spinnerBar: BoxRenderable | null = null;
     private spinnerTimer: ReturnType<typeof setInterval> | null = null;
+    private _destroyed = false;
     private revealFirstChunk = true;
     private debugLog: ((label: string, content: string) => void) | null = null;
 
@@ -279,6 +280,16 @@ export class GameUI {
                     return false; // F3/F4 — pass through
                 },
             ],
+        });
+
+        // Clear timers when renderer is destroyed (e.g. Ctrl+C)
+        this.renderer.on('destroy', () => {
+            this._destroyed = true;
+            this.stopRevealTimer();
+            if (this.spinnerTimer) {
+                clearInterval(this.spinnerTimer);
+                this.spinnerTimer = null;
+            }
         });
 
         // Create mutable components with the Renderable API
@@ -724,11 +735,7 @@ export class GameUI {
 
     // ─── Title Screen ───────────────────────────────────────────────────────
 
-    showTitleScreen(options: {
-        showVoiceSetup?: boolean;
-        showVoiceToggle?: boolean;
-        voiceEnabled?: boolean;
-    } = {}): Promise<'new_run' | 'history' | 'voice_setup' | 'voice_toggle' | 'quit'> {
+    showTitleScreen(): Promise<'new_run' | 'history' | 'settings' | 'quit'> {
         this.clearLayout();
 
         const artLines = TITLE_ART.map((line, i) =>
@@ -746,14 +753,9 @@ export class GameUI {
         const menuOptions = [
             { name: 'New Run', description: 'Begin a new expedition into Station Omega', value: 'new_run' },
             { name: 'Run History', description: 'View past expedition logs', value: 'history' },
+            { name: 'Settings', description: 'Configure API keys and voice narration', value: 'settings' },
+            { name: 'Quit', description: 'Exit the game', value: 'quit' },
         ];
-        if (options.showVoiceToggle) {
-            const label = options.voiceEnabled ? 'Voice: ON' : 'Voice: OFF';
-            menuOptions.push({ name: label, description: 'Enable/Disable voice narration', value: 'voice_toggle' });
-        } else if (options.showVoiceSetup) {
-            menuOptions.push({ name: 'Voice Setup', description: 'Enter Inworld API key for voice narration', value: 'voice_setup' });
-        }
-        menuOptions.push({ name: 'Quit', description: 'Exit the game', value: 'quit' });
 
         const menu = new SelectRenderable(this.renderer, {
             id: 'title-menu',
@@ -810,24 +812,28 @@ export class GameUI {
             menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
                 const selected = menu.getSelectedOption();
                 if (!selected) return;
-                resolve(selected.value as 'new_run' | 'history' | 'voice_setup' | 'voice_toggle' | 'quit');
+                resolve(selected.value as 'new_run' | 'history' | 'settings' | 'quit');
             });
         });
     }
 
     // ─── API Key Entry Screen ─────────────────────────────────────────────
 
-    showApiKeyEntry(): Promise<string | null> {
+    showApiKeyEntry(options: {
+        title: string;
+        description: string;
+        placeholder: string;
+    }): Promise<string | null> {
         this.clearLayout();
 
         const header = new TextRenderable(this.renderer, {
             id: 'apikey-header',
-            content: t`${bold(fg(COLORS.title)('VOICE SETUP'))}`,
+            content: t`${bold(fg(COLORS.title)(options.title))}`,
         });
 
         const desc = new TextRenderable(this.renderer, {
             id: 'apikey-desc',
-            content: t`${fg(COLORS.text)('Enter your Inworld API key to enable voice narration.')}\n${fg(COLORS.textDim)('Leave blank and press Enter to skip.')}`,
+            content: t`${fg(COLORS.text)(options.description)}\n${fg(COLORS.textDim)('Leave blank and press Enter to cancel.')}`,
         });
 
         const input = new InputRenderable(this.renderer, {
@@ -837,7 +843,7 @@ export class GameUI {
             focusedBackgroundColor: COLORS.inputFocusBg,
             textColor: COLORS.inputText,
             cursorColor: COLORS.cursor,
-            placeholder: 'base64 credentials...',
+            placeholder: options.placeholder,
         });
 
         const container = new BoxRenderable(this.renderer, {
@@ -863,6 +869,94 @@ export class GameUI {
             input.on(InputRenderableEvents.ENTER, (value: string) => {
                 const trimmed = value.trim();
                 resolve(trimmed || null);
+            });
+        });
+    }
+
+    // ─── Settings Screen ─────────────────────────────────────────────────────
+
+    showSettingsScreen(options: {
+        hasOpenAiKey: boolean;
+        hasInworldKey: boolean;
+        voiceReady: boolean;
+        voiceEnabled: boolean;
+    }): Promise<'openai_key' | 'inworld_key' | 'voice_toggle' | 'back'> {
+        this.clearLayout();
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'settings-header',
+            content: t`${bold(fg(COLORS.title)('SETTINGS'))}`,
+        });
+
+        const openAiStatus = options.hasOpenAiKey ? '[configured]' : '[not set]';
+        const inworldStatus = options.hasInworldKey
+            ? (options.voiceReady ? '[configured]' : '[key set — ffplay missing]')
+            : '[not set]';
+
+        const menuOptions = [
+            {
+                name: `OpenAI API Key  ${openAiStatus}`,
+                description: 'Required for the AI game master',
+                value: 'openai_key',
+            },
+            {
+                name: `Inworld API Key  ${inworldStatus}`,
+                description: 'Required for voice narration (also needs ffplay)',
+                value: 'inworld_key',
+            },
+        ];
+
+        if (options.voiceReady) {
+            const voiceLabel = options.voiceEnabled ? 'Voice: ON' : 'Voice: OFF';
+            menuOptions.push({
+                name: voiceLabel,
+                description: 'Toggle voice narration',
+                value: 'voice_toggle',
+            });
+        }
+
+        menuOptions.push({
+            name: 'Back',
+            description: 'Return to title screen',
+            value: 'back',
+        });
+
+        const menu = new SelectRenderable(this.renderer, {
+            id: 'settings-menu',
+            options: menuOptions,
+            height: menuOptions.length * 2,
+            width: '60%',
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: COLORS.bg,
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'settings-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+        });
+        container.add(header);
+        container.add(menu);
+
+        this.layoutRoot.add(container);
+        menu.focus();
+
+        return new Promise((resolve) => {
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+                const selected = menu.getSelectedOption();
+                if (!selected) return;
+                resolve(selected.value as 'openai_key' | 'inworld_key' | 'voice_toggle' | 'back');
             });
         });
     }
@@ -1866,6 +1960,7 @@ export class GameUI {
     }
 
     private revealTick(): void {
+        if (this._destroyed) return;
         const now = Date.now();
         const dtSec = (now - this.revealLastTickTime) / 1000;
         this.revealLastTickTime = now;
@@ -2147,6 +2242,12 @@ export class GameUI {
     // ─── Cleanup ────────────────────────────────────────────────────────────
 
     destroy(): void {
+        this._destroyed = true;
+        this.stopRevealTimer();
+        if (this.spinnerTimer) {
+            clearInterval(this.spinnerTimer);
+            this.spinnerTimer = null;
+        }
         this.renderer.destroy();
     }
 }

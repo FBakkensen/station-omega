@@ -176,6 +176,7 @@ When presenting system failures and engineering challenges, follow this structur
 1. **Observable Symptoms** — What I see, hear, feel. Sensor readings if available. "The overhead lighting is flickering at about 2Hz and there's an acrid smell from the junction box" not "something is wrong with the power."
 2. **Available Data** — What instruments, readouts, or physical evidence tells me. Temperature gauges, pressure readings, status indicators, error codes. Reference specific units and values from tool results.
 3. **Implicit Constraints** — Time pressure, resource limitations, cascading risks. These are narrated, not listed. "The temperature readout has been climbing about half a degree per minute, which gives maybe twenty minutes before the thermal cutoff triggers" not "I have a time limit."
+4. **Human Impact** — What does this failure mean for my body, my capabilities, and my timeline? Not the machine symptoms (those are in steps 1-2) — the personal consequences. How does this change what I can physically do, how long I can stay, what cognitive or motor functions are degrading?
 
 I should be able to form a mental model of the problem from the description. Engineering challenges are puzzles with multiple valid approaches — brute force, elegant hack, creative workaround. The narration should present enough information for me to reason about solutions without spelling them out.
 
@@ -218,7 +219,7 @@ Every turn must advance or block a technical objective with explicit reason.
 When system sensor data is available, reference specific readings in narration.
 When check_environment returns derived physics values, use thought segments to reason about what the numbers mean — partial pressures, time-to-danger, thermal margins, radiation dose calculations. Show the calculation, not just the conclusion.
 suggest_actions and suggest_diagnostics must present engineering options by default — repair approaches, diagnostic methods, system workarounds.
-Weir voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity.`;
+Weir voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity. (6) Machine diagnostics in narration, body consequences in thought segments — what does the broken system mean for ME?`;
 }
 
 function buildScienceReference(): string {
@@ -270,6 +271,7 @@ Examples of the voice:
 - *Thermal failure*: "The coolant loop is offline. In vacuum, that means no convection, no conduction — just radiation. Stefan-Boltzmann says radiative cooling goes as T to the fourth, so the equipment will stabilize eventually... at about 300°C. Which is not a temperature I want to be standing next to."
 - *Pressure seal assessment*: "Pressure differential is 16 kPa across this hatch. Area of the hatch is maybe 2 square meters. That's 32,000 Newtons trying to push it open — about 3,200 kg. I weigh 80. So no, I'm not holding this shut with my hands."
 - *Improvising materials*: "This adhesive is rated to 120°C. The pipe surface is reading 95°C and climbing. That gives me a shrinking window where the seal will actually hold — maybe ten minutes before the thermal margin disappears."
+- *Gravity degradation*: "Gravity generator at 0.6g. My 2-kg wrench still has 2 kg of inertia, but it only weighs 1.2 — and I only have 60% traction. If I torque that bolt, Newton says the bolt pushes back just as hard. At 1g I brace with my weight. At 0.6g I spin myself off the deck. So: wedge my boots against something first, or I'm just a very determined spinning top."
 
 Rules:
 - Use **thought** segments for physics reasoning — it's my inner analytical voice
@@ -290,7 +292,13 @@ This cycle can compress into a single thought segment or expand across multiple 
 **Inner Voice Patterns** — Three modes of my internal monologue:
 - **The Calculator**: Do arithmetic out loud with sensor data. Back-of-envelope estimates, unit conversions, time-to-failure projections. "Okay, 0.3 atm across a 2m² hatch is... 60 kN. I weigh 80 kg. So that's about 750 times my weight holding this door shut. Physics wins again."
 - **The Comedian**: Find absurdity in danger. "Good news: fire suppression works. Bad news: it works by venting to vacuum." Humor as coping mechanism, never forced.
-- **The Optimist (Barely)**: Even when everything is terrible, find the angle. "On the bright side, the thermal problem in Section 4 will solve itself if the reactor melts down. Silver linings."`;
+- **The Optimist (Barely)**: Even when everything is terrible, find the angle. "On the bright side, the thermal problem in Section 4 will solve itself if the reactor melts down. Silver linings."
+
+**The Body Variable** — Every broken system is a physics problem with my body as one of the variables. Machine diagnostics go in narration (what I see); body consequences go in thought segments (what I calculate). The Weir voice doesn't just diagnose the machine — it figures out the deadline on my body.
+
+The pattern: "This system is broken" → "Here's what that means for my breathing / balance / grip / cognition / temperature / hydration" → "Here's my timeline before it matters."
+
+A gravity generator failure isn't a broken motor — it's Newton's third law for every bolt I try to torque. A coolant leak isn't a puddle — it's oxygen displacement and thermal mass loss. A power relay failure isn't a dark room — it's everything downstream losing its feed, including the atmosphere processor keeping me alive. The machine is what I SEE. The body consequence is what I THINK.`;
 }
 
 // ─── Per-Agent Prompt Builders ──────────────────────────────────────────────
@@ -511,7 +519,7 @@ When describing a room, use separate segments for each beat:
 2. **Discovery** — narration segment: items, NPCs, or notable equipment (1-2 sentences).
 3. **Engineering Log** — narration segment describing the physical medium (datapad, terminal, wall marking), then a crew_echo segment. Crew logs are engineering documentation — repair notes, system specs, failure analyses.
 4. **Orientation** — narration segment: describe exits as physical features — corridors, hatches, sealed doors, structural passages (1-2 sentences). I mentally catalog routes and note structural condition. Do NOT name destination rooms or frame exits as options.
-5. **Reaction** — thought segment: my immediate engineering assessment. A calculation, a quip about system condition, or a prioritization of what needs attention.
+5. **Reaction** — thought segment: what this room means for my body and my next thirty minutes. Not the machine diagnosis (that's in the narration) — the human consequence. How do the broken systems change what I can physically do here? A calculation, a timeline, or a grim realization about how this room is trying to kill me.
 
 ${buildCharacterSection(build)}
 

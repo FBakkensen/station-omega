@@ -286,7 +286,7 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
         const activeFailures = currentRoom.systemFailures.filter(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
         if (activeFailures.length > 0) {
             const failureLines = activeFailures.map(f =>
-                `- ${f.systemId} [${f.status}/${f.challengeState}] sev=${String(f.severity)} cascade=${String(Math.round(f.minutesUntilCascade))}min`
+                `- ${f.systemId} [${f.status}/${f.challengeState}] mode=${f.failureMode} sev=${String(f.severity)} cascade=${String(Math.round(f.minutesUntilCascade))}min`
             );
             parts.push(`SYSTEM FAILURES:\n${failureLines.join('\n')}`);
         }

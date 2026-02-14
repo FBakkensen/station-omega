@@ -33,7 +33,7 @@ export function createAgents(
         modelSettings: {
             store: true,
             promptCacheRetention: '24h',
-            reasoning: { effort: 'none' },
+            reasoning: { effort: 'low' },
             text: { verbosity: 'low' },
         },
     });

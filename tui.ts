@@ -31,6 +31,7 @@ import type {
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
 import type { DisplaySegment } from './src/schema.js';
+import type { TrendDirection } from './src/environment.js';
 import {
     segmentCardStyle,
     truncateChunks,
@@ -51,9 +52,9 @@ const COLORS = {
     inputFocusBg: '#151d28',
     inputText: '#e0e8f0',
     cursor: '#00e5ff',
-    hpGood: '#00ff88',
-    hpMid: '#ffcc00',
-    hpLow: '#ff4444',
+    hpGood: '#4dc9f6',
+    hpMid: '#f6a623',
+    hpLow: '#e84393',
     separator: '#1e3a5f',
     narrative: '#d0d8e0',
     cardBg: '#243348',
@@ -183,6 +184,50 @@ function challengeDots(state: string): string {
     }
 }
 
+// ─── Sidebar Bar/Trend Helpers ──────────────────────────────────────────────
+
+const BAR_WIDTH = 16;
+
+function envBar(value: number, min: number, max: number): string {
+    const pct = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    const filled = Math.round(pct * BAR_WIDTH);
+    return '\u2588'.repeat(filled) + '\u2591'.repeat(BAR_WIDTH - filled);
+}
+
+function trendArrow(dir: TrendDirection): string {
+    switch (dir) {
+        case 'rising': return '\u2191';
+        case 'falling': return '\u2193';
+        case 'stable': return '\u2192';
+    }
+}
+
+type ThresholdLevel = 'green' | 'yellow' | 'red';
+
+function o2Level(v: number): ThresholdLevel { return v >= 19 ? 'green' : v >= 16 ? 'yellow' : 'red'; }
+function co2Level(v: number): ThresholdLevel { return v < 2000 ? 'green' : v <= 5000 ? 'yellow' : 'red'; }
+function pressureLevel(v: number): ThresholdLevel { return v >= 95 ? 'green' : v >= 77 ? 'yellow' : 'red'; }
+function tempLevel(v: number): ThresholdLevel { return (v >= 15 && v <= 30) ? 'green' : (v >= 5 && v <= 42) ? 'yellow' : 'red'; }
+function radLevel(v: number): ThresholdLevel { return v < 0.5 ? 'green' : v <= 5.0 ? 'yellow' : 'red'; }
+function structLevel(v: number): ThresholdLevel { return v >= 80 ? 'green' : v >= 50 ? 'yellow' : 'red'; }
+
+function levelColor(level: ThresholdLevel): string {
+    switch (level) {
+        case 'green': return '#4dc9f6';
+        case 'yellow': return '#f6a623';
+        case 'red': return '#e84393';
+    }
+}
+
+/** Color a trend arrow based on whether the direction is good or bad for this metric. */
+function trendColor(dir: TrendDirection, metric: string): string {
+    // Rising is bad for: co2, temp, radiation. Good for: o2, pressure, structural.
+    const risingIsBad = metric === 'co2Ppm' || metric === 'temperatureC' || metric === 'radiationMsv';
+    if (dir === 'stable') return '#5a6a7a';
+    if (dir === 'rising') return risingIsBad ? '#e84393' : '#4dc9f6';
+    return risingIsBad ? '#4dc9f6' : '#e84393'; // falling
+}
+
 // ─── GameUI ──────────────────────────────────────────────────────────────────
 
 // ─── Segment Card State ──────────────────────────────────────────────────────
@@ -210,13 +255,14 @@ export class GameUI {
     };
 
     // Sidebar panel text renderables
-    private vitalsText!: TextRenderable;
-    private locationText!: TextRenderable;
+    private atmosphereText!: TextRenderable;
+    private suitText!: TextRenderable;
     private systemsText!: TextRenderable;
+    private systemsPanel!: BoxRenderable;
+    private hazardsText!: TextRenderable;
+    private hazardsPanel!: BoxRenderable;
     private inventoryText!: TextRenderable;
     private missionText!: TextRenderable;
-    private alertsPanel!: BoxRenderable;
-    private alertsText!: TextRenderable;
     private sidebar!: BoxRenderable;
 
     // Compact fallback status (narrow terminals)
@@ -309,17 +355,21 @@ export class GameUI {
         });
 
         // Sidebar panel text renderables
-        this.vitalsText = new TextRenderable(this.renderer, {
-            id: 'vitals-text',
+        this.atmosphereText = new TextRenderable(this.renderer, {
+            id: 'atmosphere-text',
             content: t`${fg(COLORS.textDim)('...')}`,
         });
-        this.locationText = new TextRenderable(this.renderer, {
-            id: 'location-text',
+        this.suitText = new TextRenderable(this.renderer, {
+            id: 'suit-text',
             content: t`${fg(COLORS.textDim)('...')}`,
         });
         this.systemsText = new TextRenderable(this.renderer, {
             id: 'systems-text',
             content: t`${fg(COLORS.hpGood)('All nominal')}`,
+        });
+        this.hazardsText = new TextRenderable(this.renderer, {
+            id: 'hazards-text',
+            content: t`${fg(COLORS.textDim)('None')}`,
         });
         this.inventoryText = new TextRenderable(this.renderer, {
             id: 'inventory-text',
@@ -328,10 +378,6 @@ export class GameUI {
         this.missionText = new TextRenderable(this.renderer, {
             id: 'mission-text',
             content: t`${fg(COLORS.textDim)('...')}`,
-        });
-        this.alertsText = new TextRenderable(this.renderer, {
-            id: 'alerts-text',
-            content: t`${fg(COLORS.textDim)('None')}`,
         });
 
         // Compact fallback status for narrow terminals
@@ -556,7 +602,7 @@ export class GameUI {
     }
 
     private buildGameplayLayout(): void {
-        this.isNarrowMode = process.stdout.columns < 90;
+        this.isNarrowMode = process.stdout.columns < 100;
 
         // Main narrative panel
         const narrativePanel = Box(
@@ -605,42 +651,45 @@ export class GameUI {
 
         // ── Sidebar panels ──────────────────────────────────────────────
 
-        const sidebarPanelBorder = COLORS.border;
+        const sidebarPanelBorder = '#2e6090';
         const sidebarPanelBg = COLORS.panelBg;
 
-        const vitalsPanel = new BoxRenderable(this.renderer, {
-            id: 'sb-vitals',
-            height: 6,
+        // Panel 1: ATMOSPHERE (always visible)
+        const atmospherePanel = new BoxRenderable(this.renderer, {
+            id: 'sb-atmosphere',
+            height: 8,
             width: '100%',
             borderStyle: 'single',
             borderColor: sidebarPanelBorder,
-            title: ' VITALS ',
+            title: ' ATMOSPHERE ',
             titleAlignment: 'center',
             backgroundColor: sidebarPanelBg,
             paddingLeft: 1,
             paddingRight: 1,
             flexDirection: 'column',
         });
-        vitalsPanel.add(this.vitalsText);
+        atmospherePanel.add(this.atmosphereText);
 
-        const locationPanel = new BoxRenderable(this.renderer, {
-            id: 'sb-location',
-            height: 5,
+        // Panel 2: SUIT (always visible)
+        const suitPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-suit',
+            height: 7,
             width: '100%',
             borderStyle: 'single',
             borderColor: sidebarPanelBorder,
-            title: ' LOCATION ',
+            title: ' SUIT ',
             titleAlignment: 'center',
             backgroundColor: sidebarPanelBg,
             paddingLeft: 1,
             paddingRight: 1,
             flexDirection: 'column',
         });
-        locationPanel.add(this.locationText);
+        suitPanel.add(this.suitText);
 
-        const systemsPanel = new BoxRenderable(this.renderer, {
+        // Panel 3: SYSTEMS (context-sensitive — hidden when no failures)
+        this.systemsPanel = new BoxRenderable(this.renderer, {
             id: 'sb-systems',
-            height: 5,
+            height: 4,
             width: '100%',
             borderStyle: 'single',
             borderColor: sidebarPanelBorder,
@@ -650,9 +699,28 @@ export class GameUI {
             paddingLeft: 1,
             paddingRight: 1,
             flexDirection: 'column',
+            visible: false,
         });
-        systemsPanel.add(this.systemsText);
+        this.systemsPanel.add(this.systemsText);
 
+        // Panel 4: HAZARDS (context-sensitive — hidden when no events)
+        this.hazardsPanel = new BoxRenderable(this.renderer, {
+            id: 'sb-hazards',
+            height: 4,
+            width: '100%',
+            borderStyle: 'single',
+            borderColor: '#ff4444',
+            title: ' \u26A0 HAZARD ',
+            titleAlignment: 'center',
+            backgroundColor: sidebarPanelBg,
+            paddingLeft: 1,
+            paddingRight: 1,
+            flexDirection: 'column',
+            visible: false,
+        });
+        this.hazardsPanel.add(this.hazardsText);
+
+        // Panel 5: INVENTORY (flexGrow fills remaining space)
         const inventoryPanel = new BoxRenderable(this.renderer, {
             id: 'sb-inventory',
             flexGrow: 1,
@@ -668,9 +736,10 @@ export class GameUI {
         });
         inventoryPanel.add(this.inventoryText);
 
+        // Panel 6: MISSION (always visible)
         const missionPanel = new BoxRenderable(this.renderer, {
             id: 'sb-mission',
-            height: 5,
+            height: 4,
             width: '100%',
             borderStyle: 'single',
             borderColor: sidebarPanelBorder,
@@ -683,34 +752,18 @@ export class GameUI {
         });
         missionPanel.add(this.missionText);
 
-        this.alertsPanel = new BoxRenderable(this.renderer, {
-            id: 'sb-alerts',
-            height: 4,
-            width: '100%',
-            borderStyle: 'single',
-            borderColor: sidebarPanelBorder,
-            title: ' ALERTS ',
-            titleAlignment: 'center',
-            backgroundColor: sidebarPanelBg,
-            paddingLeft: 1,
-            paddingRight: 1,
-            flexDirection: 'column',
-            visible: false,
-        });
-        this.alertsPanel.add(this.alertsText);
-
         // Sidebar container
         this.sidebar = new BoxRenderable(this.renderer, {
             id: 'sidebar',
-            width: 28,
+            width: 38,
             flexDirection: 'column',
             backgroundColor: COLORS.bg,
         });
-        this.sidebar.add(vitalsPanel);
-        this.sidebar.add(locationPanel);
-        this.sidebar.add(systemsPanel);
+        this.sidebar.add(atmospherePanel);
+        this.sidebar.add(suitPanel);
+        this.sidebar.add(this.systemsPanel);
+        this.sidebar.add(this.hazardsPanel);
         this.sidebar.add(inventoryPanel);
-        this.sidebar.add(this.alertsPanel);
         this.sidebar.add(missionPanel);
 
         // Main row: narrative + sidebar
@@ -1510,12 +1563,12 @@ export class GameUI {
             this.updateCompactStatus(status);
             return;
         }
-        this.updateVitals(status);
-        this.updateLocation(status);
+        this.updateAtmosphere(status);
+        this.updateSuit(status);
         this.updateSystems(status);
+        this.updateHazards(status);
         this.updateInventory(status);
         this.updateMission(status);
-        this.updateAlerts(status);
     }
 
     private updateCompactStatus(status: GameStatus): void {
@@ -1526,40 +1579,98 @@ export class GameUI {
         this.compactStatusText.content = t`${fg(hpColor)(`HP ${String(status.hp)}/${String(status.maxHp)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`${cls} ${status.roomName}`)} ${fg(COLORS.textDim)(`(${String(status.roomIndex)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.textDim)(`T${String(status.turnCount)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
     }
 
-    private updateVitals(status: GameStatus): void {
+    private updateAtmosphere(status: GameStatus): void {
+        if (!status.environment) {
+            this.atmosphereText.content = t`${fg(COLORS.textDim)('No sensor data')}`;
+            return;
+        }
+        const { snapshot, trends } = status.environment;
+        const metrics: Array<{ label: string; value: string; level: ThresholdLevel; trendKey: string; trend: TrendDirection }> = [
+            { label: 'O\u2082  ', value: `${snapshot.oxygenPct.toFixed(1)}%`.padEnd(8), level: o2Level(snapshot.oxygenPct), trendKey: 'oxygenPct', trend: trends.oxygenPct },
+            { label: 'CO\u2082 ', value: `${String(Math.round(snapshot.co2Ppm))}ppm`.padEnd(8), level: co2Level(snapshot.co2Ppm), trendKey: 'co2Ppm', trend: trends.co2Ppm },
+            { label: 'kPa ', value: snapshot.pressureKpa.toFixed(1).padEnd(8), level: pressureLevel(snapshot.pressureKpa), trendKey: 'pressureKpa', trend: trends.pressureKpa },
+            { label: 'Temp', value: `${String(Math.round(snapshot.temperatureC))}\u00B0C`.padEnd(8), level: tempLevel(snapshot.temperatureC), trendKey: 'temperatureC', trend: trends.temperatureC },
+            { label: 'Rad ', value: `${snapshot.radiationMsv.toFixed(1)}mSv`.padEnd(8), level: radLevel(snapshot.radiationMsv), trendKey: 'radiationMsv', trend: trends.radiationMsv },
+            { label: 'Str ', value: `${String(Math.round(snapshot.structuralPct))}%`.padEnd(8), level: structLevel(snapshot.structuralPct), trendKey: 'structuralPct', trend: trends.structuralPct },
+        ];
+
+        const chunks: TextChunk[] = [];
+        for (let i = 0; i < metrics.length; i++) {
+            if (i > 0) chunks.push(fg(COLORS.text)('\n'));
+            const m = metrics[i];
+            const color = levelColor(m.level);
+            const bar = envBar(
+                m.trendKey === 'co2Ppm' ? snapshot.co2Ppm
+                    : m.trendKey === 'radiationMsv' ? snapshot.radiationMsv
+                    : m.trendKey === 'oxygenPct' ? snapshot.oxygenPct : m.trendKey === 'pressureKpa' ? snapshot.pressureKpa
+                    : m.trendKey === 'structuralPct' ? snapshot.structuralPct : m.trendKey === 'temperatureC' ? snapshot.temperatureC
+                    : 0,
+                m.trendKey === 'co2Ppm' ? 0 : m.trendKey === 'radiationMsv' ? 0
+                    : m.trendKey === 'oxygenPct' ? 14 : m.trendKey === 'pressureKpa' ? 60 : m.trendKey === 'structuralPct' ? 40 : m.trendKey === 'temperatureC' ? 0 : 0,
+                m.trendKey === 'co2Ppm' ? 6000 : m.trendKey === 'radiationMsv' ? 10
+                    : m.trendKey === 'oxygenPct' ? 21 : m.trendKey === 'pressureKpa' ? 101 : m.trendKey === 'structuralPct' ? 100 : m.trendKey === 'temperatureC' ? 55 : 1,
+            );
+            const arrow = trendArrow(m.trend);
+            const arrowColor = trendColor(m.trend, m.trendKey);
+            chunks.push(fg(COLORS.textDim)(m.label), fg(color)(m.value), fg(color)(bar), fg(arrowColor)(` ${arrow}`));
+        }
+
+        this.atmosphereText.content = new StyledText(chunks);
+
+        // Crisis mode: shift sidebar border when any value is red
+        const hasRedMetric = metrics.some(m => m.level === 'red');
+        this.sidebar.backgroundColor = hasRedMetric ? '#3a1a3a' : COLORS.bg;
+    }
+
+    private updateSuit(status: GameStatus): void {
+        const cls = classIcon(status.characterClass);
+        const hours = Math.floor(status.missionElapsedMinutes / 60);
+        const mins = status.missionElapsedMinutes % 60;
+        const met = `T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+
         const hpPct = status.hp / status.maxHp;
         const hpColor = hpPct >= 0.6 ? COLORS.hpGood : hpPct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
-        const hpLabel = hpPct >= 0.8 ? 'Healthy'
-            : hpPct >= 0.5 ? 'Wounded'
-            : hpPct >= 0.25 ? 'Critical'
-            : 'Dying';
-
-        const barW = 14;
-        const filled = Math.round(hpPct * barW);
-        const hpBar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
-
-        const cls = classIcon(status.characterClass);
-
-        // Oxygen and suit integrity indicators
         const o2Pct = status.maxOxygen > 0 ? status.oxygen / status.maxOxygen : 1;
         const o2Color = o2Pct >= 0.6 ? COLORS.hpGood : o2Pct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
         const suitColor = status.suitIntegrity >= 60 ? COLORS.hpGood : status.suitIntegrity >= 25 ? COLORS.hpMid : COLORS.hpLow;
 
-        this.vitalsText.content = t`${fg(COLORS.text)(`${cls} ${hpLabel}`)}\n${fg(hpColor)(`HP ${hpBar} ${String(status.hp)}`)}\n${fg(o2Color)(`O2 ${String(status.oxygen)}%`)}  ${fg(suitColor)(`Suit ${String(status.suitIntegrity)}%`)}`;
-    }
+        const hpBar = envBar(status.hp, 0, status.maxHp);
+        const o2Bar = envBar(status.oxygen, 0, status.maxOxygen);
+        const suitBar = envBar(status.suitIntegrity, 0, 100);
 
-    private updateLocation(status: GameStatus): void {
-        this.locationText.content = t`${fg(COLORS.text)(status.roomName)}\n${fg(COLORS.textDim)(`Room ${String(status.roomIndex)}/${String(status.totalRooms)}`)}\n${fg(COLORS.textDim)(`Turn ${String(status.turnCount)}`)}`;
+        // ppO2 from environment data
+        let ppO2Line: TextChunk[];
+        if (status.environment) {
+            const { ppO2, hypoxiaRisk } = status.environment.snapshot;
+            const riskColor = hypoxiaRisk === 'nominal' ? COLORS.hpGood : hypoxiaRisk === 'warning' ? COLORS.hpMid : COLORS.hpLow;
+            const riskLabel = hypoxiaRisk === 'nominal' ? 'NOMINAL' : hypoxiaRisk === 'warning' ? 'WARNING' : 'CRITICAL';
+            ppO2Line = [fg(COLORS.textDim)(`ppO\u2082 ${ppO2.toFixed(1)}kPa`), fg(riskColor)(`     ${riskLabel}`)];
+        } else {
+            ppO2Line = [fg(COLORS.textDim)('ppO\u2082 --.-kPa')];
+        }
+
+        this.suitText.content = new StyledText([
+            fg(COLORS.textDim)(`${cls} ${met}\n`),
+            fg(COLORS.textDim)('HP  '), fg(hpColor)(`${String(status.hp).padStart(3)}/${String(status.maxHp)} `), fg(hpColor)(hpBar), fg(COLORS.text)('\n'),
+            fg(COLORS.textDim)('O\u2082  '), fg(o2Color)(` ${String(status.oxygen).padStart(3)}%   `), fg(o2Color)(o2Bar), fg(COLORS.text)('\n'),
+            fg(COLORS.textDim)('SUIT'), fg(suitColor)(` ${String(status.suitIntegrity).padStart(3)}%   `), fg(suitColor)(suitBar), fg(COLORS.text)('\n'),
+            ...ppO2Line,
+        ]);
     }
 
     private updateSystems(status: GameStatus): void {
         const active = status.systemFailures.filter(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
         if (active.length === 0) {
-            this.systemsText.content = t`${fg(COLORS.hpGood)('All nominal')}`;
+            this.systemsPanel.visible = false;
             return;
         }
 
-        const maxSystems = 4;
+        this.systemsPanel.visible = true;
+        const failCount = active.length;
+        this.systemsPanel.title = ` SYSTEMS \u2500 ${String(failCount)} FAILING `;
+        this.systemsPanel.height = 2 + Math.min(failCount, 5);
+
+        const maxSystems = 5;
         const lines: TextChunk[][] = [];
         for (let i = 0; i < Math.min(active.length, maxSystems); i++) {
             const f = active[i];
@@ -1574,18 +1685,19 @@ export class GameUI {
                         ? COLORS.hpMid
                         : COLORS.hpGood;
 
-            // Cascade timer or challenge progress
+            const dots = challengeDots(f.challengeState);
             let trail: string;
             if (f.turnsUntilCascade <= 3) {
                 trail = `\u26A1${String(f.turnsUntilCascade)}T`;
             } else {
-                trail = challengeDots(f.challengeState);
+                trail = dots;
             }
+            const trailColor = f.turnsUntilCascade <= 3 ? COLORS.hpLow : COLORS.textDim;
 
             lines.push([
                 fg(COLORS.text)(abbrev.padEnd(8)),
                 fg(badgeColor)(` ${sev.padEnd(3)} ${badge.padEnd(4)} `),
-                fg(COLORS.textDim)(trail),
+                fg(trailColor)(trail),
             ]);
         }
 
@@ -1597,62 +1709,82 @@ export class GameUI {
         this.systemsText.content = new StyledText(chunks);
     }
 
-    private updateInventory(status: GameStatus): void {
-        if (status.inventory.length === 0) {
-            this.inventoryText.content = t`${fg(COLORS.textDim)('Empty')}\n${fg(COLORS.textDim)(`[0/${String(status.maxInventory)}]`)}`;
+    private updateHazards(status: GameStatus): void {
+        if (status.activeEvents.length === 0) {
+            this.hazardsPanel.visible = false;
             return;
         }
 
-        const itemLines = status.inventory.map((name, i) => {
+        this.hazardsPanel.visible = true;
+        this.hazardsPanel.height = 2 + status.activeEvents.length * 2;
+
+        const chunks: TextChunk[] = [];
+        for (let i = 0; i < status.activeEvents.length; i++) {
+            const e = status.activeEvents[i];
+            if (i > 0) chunks.push(fg(COLORS.text)('\n'));
+            const label = e.type.replace(/_/g, ' ').toUpperCase();
+            const turns = `${String(e.turnsRemaining)}T left`;
+            const hint = alertEffectHint(e.type, e.effect);
+            chunks.push(
+                fg(COLORS.hpLow)(label.padEnd(24)),
+                fg(COLORS.hpMid)(turns),
+                fg(COLORS.text)('\n'),
+                fg(COLORS.textDim)(`  ${hint}`),
+            );
+        }
+        this.hazardsText.content = new StyledText(chunks);
+    }
+
+    private updateInventory(status: GameStatus): void {
+        const slotPct = status.maxInventory > 0 ? status.inventory.length / status.maxInventory : 0;
+        const slotColor = slotPct >= 1 ? COLORS.hpLow : slotPct >= 0.8 ? COLORS.hpMid : COLORS.hpGood;
+        const slotLabel = slotPct >= 1 ? `${String(status.inventory.length)}/${String(status.maxInventory)} FULL` : `${String(status.inventory.length)}/${String(status.maxInventory)}`;
+
+        // Update inventory panel title dynamically
+        // (we can't easily change the panel title on BoxRenderable after creation,
+        //  so we include slot info in the text content instead)
+
+        if (status.inventory.length === 0) {
+            this.inventoryText.content = t`${fg(COLORS.textDim)('Empty')}\n${fg(slotColor)(`[${slotLabel}]`)}`;
+            return;
+        }
+
+        const lines: TextChunk[][] = [];
+        for (let i = 0; i < status.inventory.length; i++) {
+            const name = status.inventory[i];
             const isKey = status.inventoryKeyFlags[i];
             const prefix = isKey ? '*' : String(i + 1);
-            return `${prefix} ${name}`;
-        });
-        const slotLabel = `[${String(status.inventory.length)}/${String(status.maxInventory)}]`;
-        this.inventoryText.content = t`${fg(COLORS.text)(itemLines.join('\n'))}\n${fg(COLORS.textDim)(slotLabel)}`;
+            const truncName = name.length > 28 ? name.slice(0, 26) + '..' : name;
+            const suffix = isKey ? ' [K]' : '';
+            const nameColor = isKey ? '#00e5ff' : COLORS.text;
+            lines.push([fg(COLORS.textDim)(`${prefix} `), fg(nameColor)(`${truncName}${suffix}`)]);
+        }
+
+        const chunks: TextChunk[] = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (i > 0) chunks.push(fg(COLORS.text)('\n'));
+            chunks.push(...lines[i]);
+        }
+        chunks.push(fg(COLORS.text)('\n'), fg(slotColor)(`[${slotLabel}]`));
+        this.inventoryText.content = new StyledText(chunks);
     }
 
     private updateMission(status: GameStatus): void {
-        const title = status.objectiveTitle.length > 22
-            ? status.objectiveTitle.slice(0, 22) + '..'
-            : status.objectiveTitle;
-
         if (status.objectivesComplete) {
-            this.missionText.content = t`${fg(COLORS.hpGood)('COMPLETE')}\n${fg(COLORS.textDim)(title)}`;
+            this.missionText.content = t`${fg(COLORS.hpGood)('COMPLETE')}`;
             return;
         }
 
         const completed = status.objectiveSteps.filter(s => s.completed).length;
         const total = status.objectiveTotal;
-        const barW = 10;
+        const barW = 18;
         const filled = total > 0 ? Math.round((completed / total) * barW) : 0;
         const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barW - filled);
+        const desc = status.objectiveCurrentDesc.length > 34
+            ? status.objectiveCurrentDesc.slice(0, 32) + '..'
+            : status.objectiveCurrentDesc;
 
-        this.missionText.content = t`${fg(COLORS.textDim)(title)}\n${fg(COLORS.title)(bar)} ${fg(COLORS.text)(`${String(completed)}/${String(total)}`)}\n${fg(COLORS.textDim)('F2: details')}`;
-    }
-
-    private updateAlerts(status: GameStatus): void {
-        if (status.activeEvents.length === 0) {
-            this.alertsPanel.visible = false;
-            return;
-        }
-
-        this.alertsPanel.visible = true;
-        this.alertsPanel.borderColor = COLORS.hpLow;
-
-        // Render each alert as two explicit lines to avoid awkward auto-wrapping (e.g. "(-5" / "HP/T)").
-        const lines: string[] = [];
-        for (const e of status.activeEvents) {
-            const label = e.type.replace(/_/g, ' ').toUpperCase();
-            const turns = `${String(e.turnsRemaining)}T`;
-            const hint = alertEffectHint(e.type, e.effect);
-            lines.push(`\u26A0 ${label}`);
-            lines.push(hint ? `  ${turns}  ${hint}` : `  ${turns}`);
-        }
-
-        // Box border consumes 2 rows (top+bottom). Keep enough room for our content lines.
-        this.alertsPanel.height = Math.max(4, lines.length + 2);
-        this.alertsText.content = t`${fg(COLORS.hpLow)(lines.join('\n'))}`;
+        this.missionText.content = t`${fg(COLORS.title)(bar)} ${fg(COLORS.text)(`${String(completed)}/${String(total)}`)}  ${fg(COLORS.textDim)('F2:more')}\n${fg(COLORS.textDim)(desc)}`;
     }
 
     // ─── F-Key Actions ────────────────────────────────────────────────────

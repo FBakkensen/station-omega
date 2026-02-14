@@ -98,8 +98,10 @@ function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
             const name = seg.speakerName ?? 'Unknown';
             return [bold(fg(HEADER_COLORS.dialogue)(name)), fg('#5a6a7a')('\n')];
         }
-        case 'thought':
-            return [italic(fg(HEADER_COLORS.thought)('\u00AB Thinking... \u00BB')), fg('#5a6a7a')('\n')];
+        case 'thought': {
+            const timeLabel = seg.missionTime ? `\u00AB ${seg.missionTime} \u00BB` : '\u00AB Thinking... \u00BB';
+            return [italic(fg(HEADER_COLORS.thought)(timeLabel)), fg('#5a6a7a')('\n')];
+        }
         case 'station_pa':
             return [bold(fg(HEADER_COLORS.station_pa)('[STATION PA]')), fg('#5a6a7a')('\n')];
         case 'crew_echo': {

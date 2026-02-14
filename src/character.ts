@@ -170,6 +170,7 @@ export function initializePlayerState(
         metrics,
         fieldSurgeryUsedInRoom: new Set<string>(),
         npcAllies: new Set<string>(),
+        missionElapsedMinutes: 0,
     };
 }
 

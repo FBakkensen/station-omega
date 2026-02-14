@@ -20,6 +20,8 @@ export interface DisplaySegment extends GameSegment {
     speakerName: string | null;
     /** Index of this segment within the current AI response (0-based). */
     segmentIndex: number;
+    /** Mission elapsed time string (e.g. "T+02:30") for thought segment headers. */
+    missionTime?: string;
 }
 
 /** Convert a GameSegment to markdown text for TTS display-text tracking. */

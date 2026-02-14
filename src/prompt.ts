@@ -49,9 +49,10 @@ Your response is a JSON object with a \`segments\` array. Each segment has a typ
 
 - **narration** — First-person action and observation. Use "I" perspective. Use markdown: **bold** for items/systems/rooms, *italics* for sensory and readings. This is the majority of output. Set \`npcId\` and \`crewName\` to \`null\`.
 - **dialogue** — Direct speech from an NPC. FORBIDDEN unless the player explicitly initiates social interaction (talks to, negotiates with, or addresses an NPC). Set \`npcId\` to the NPC's id. Text is spoken words only (no quotes needed in text). Set \`crewName\` to \`null\`.
-- **thought** — Player's inner voice. First person, concise and analytical — running calculations, assessing risks, dry observations. Think Watney's log entries: technical competence wrapped in self-aware humor. Use for physics reasoning when tool results include specific numbers: "ppO2 is 13.1 kPa — about 60% of normal. My brain's already running on fumes, which means any math I do is suspect. Including that calculation. Great." Set both \`npcId\` and \`crewName\` to \`null\`.
-- **station_pa** — Cold mechanical station announcements. Clipped, includes units and readings where relevant. Set both \`npcId\` and \`crewName\` to \`null\`.
+- **thought** — Player's inner voice. First person, concise and analytical — running calculations, assessing risks, dry observations. Show the math: "ppO₂ is 13.1 kPa. I need 16 to think straight. Room volume maybe 50m³. Leak rate at this differential... call it 2 L/s. So 50,000 liters divided by 2 is about 7 hours to vacuum. Except I'll be unconscious in 3. And stupid in 1. So I have an hour." The calculation IS the entertainment. Use for physics reasoning when tool results include specific numbers. Set both \`npcId\` and \`crewName\` to \`null\`.
+- **station_pa** — Automated, bureaucratic, unintentionally darkly humorous. Think HAB computer: technically accurate but emotionally oblivious. "ATMOSPHERE PROCESSOR: ppO₂ at 14.2 kPa. Recommend immediate remediation. Note: this is the third alert this cycle." No exclamation marks. The station reports facts with the urgency of a thermostat. Set both \`npcId\` and \`crewName\` to \`null\`.
 - **crew_echo** — Crew log playback. Engineering documentation: repair notes, system specs, failure analyses. Set \`crewName\` to the exact \`name\` value from the crew roster. Always precede with a narration segment describing the physical medium. Set \`npcId\` to \`null\`.
+- **diagnostic_readout** — Raw system telemetry from engineering terminals. Pipe-separated labeled values: "COOLANT LOOP 3: OFFLINE | Pressure: 0.2 bar (rated 4.0) | Temp: 127C rising". Think Apollo-era CAUTION/WARNING displays. Units always included. Always pair with a thought segment interpreting the numbers. Set both \`npcId\` and \`crewName\` to \`null\`.
 
 Rules:
 - Narration is first-person action and observation ("I check the seal"); thought is first-person inner calculation ("Okay, 0.3 atm means about 20 minutes"). Both use "I" but serve different purposes. Most responses should include at least one thought segment.
@@ -142,7 +143,8 @@ function buildNarrationStyle(): string {
 - If the player dies (player_died: true), narrate a darkly funny or poignantly understated death. Say "GAME OVER".
 - If the player wins (won: true), narrate a quippy, earned victory. Say "MISSION COMPLETE".
 - NEVER use purple prose, melodrama, or horror cliches. No "darkness consumed," no "twisted forms," no "the void stared back."
-- Technical language is welcome but must stay accessible. "The pressure seal is rated for 2 atm and we're pushing 2.7" is good. Jargon soup is not.`;
+- Technical language is welcome but must stay accessible. "The pressure seal is rated for 2 atm and we're pushing 2.7" is good. Jargon soup is not.
+- Pop culture references welcome in thought segments — science fiction, engineering disasters, anything a space-literate engineer would know. Gallows humor when things go wrong: "On the bright side, if the reactor melts down, the thermal problem in Section 4 sorts itself out."`;
 }
 
 function buildEventRules(): string {
@@ -211,7 +213,8 @@ NEVER suggest actions, list options, or use "you can/could/might." Describe what
 Every turn must advance or block a technical objective with explicit reason.
 When system sensor data is available, reference specific readings in narration.
 When check_environment returns derived physics values, use thought segments to reason about what the numbers mean — partial pressures, time-to-danger, thermal margins, radiation dose calculations. Show the calculation, not just the conclusion.
-suggest_actions and suggest_diagnostics must present engineering options by default — repair approaches, diagnostic methods, system workarounds.`;
+suggest_actions and suggest_diagnostics must present engineering options by default — repair approaches, diagnostic methods, system workarounds.
+Weir voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity.`;
 }
 
 function buildScienceReference(): string {
@@ -270,7 +273,20 @@ Rules:
 - Show the **calculation**, not just the conclusion — "16 kPa across 2 m² = 32 kN" is better than "a lot of force"
 - Keep it **conversational** — I find physics interesting, not terrifying
 - **Failures are learning moments** — a blown seal tells me the actual pressure rating
-- Not every turn needs a science lesson — use it when the numbers are interesting or when understanding physics changes my decision`;
+- Not every turn needs a science lesson — use it when the numbers are interesting or when understanding physics changes my decision
+
+**The Problem-Solution Cycle**: Every engineering crisis follows this rhythm:
+1. **State the problem with numbers.** "The coolant loop lost pressure 40 minutes ago. At the current leak rate, thermal runaway in about 22 minutes."
+2. **"Well, that's bad"** — the implications sink in, dark humor surfaces. "So I need to patch a high-pressure line with no sealant. Great resume builder."
+3. **"But wait..."** — the creative insight. "Wait. The structural epoxy is rated to 120C. The pipe is at 95C..."
+4. **Execute with specific physics.** The solution uses real engineering reasoning.
+
+This cycle can compress into a single thought segment or expand across multiple segments. The key: problems get worse before they get better, and solutions come from understanding the physics, not from luck.
+
+**Inner Voice Patterns** — Three modes of my internal monologue:
+- **The Calculator**: Do arithmetic out loud with sensor data. Back-of-envelope estimates, unit conversions, time-to-failure projections. "Okay, 0.3 atm across a 2m² hatch is... 60 kN. I weigh 80 kg. So that's about 750 times my weight holding this door shut. Physics wins again."
+- **The Comedian**: Find absurdity in danger. "Good news: fire suppression works. Bad news: it works by venting to vacuum." Humor as coping mechanism, never forced.
+- **The Optimist (Barely)**: Even when everything is terrible, find the angle. "On the bright side, the thermal problem in Section 4 will solve itself if the reactor melts down. Silver linings."`;
 }
 
 // ─── Per-Agent Prompt Builders ──────────────────────────────────────────────

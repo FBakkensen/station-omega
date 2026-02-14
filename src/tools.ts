@@ -13,6 +13,7 @@ import type {
 } from './types.js';
 import { getProficiencyModifier } from './character.js';
 import { CRAFT_RECIPES } from './data.js';
+import { computeEnvironment } from './environment.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1103,70 +1104,45 @@ export function createGameToolSets(classId: string): GameToolSets {
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
+            const env = computeEnvironment(room, state.activeEvents);
             const failures = room.systemFailures.filter(f => f.challengeState !== 'resolved');
-            const hasAtmo = failures.some(f => f.systemId === 'atmosphere_processor' || f.systemId === 'life_support');
-            const hasPressure = failures.some(f => f.systemId === 'pressure_seal');
-            const hasRad = failures.some(f => f.systemId === 'radiation_shielding');
-            const hasThermal = failures.some(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop');
-            const hasStructural = failures.some(f => f.systemId === 'structural_integrity');
 
-            // Raw sensor values
-            const atmoFailureCount = failures.filter(f => f.systemId === 'atmosphere_processor' || f.systemId === 'life_support').length;
-            const lifeSupportFailureCount = failures.filter(f => f.systemId === 'life_support').length;
-            const pressureFailureCount = failures.filter(f => f.systemId === 'pressure_seal').length;
-            const thermalFailureCount = failures.filter(f => f.systemId === 'thermal_regulator' || f.systemId === 'coolant_loop').length;
-            const radFailureCount = failures.filter(f => f.systemId === 'radiation_shielding').length;
-            const structuralFailureCount = failures.filter(f => f.systemId === 'structural_integrity').length;
-
-            const oxygenPct = hasAtmo ? Math.max(14, 21 - atmoFailureCount * 3) : 21;
-            const co2Ppm = hasAtmo ? 2200 + lifeSupportFailureCount * 800 : 400;
-            const pressureKpa = hasPressure ? 85 - pressureFailureCount * 8 : 101;
-            const temperatureC = hasThermal ? 38 + thermalFailureCount * 5 : 22;
-            const radiationMsv = hasRad ? 2.5 + radFailureCount * 3.5 : 0.1;
-            const structuralPct = hasStructural ? 70 - structuralFailureCount * 15 : 98;
-
-            // Derived physics — engine-computed values the AI can reference directly
-            const ppO2 = Math.round(oxygenPct / 100 * pressureKpa * 10) / 10;
-            const hypoxiaRisk: 'nominal' | 'warning' | 'critical' =
-                ppO2 < 12 ? 'critical' : ppO2 < 16 ? 'warning' : 'nominal';
-
-            const ppCO2 = Math.round(co2Ppm / 1e6 * pressureKpa * 1000) / 1000;
+            // Additional derived physics for the AI (beyond EnvironmentSnapshot)
+            const ppCO2 = Math.round(env.co2Ppm / 1e6 * env.pressureKpa * 1000) / 1000;
             const co2Risk: 'nominal' | 'elevated' | 'dangerous' | 'critical' =
-                co2Ppm >= 40000 ? 'critical' : co2Ppm >= 20000 ? 'dangerous' :
-                co2Ppm >= 5000 ? 'elevated' : 'nominal';
+                env.co2Ppm >= 40000 ? 'critical' : env.co2Ppm >= 20000 ? 'dangerous' :
+                env.co2Ppm >= 5000 ? 'elevated' : 'nominal';
 
-            // Clausius-Clapeyron approximation: T_boil ≈ 100 - 0.27 * (101.325 - P) for near-atmospheric
-            const boilingPointC = Math.round((100 - 0.27 * (101.325 - pressureKpa)) * 10) / 10;
+            const boilingPointC = Math.round((100 - 0.27 * (101.325 - env.pressureKpa)) * 10) / 10;
 
-            const radiationAnnualMsv = Math.round(radiationMsv * 8760 * 10) / 10;
+            const radiationAnnualMsv = Math.round(env.radiationMsv * 8760 * 10) / 10;
             const radiationCategory: 'background' | 'elevated' | 'exceeds_annual_limit' | 'lethal_hours' | 'lethal_minutes' =
-                radiationMsv >= 500 ? 'lethal_minutes' : radiationMsv >= 50 ? 'lethal_hours' :
+                env.radiationMsv >= 500 ? 'lethal_minutes' : env.radiationMsv >= 50 ? 'lethal_hours' :
                 radiationAnnualMsv > 50 ? 'exceeds_annual_limit' :
                 radiationAnnualMsv > 1 ? 'elevated' : 'background';
 
-            const pressureDiffKpa = Math.round((101.325 - pressureKpa) * 10) / 10;
-            // Rough suit leak estimate: ~0.5% per minute per 10 kPa differential
+            const pressureDiffKpa = Math.round((101.325 - env.pressureKpa) * 10) / 10;
             const suitLeakPctPerMin = Math.round(Math.max(0, pressureDiffKpa / 10 * 0.5) * 100) / 100;
 
             return JSON.stringify({
                 room_name: room.name,
                 atmosphere: {
-                    oxygen_pct: oxygenPct,
-                    co2_ppm: co2Ppm,
-                    pressure_kpa: pressureKpa,
+                    oxygen_pct: env.oxygenPct,
+                    co2_ppm: env.co2Ppm,
+                    pressure_kpa: env.pressureKpa,
                     contaminants: failures.some(f => f.failureMode === 'contamination') ? 'detected' : 'nominal',
                 },
-                temperature_c: temperatureC,
-                radiation_msv: radiationMsv,
-                structural_integrity_pct: structuralPct,
-                gravity_g: failures.some(f => f.systemId === 'gravity_generator') ? 0.6 : 1.0,
-                power_status: failures.some(f => f.systemId === 'power_relay') ? 'intermittent' : 'nominal',
-                system_failures_detected: failures.length,
+                temperature_c: env.temperatureC,
+                radiation_msv: env.radiationMsv,
+                structural_integrity_pct: env.structuralPct,
+                gravity_g: env.gravityG,
+                power_status: env.powerStatus,
+                system_failures_detected: env.activeFailureCount,
                 player_oxygen: state.oxygen,
                 player_suit_integrity: state.suitIntegrity,
                 derived: {
-                    o2_partial_pressure_kpa: ppO2,
-                    hypoxia_risk: hypoxiaRisk,
+                    o2_partial_pressure_kpa: env.ppO2,
+                    hypoxia_risk: env.hypoxiaRisk,
                     co2_partial_pressure_kpa: ppCO2,
                     co2_risk: co2Risk,
                     water_boiling_point_c: boilingPointC,

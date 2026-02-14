@@ -12,6 +12,7 @@ import type { GameContext, ChoiceSet } from './src/tools.js';
 import { buildOrchestratorPrompt } from './src/prompt.js';
 import { createAgents } from './src/agents.js';
 import { EventTracker, getEventContext } from './src/events.js';
+import { computeEnvironment, EnvironmentTracker } from './src/environment.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
 import { hasOpenAiKey, setOpenAiKey } from './src/env.js';
@@ -57,9 +58,16 @@ function randomStoryArc(): StoryArc {
     return STORY_ARCS[Math.floor(Math.random() * STORY_ARCS.length)];
 }
 
-function getStatus(state: GameState, station: GeneratedStation): GameStatus {
+function getStatus(state: GameState, station: GeneratedStation, envTracker?: EnvironmentTracker): GameStatus {
     const room = station.rooms.get(state.currentRoom);
     const roomKeys = [...station.rooms.keys()];
+
+    // Update environment readings if tracker is provided
+    let environment = envTracker?.current() ?? null;
+    if (envTracker && room) {
+        environment = envTracker.update(room, state.activeEvents);
+    }
+
     return {
         hp: state.hp,
         maxHp: state.maxHp,
@@ -96,6 +104,8 @@ function getStatus(state: GameState, station: GeneratedStation): GameStatus {
             { roomsVisited: state.roomsVisited, currentRoom: state.currentRoom, roomLootTaken: state.roomLootTaken },
             station.mapLayout,
         ),
+        environment,
+        missionElapsedMinutes: state.missionElapsedMinutes,
     };
 }
 
@@ -200,6 +210,7 @@ function resolveSegment(
     seg: { type: string; text: string; npcId: string | null; crewName: string | null },
     segmentIndex: number,
     station: GeneratedStation,
+    missionElapsedMinutes?: number,
 ): DisplaySegment {
     let speakerName: string | null = null;
     if (seg.type === 'dialogue' && seg.npcId) {
@@ -213,7 +224,16 @@ function resolveSegment(
     } else if (seg.type === 'crew_echo') {
         speakerName = seg.crewName ?? 'Unknown';
     }
-    return { ...seg, type: seg.type as DisplaySegment['type'], speakerName, segmentIndex };
+
+    // Set mission time on thought segments
+    let missionTime: string | undefined;
+    if (seg.type === 'thought' && missionElapsedMinutes !== undefined) {
+        const h = Math.floor(missionElapsedMinutes / 60);
+        const m = missionElapsedMinutes % 60;
+        missionTime = `T+${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    return { ...seg, type: seg.type as DisplaySegment['type'], speakerName, segmentIndex, missionTime };
 }
 
 // ─── Turn Context ───────────────────────────────────────────────────────────
@@ -221,6 +241,11 @@ function resolveSegment(
 /** Build dynamic per-turn context as a system message. Returns null if no context needed. */
 function buildTurnContext(state: GameState, station: GeneratedStation): string | null {
     const parts: string[] = [];
+
+    // Mission elapsed time
+    const hours = Math.floor(state.missionElapsedMinutes / 60);
+    const mins = state.missionElapsedMinutes % 60;
+    parts.push(`MISSION ELAPSED TIME: T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')} (Turn ${String(state.turnCount)})`);
 
     // Active events
     if (state.activeEvents.length > 0) {
@@ -265,9 +290,17 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
             );
             parts.push(`SYSTEM FAILURES:\n${failureLines.join('\n')}`);
         }
+
+        // Environment readings (matches sidebar display values)
+        const env = computeEnvironment(currentRoom, state.activeEvents);
+        parts.push(
+            `ENVIRONMENT: O₂ ${env.oxygenPct.toFixed(1)}% | CO₂ ${String(Math.round(env.co2Ppm))}ppm | ` +
+            `Pressure ${env.pressureKpa.toFixed(1)}kPa | Temp ${String(Math.round(env.temperatureC))}°C | ` +
+            `Rad ${env.radiationMsv.toFixed(1)}mSv | Structural ${String(Math.round(env.structuralPct))}%`
+        );
     }
 
-    return parts.length > 0 ? parts.join('\n\n') : null;
+    return parts.join('\n\n');
 }
 
 // ─── Guardrail Feedback ─────────────────────────────────────────────────────
@@ -343,6 +376,9 @@ async function runGameplay(
     // Event tracker
     const eventTracker = new EventTracker();
 
+    // Environment tracker (passive sensor readings for sidebar)
+    const envTracker = new EnvironmentTracker();
+
     // Configure TTS for this run
     ttsEngine.setNPCs(station.npcs);
     ttsEngine.setCrewRoster(station.crewRoster);
@@ -408,6 +444,7 @@ async function runGameplay(
     function tickTurn(): void {
         state.turnCount++;
         state.metrics.turnCount++;
+        state.missionElapsedMinutes += 15;
 
         // Tick active events
         const eventContext = eventTracker.tickActiveEvents(state);
@@ -528,7 +565,7 @@ async function runGameplay(
                                 // Extract complete segments from incremental JSON
                                 const segments = segmentParser.push(data.delta);
                                 for (const seg of segments) {
-                                    const display = resolveSegment(seg, segmentsRendered, station);
+                                    const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
                                     const chunks = segmentToStyledChunks(display);
                                     const headerChars = getHeaderCharCount(display);
                                     const bodyChars = countChunkChars(chunks) - headerChars;
@@ -547,7 +584,7 @@ async function runGameplay(
                         try {
                             const parsed = JSON.parse(rawJson) as GameResponse;
                             for (const seg of parsed.segments) {
-                                const display = resolveSegment(seg, segmentsRendered, station);
+                                const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
                                 const chunks = segmentToStyledChunks(display);
                                 const headerChars = getHeaderCharCount(display);
                                 const bodyChars = countChunkChars(chunks) - headerChars;
@@ -591,7 +628,7 @@ async function runGameplay(
                 }
 
                 // Post-stream finalization
-                ui.updateStatus(getStatus(state, station));
+                ui.updateStatus(getStatus(state, station, envTracker));
 
                 const afterStream = () => {
                     debugLog('SESSION', 'afterStream — calling finalizeAllCards');
@@ -631,7 +668,7 @@ async function runGameplay(
             ttsEngine.stop();
             ui.discardTurnCards();
             ui.hideTypingIndicator();
-            ui.updateStatus(getStatus(state, station));
+            ui.updateStatus(getStatus(state, station, envTracker));
             ui.appendNarrative(
                 '*Static crackles through the comms. The station systems are unresponsive. Try again.*'
             );
@@ -640,7 +677,7 @@ async function runGameplay(
 
     // Update UI
     ui.setSlashCommands(getSlashCommands(state, station, ttsEngine));
-    ui.updateStatus(getStatus(state, station));
+    ui.updateStatus(getStatus(state, station, envTracker));
 
     // Show voice hint if no API key is set
     if (!ttsEngine.hasApiKey()) {

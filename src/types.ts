@@ -1,4 +1,5 @@
 import type { TextChunk } from '@opentui/core';
+import type { EnvironmentReadout } from './environment.js';
 
 // ─── Story & World Configuration ────────────────────────────────────────────
 
@@ -417,6 +418,7 @@ export interface GameState {
     metrics: RunMetrics;
     fieldSurgeryUsedInRoom: Set<string>;
     npcAllies: Set<string>;
+    missionElapsedMinutes: number;
 }
 
 export interface GameStatus {
@@ -442,6 +444,8 @@ export interface GameStatus {
     objectiveSteps: Array<{ description: string; completed: boolean }>;
     mapText: TextChunk[];
     systemFailures: Array<{ systemId: SystemId; status: SystemStatus; challengeState: ChallengeState; severity: 1 | 2 | 3; turnsUntilCascade: number }>;
+    environment: EnvironmentReadout | null;
+    missionElapsedMinutes: number;
 }
 
 // ─── Slash Commands (for TUI) ───────────────────────────────────────────────

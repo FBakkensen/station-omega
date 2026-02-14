@@ -95,9 +95,9 @@ export interface SystemFailure {
     requiredMaterials: string[];
     requiredSkill: ActionDomain;
     difficulty: ActionDifficulty;
-    turnsUntilCascade: number;
+    minutesUntilCascade: number;
     cascadeTarget: string | null;
-    hazardPerTurn: number;
+    hazardPerMinute: number;
     diagnosisHint: string;
     technicalDetail: string;
     mitigationPaths: string[];
@@ -110,9 +110,9 @@ export interface SystemFailureSkeleton {
     requiredMaterials: string[];
     requiredSkill: ActionDomain;
     difficulty: ActionDifficulty;
-    turnsUntilCascade: number;
+    minutesUntilCascade: number;
     cascadeTarget: string | null;
-    hazardPerTurn: number;
+    hazardPerMinute: number;
     diagnosisHint: string;
     mitigationPaths: string[];
 }
@@ -330,8 +330,9 @@ export type EventType = 'hull_breach' | 'power_failure' | 'distress_signal' | 'r
 export interface ActiveEvent {
     type: EventType;
     description: string;
-    turnsRemaining: number;
+    minutesRemaining: number;
     effect: string;
+    resolutionHint: string;
 }
 
 // ─── Run Metrics & Scoring ──────────────────────────────────────────────────
@@ -344,6 +345,7 @@ export interface RunMetrics {
     startTime: number;
     endTime: number | null;
     turnCount: number;
+    missionElapsedMinutes: number;
     moveCount: number;
     totalDamageTaken: number;
     totalDamageHealed: number;
@@ -435,7 +437,7 @@ export interface GameStatus {
     characterClass: CharacterClassId;
     turnCount: number;
     maxInventory: number;
-    activeEvents: Array<{ type: string; turnsRemaining: number; effect: string }>;
+    activeEvents: Array<{ type: string; minutesRemaining: number; effect: string }>;
     objectiveTitle: string;
     objectiveStep: number;
     objectiveTotal: number;
@@ -443,7 +445,7 @@ export interface GameStatus {
     objectivesComplete: boolean;
     objectiveSteps: Array<{ description: string; completed: boolean }>;
     mapText: TextChunk[];
-    systemFailures: Array<{ systemId: SystemId; status: SystemStatus; challengeState: ChallengeState; severity: 1 | 2 | 3; turnsUntilCascade: number }>;
+    systemFailures: Array<{ systemId: SystemId; status: SystemStatus; challengeState: ChallengeState; severity: 1 | 2 | 3; minutesUntilCascade: number }>;
     environment: EnvironmentReadout | null;
     missionElapsedMinutes: number;
 }

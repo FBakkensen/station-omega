@@ -5,8 +5,9 @@ const HISTORY_PATH = 'run-history.json';
 const MAX_HISTORY = 50;
 
 export function computeScore(metrics: RunMetrics, totalRooms: number): RunScore {
-    const parTurns = metrics.won ? 30 : 15;
-    const speed = Math.max(0, Math.min(100, 100 - (metrics.turnCount - parTurns) * 3));
+    // Speed scoring: based on in-game mission elapsed time (minutes)
+    const parMinutes = metrics.won ? 180 : 90;
+    const speed = Math.max(0, Math.min(100, 100 - Math.floor((metrics.missionElapsedMinutes - parMinutes) / 5) * 3));
 
     // Engineering efficiency: systems diagnosed + repaired, minimal cascades, improvised solutions
     const totalSystems = metrics.systemsDiagnosed + metrics.systemsRepaired;

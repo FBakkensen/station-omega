@@ -199,12 +199,12 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
 
         for (const template of selected) {
             const failureMode = rng.pick(template.failureModes);
-            const turnsUntilCascade = severity === 1 ? 0 : (severity === 2 ? rng.nextInt(6, 10) : rng.nextInt(3, 6));
-            const hazardPerTurn = severity === 1 ? 0 : (severity === 2 ? 2 : 5);
+            const minutesUntilCascade = severity === 1 ? 0 : (severity === 2 ? rng.nextInt(60, 120) : rng.nextInt(30, 60));
+            const hazardPerMinute = severity === 1 ? 0 : (severity === 2 ? 0.2 : 0.5);
 
             // Pick a cascade target (adjacent room, if cascade timer is set)
             let cascadeTarget: string | null = null;
-            if (turnsUntilCascade > 0 && room.connections.length > 0) {
+            if (minutesUntilCascade > 0 && room.connections.length > 0) {
                 const candidates = room.connections.filter(id => id !== entryRoomId);
                 if (candidates.length > 0) {
                     cascadeTarget = rng.pick(candidates);
@@ -218,9 +218,9 @@ export function generateSkeleton(config: RunConfig): StationSkeleton {
                 requiredMaterials: [...template.requiredMaterials],
                 requiredSkill: template.requiredSkill,
                 difficulty,
-                turnsUntilCascade,
+                minutesUntilCascade,
                 cascadeTarget,
-                hazardPerTurn,
+                hazardPerMinute,
                 diagnosisHint: template.diagnosisHint,
                 mitigationPaths: [...template.mitigationPaths],
             };

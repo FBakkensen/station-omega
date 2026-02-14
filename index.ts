@@ -82,7 +82,7 @@ function getStatus(state: GameState, station: GeneratedStation, envTracker?: Env
         oxygen: state.oxygen,
         maxOxygen: state.maxOxygen,
         suitIntegrity: state.suitIntegrity,
-        activeEvents: state.activeEvents.map(e => ({ type: e.type, turnsRemaining: e.turnsRemaining, effect: e.effect })),
+        activeEvents: state.activeEvents.map(e => ({ type: e.type, minutesRemaining: e.minutesRemaining, effect: e.effect })),
         objectiveTitle: station.objectives.title,
         objectiveStep: station.objectives.currentStepIndex,
         objectiveTotal: station.objectives.steps.length,
@@ -97,7 +97,7 @@ function getStatus(state: GameState, station: GeneratedStation, envTracker?: Env
             status: f.status,
             challengeState: f.challengeState,
             severity: f.severity,
-            turnsUntilCascade: f.turnsUntilCascade,
+            minutesUntilCascade: f.minutesUntilCascade,
         })),
         mapText: renderMapStyled(
             station,
@@ -245,7 +245,7 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
     // Mission elapsed time
     const hours = Math.floor(state.missionElapsedMinutes / 60);
     const mins = state.missionElapsedMinutes % 60;
-    parts.push(`MISSION ELAPSED TIME: T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')} (Turn ${String(state.turnCount)})`);
+    parts.push(`MISSION ELAPSED TIME: T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`);
 
     // Active events
     if (state.activeEvents.length > 0) {
@@ -286,7 +286,7 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
         const activeFailures = currentRoom.systemFailures.filter(f => f.challengeState !== 'resolved' && f.challengeState !== 'failed');
         if (activeFailures.length > 0) {
             const failureLines = activeFailures.map(f =>
-                `- ${f.systemId} [${f.status}/${f.challengeState}] sev=${String(f.severity)} cascade=${String(f.turnsUntilCascade)}T`
+                `- ${f.systemId} [${f.status}/${f.challengeState}] sev=${String(f.severity)} cascade=${String(Math.round(f.minutesUntilCascade))}min`
             );
             parts.push(`SYSTEM FAILURES:\n${failureLines.join('\n')}`);
         }
@@ -389,6 +389,7 @@ async function runGameplay(
         station,
         build,
         onChoices: (cs) => { pendingChoices = cs; },
+        turnElapsedMinutes: 0,
     };
 
     const toolSets = createGameToolSets(classId);
@@ -441,13 +442,16 @@ async function runGameplay(
     let lastResponseId: string | undefined;
     let turnId = 0;
 
-    function tickTurn(): void {
+    /** Advance time after AI run completes. Tools accumulate elapsed minutes in gameCtx.turnElapsedMinutes. */
+    function tickTime(): void {
+        const elapsed = Math.max(1, gameCtx.turnElapsedMinutes);
+        state.missionElapsedMinutes += elapsed;
+        state.metrics.missionElapsedMinutes = state.missionElapsedMinutes;
         state.turnCount++;
         state.metrics.turnCount++;
-        state.missionElapsedMinutes += 15;
 
-        // Tick active events
-        const eventContext = eventTracker.tickActiveEvents(state);
+        // Tick active events with proportional damage
+        const eventContext = eventTracker.tickActiveEvents(state, elapsed);
 
         // Check for new random event
         const newEvent = eventTracker.checkRandomEvent(state);
@@ -456,13 +460,13 @@ async function runGameplay(
             eventContext.push(`NEW EVENT: ${newEvent.type.replace(/_/g, ' ').toUpperCase()} — ${newEvent.effect}`);
         }
 
-        // Tick cascade timers on system failures across the station
-        const cascadeContext = eventTracker.tickCascadeTimers(state, station);
+        // Tick cascade timers with proportional time
+        const cascadeContext = eventTracker.tickCascadeTimers(state, station, elapsed);
         eventContext.push(...cascadeContext);
 
         // Log event context for debugging
         if (eventContext.length > 0) {
-            debugLog('EVENTS', eventContext.join('\n'));
+            debugLog('EVENTS', `[${String(elapsed)} min elapsed]\n${eventContext.join('\n')}`);
         }
     }
 
@@ -517,7 +521,8 @@ async function runGameplay(
                     ui.discardTurnCards();
                 }
 
-                tickTurn();
+                // Reset elapsed time accumulator — tools will add their durations during the AI run
+                gameCtx.turnElapsedMinutes = 0;
 
                 // Build per-turn context as a system message (dynamic state the AI interprets)
                 const turnContext = buildTurnContext(state, station);
@@ -607,6 +612,9 @@ async function runGameplay(
 
                     // Capture response ID for conversation chaining
                     lastResponseId = stream.lastResponseId;
+
+                    // Advance time based on accumulated tool durations (after AI run)
+                    tickTime();
                 } catch (err: unknown) {
                     if (err instanceof OutputGuardrailTripwireTriggered && attempt === 0) {
                         const issues = (err.result.output.outputInfo as { issues: string[] }).issues;

@@ -1,12 +1,15 @@
 import type {
     ActionDifficulty,
+    ActiveEvent,
     CharacterBuild,
     CharacterClassId,
     Difficulty,
     Disposition,
     FailureMode,
+    GameState,
     ItemEffect,
     ItemSkeleton,
+    Room,
     RoomArchetype,
     StoryArc,
     SystemId,
@@ -288,3 +291,84 @@ export const NPC_APPROACH_BASE_CHANCE: Readonly<Record<Disposition, number>> = {
     friendly: 85,
     fearful: 75,
 } as const;
+
+// ─── Action Duration Tables (time-based system) ────────────────────────────
+
+/** Base duration in minutes for each tool under ideal conditions. */
+export const BASE_DURATIONS: Readonly<Record<string, number>> = {
+    look_around: 2,
+    move_to: 3,
+    pick_up_item: 1,
+    use_item: 2,
+    attempt_action: 5,
+    interact_npc: 3,
+    diagnose_system: 5,
+    stabilize_hazard: 8,
+    repair_system: 12,
+    improvise_repair: 10,
+    craft_item: 8,
+    check_environment: 1,
+    analyze_item: 2,
+    bypass_system: 5,
+    field_surgery: 8,
+    crisis_assessment: 3,
+    complete_objective: 1,
+    // Zero-time tools
+    record_moral_choice: 0,
+    suggest_actions: 0,
+    suggest_interactions: 0,
+    suggest_diagnostics: 0,
+} as const;
+
+/** Time multiplier per active event type (environmental conditions). */
+export const EVENT_TIME_MULTIPLIERS: Readonly<Record<string, number>> = {
+    power_failure: 1.5,
+    hull_breach: 1.3,
+    coolant_leak: 1.4,
+    radiation_spike: 1.2,
+    atmosphere_alarm: 1.2,
+} as const;
+
+/** Time multiplier per action difficulty level. */
+export const DIFFICULTY_TIME_MULTIPLIERS: Readonly<Record<ActionDifficulty, number>> = {
+    trivial: 1.0,
+    easy: 1.2,
+    moderate: 1.5,
+    hard: 2.0,
+    extreme: 3.0,
+    impossible: 3.0,
+} as const;
+
+/**
+ * Compute how many minutes an action takes given the tool, player state,
+ * active events, current room, and optional difficulty.
+ */
+export function computeActionMinutes(
+    toolName: string,
+    state: GameState,
+    activeEvents: ActiveEvent[],
+    room: Room,
+    difficulty?: ActionDifficulty,
+): number {
+    let minutes = BASE_DURATIONS[toolName] ?? 1;
+
+    // Difficulty scaling (for tools that pass a difficulty)
+    if (difficulty) minutes *= DIFFICULTY_TIME_MULTIPLIERS[difficulty];
+
+    // Environmental modifiers from active events
+    for (const event of activeEvents) {
+        minutes *= EVENT_TIME_MULTIPLIERS[event.type] ?? 1.0;
+    }
+
+    // Player condition modifiers
+    if (state.suitIntegrity < 50) minutes *= 1.3;
+    if (state.hp / state.maxHp < 0.3) minutes *= 1.4;
+
+    // Room hazard modifiers — each active system failure adds friction
+    const activeFailures = room.systemFailures.filter(f =>
+        f.challengeState !== 'resolved' && f.challengeState !== 'failed'
+    );
+    minutes *= Math.pow(1.1, activeFailures.length);
+
+    return Math.round(minutes);
+}

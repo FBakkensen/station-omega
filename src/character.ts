@@ -119,6 +119,7 @@ export function initializePlayerState(
         startTime: Date.now(),
         endTime: null,
         turnCount: 0,
+        missionElapsedMinutes: 0,
         moveCount: 0,
         totalDamageTaken: 0,
         totalDamageHealed: 0,

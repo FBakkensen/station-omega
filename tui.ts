@@ -125,18 +125,18 @@ function formatDuration(ms: number): string {
     return `${String(min)}m ${String(sec)}s`;
 }
 
-function alertEffectHint(type: string, effect: string): string {
-    // Keep this short; the alerts panel has limited width and height.
+function alertEffectHint(type: string, _effect: string): string {
+    // Descriptive labels — no turn-based rates
     switch (type) {
-        case 'hull_breach': return '-5 SUIT/T';
-        case 'radiation_spike': return '-3 HP/T';
-        case 'power_failure': return 'SENSORS DOWN';
-        case 'atmosphere_alarm': return '-2 O2/T';
-        case 'coolant_leak': return 'CASCADE';
-        case 'structural_alert': return '-5 SUIT/T';
+        case 'hull_breach': return 'DECOMPRESSION';
+        case 'radiation_spike': return 'RADIATION';
+        case 'power_failure': return 'DARK';
+        case 'atmosphere_alarm': return 'LOW O\u2082';
+        case 'coolant_leak': return 'SLIP HAZARD';
+        case 'structural_alert': return 'DEBRIS';
         case 'distress_signal': return 'NEW PATH';
         case 'supply_cache': return 'SUPPLIES';
-        default: return effect ? effect.toUpperCase() : '';
+        default: return _effect ? _effect.toUpperCase() : '';
     }
 }
 
@@ -1576,7 +1576,10 @@ export class GameUI {
         const hpColor = hpPct >= 0.6 ? COLORS.hpGood : hpPct >= 0.25 ? COLORS.hpMid : COLORS.hpLow;
         const inv = status.inventory.length > 0 ? status.inventory.join(', ') : 'empty';
         const cls = classIcon(status.characterClass);
-        this.compactStatusText.content = t`${fg(hpColor)(`HP ${String(status.hp)}/${String(status.maxHp)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`${cls} ${status.roomName}`)} ${fg(COLORS.textDim)(`(${String(status.roomIndex)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.textDim)(`T${String(status.turnCount)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
+        const hours = Math.floor(status.missionElapsedMinutes / 60);
+        const mins = status.missionElapsedMinutes % 60;
+        const met = `T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+        this.compactStatusText.content = t`${fg(hpColor)(`HP ${String(status.hp)}/${String(status.maxHp)}`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`${cls} ${status.roomName}`)} ${fg(COLORS.textDim)(`(${String(status.roomIndex)}/${String(status.totalRooms)})`)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.textDim)(met)}  ${fg(COLORS.textDim)('|')}  ${fg(COLORS.text)(`Inv: ${inv}`)}`;
     }
 
     private updateAtmosphere(status: GameStatus): void {
@@ -1687,12 +1690,14 @@ export class GameUI {
 
             const dots = challengeDots(f.challengeState);
             let trail: string;
-            if (f.turnsUntilCascade <= 3) {
-                trail = `\u26A1${String(f.turnsUntilCascade)}T`;
+            if (f.minutesUntilCascade > 0 && f.minutesUntilCascade <= 30) {
+                trail = `\u26A1${String(Math.round(f.minutesUntilCascade))}m`;
+            } else if (f.minutesUntilCascade > 30) {
+                trail = `${String(Math.round(f.minutesUntilCascade))}m`;
             } else {
                 trail = dots;
             }
-            const trailColor = f.turnsUntilCascade <= 3 ? COLORS.hpLow : COLORS.textDim;
+            const trailColor = f.minutesUntilCascade > 0 && f.minutesUntilCascade <= 30 ? COLORS.hpLow : COLORS.textDim;
 
             lines.push([
                 fg(COLORS.text)(abbrev.padEnd(8)),
@@ -1723,11 +1728,11 @@ export class GameUI {
             const e = status.activeEvents[i];
             if (i > 0) chunks.push(fg(COLORS.text)('\n'));
             const label = e.type.replace(/_/g, ' ').toUpperCase();
-            const turns = `${String(e.turnsRemaining)}T left`;
+            const timeLeft = `${String(e.minutesRemaining)}m`;
             const hint = alertEffectHint(e.type, e.effect);
             chunks.push(
                 fg(COLORS.hpLow)(label.padEnd(24)),
-                fg(COLORS.hpMid)(turns),
+                fg(COLORS.hpMid)(timeLeft),
                 fg(COLORS.text)('\n'),
                 fg(COLORS.textDim)(`  ${hint}`),
             );

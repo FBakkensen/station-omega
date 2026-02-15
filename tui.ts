@@ -1011,12 +1011,24 @@ export class GameUI {
                 if (!selected) return;
                 resolve(selected.value as 'openrouter_key' | 'inworld_key' | 'voice_toggle' | 'back');
             });
+
+            const handleEsc = (key: KeyEvent) => {
+                if (key.name === 'escape' && menu.focused) {
+                    resolve('back');
+                }
+            };
+            this.renderer.keyInput.on('keypress', handleEsc);
+
+            const cleanup = () => {
+                this.renderer.keyInput.off('keypress', handleEsc);
+            };
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, cleanup);
         });
     }
 
     // ─── Character Select Screen ────────────────────────────────────────────
 
-    showCharacterSelect(builds: ReadonlyMap<CharacterClassId, CharacterBuild> = CHARACTER_BUILDS): Promise<CharacterClassId> {
+    showCharacterSelect(builds: ReadonlyMap<CharacterClassId, CharacterBuild> = CHARACTER_BUILDS): Promise<CharacterClassId | null> {
         this.clearLayout();
 
         const header = new TextRenderable(this.renderer, {
@@ -1107,11 +1119,23 @@ export class GameUI {
 
         return new Promise((resolve) => {
             menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
-                clearInterval(pollInterval);
                 const selected = menu.getSelectedOption();
                 if (!selected) return;
                 resolve(selected.value as CharacterClassId);
             });
+
+            const handleEsc = (key: KeyEvent) => {
+                if (key.name === 'escape' && menu.focused) {
+                    clearInterval(pollInterval);
+                    resolve(null);
+                }
+            };
+            this.renderer.keyInput.on('keypress', handleEsc);
+
+            const cleanup = () => {
+                this.renderer.keyInput.off('keypress', handleEsc);
+            };
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, cleanup);
         });
     }
 
@@ -1345,7 +1369,7 @@ export class GameUI {
         container.add(new TextRenderable(this.renderer, { id: 'history-spacer2', content: ' ' }));
         const hint = new TextRenderable(this.renderer, {
             id: 'history-hint',
-            content: t`${fg(COLORS.textDim)('Press Enter to return...')}`,
+            content: t`${fg(COLORS.textDim)('Press Enter or ESC to return...')}`,
         });
         container.add(hint);
 
@@ -1364,6 +1388,13 @@ export class GameUI {
             tempInput.on(InputRenderableEvents.ENTER, () => {
                 resolve();
             });
+            tempInput.handleKeyPress = (key: KeyEvent): boolean => {
+                if (key.name === 'escape') {
+                    resolve();
+                    return true;
+                }
+                return false;
+            };
         });
     }
 

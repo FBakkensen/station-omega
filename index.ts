@@ -816,6 +816,9 @@ async function main() {
 
         // CHARACTER SELECT
         const classId = await ui.showCharacterSelect(CHARACTER_BUILDS);
+        if (!classId) {
+            continue;
+        }
 
         // Guard: OpenRouter key must be set before starting a run
         if (!hasOpenRouterKey()) {

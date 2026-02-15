@@ -30,6 +30,7 @@ import type {
     SlashCommandDef,
 } from './src/types.js';
 import { CHARACTER_BUILDS } from './src/character.js';
+import type { SavedStationMeta } from './src/station-storage.js';
 import type { DisplaySegment } from './src/schema.js';
 import type { TrendDirection } from './src/environment.js';
 import {
@@ -1134,6 +1135,161 @@ export class GameUI {
 
             const cleanup = () => {
                 this.renderer.keyInput.off('keypress', handleEsc);
+            };
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, cleanup);
+        });
+    }
+
+    // ─── Station Picker Screen ─────────────────────────────────────────────
+
+    showStationPicker(savedStations: SavedStationMeta[]): Promise<{ type: 'new' } | { type: 'saved'; id: string } | null> {
+        this.clearLayout();
+
+        const header = new TextRenderable(this.renderer, {
+            id: 'station-header',
+            content: t`${bold(fg(COLORS.title)('SELECT MISSION'))}`,
+        });
+
+        const options: Array<{ name: string; description: string; value: string }> = [
+            {
+                name: '[+] Generate New Station',
+                description: 'Create a fresh station with AI-generated content',
+                value: '__new__',
+            },
+        ];
+        for (const s of savedStations) {
+            const date = new Date(s.savedAt).toLocaleDateString();
+            options.push({
+                name: s.stationName,
+                description: `${s.difficulty.toUpperCase()} | ${date} — ${s.briefing.slice(0, 80)}`,
+                value: s.id,
+            });
+        }
+
+        const menu = new SelectRenderable(this.renderer, {
+            id: 'station-menu',
+            options,
+            height: Math.min(options.length * 2, 14),
+            selectedBackgroundColor: '#1e3a5f',
+            selectedTextColor: '#00e5ff',
+            textColor: COLORS.text,
+            backgroundColor: COLORS.bg,
+            wrapSelection: true,
+            showDescription: true,
+        });
+
+        const previewText = new TextRenderable(this.renderer, {
+            id: 'station-preview',
+            content: t`${fg(COLORS.textDim)('Select a station to see details')}`,
+        });
+
+        const updatePreview = () => {
+            const selected = menu.getSelectedOption();
+            if (!selected) return;
+            if (selected.value === '__new__') {
+                previewText.content = t`${fg(COLORS.text)('Generate a brand new station using the AI pipeline.')}\n${fg(COLORS.textDim)('This may take 30-60 seconds.')}`;
+                return;
+            }
+            const station = savedStations.find(s => s.id === selected.value);
+            if (!station) return;
+            const date = new Date(station.savedAt).toLocaleDateString();
+            previewText.content = t`${fg(COLORS.title)(station.stationName)}\n${fg(COLORS.text)(station.briefing)}\n\n${fg(COLORS.textDim)(`Difficulty: ${station.difficulty.toUpperCase()} | Saved: ${date}`)}\n${fg(COLORS.textDim)('Press D to delete this station')}`;
+        };
+
+        let lastSelectedIdx = -1;
+        const pollInterval = setInterval(() => {
+            const opt = menu.getSelectedOption();
+            if (!opt) return;
+            const idx = options.findIndex(o => o.value === opt.value);
+            if (idx !== lastSelectedIdx) {
+                lastSelectedIdx = idx;
+                updatePreview();
+            }
+        }, 100);
+
+        updatePreview();
+
+        const hintText = savedStations.length > 0
+            ? 'Enter: Select | D: Delete | ESC: Back'
+            : 'Enter: Select | ESC: Back';
+
+        const container = new BoxRenderable(this.renderer, {
+            id: 'station-container',
+            flexDirection: 'column',
+            width: '100%',
+            height: '100%',
+            backgroundColor: COLORS.bg,
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            paddingTop: 2,
+            paddingLeft: 3,
+            paddingRight: 3,
+        });
+        container.add(header);
+        container.add(new TextRenderable(this.renderer, { id: 'station-spacer1', content: ' ' }));
+        container.add(menu);
+        container.add(new TextRenderable(this.renderer, { id: 'station-spacer2', content: ' ' }));
+
+        const previewBox = new BoxRenderable(this.renderer, {
+            id: 'station-preview-box',
+            borderStyle: 'rounded',
+            borderColor: COLORS.border,
+            backgroundColor: COLORS.panelBg,
+            paddingLeft: 2,
+            paddingRight: 2,
+            paddingTop: 1,
+            paddingBottom: 1,
+            width: '100%',
+        });
+        previewBox.add(previewText);
+        container.add(previewBox);
+
+        container.add(new TextRenderable(this.renderer, {
+            id: 'station-hint',
+            content: t`${fg(COLORS.textDim)(hintText)}`,
+        }));
+
+        this.layoutRoot.add(container);
+        menu.focus();
+
+        return new Promise((resolve) => {
+            let resolved = false;
+
+            menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+                if (resolved) return;
+                const selected = menu.getSelectedOption();
+                if (!selected) return;
+                resolved = true;
+                clearInterval(pollInterval);
+                if (selected.value === '__new__') {
+                    resolve({ type: 'new' });
+                } else {
+                    resolve({ type: 'saved', id: selected.value as string });
+                }
+            });
+
+            const handleKey = (key: KeyEvent) => {
+                if (resolved) return;
+                if (key.name === 'escape' && menu.focused) {
+                    resolved = true;
+                    clearInterval(pollInterval);
+                    this.renderer.keyInput.off('keypress', handleKey);
+                    resolve(null);
+                } else if ((key.name === 'd' || key.name === 'D') && menu.focused) {
+                    const selected = menu.getSelectedOption();
+                    if (!selected || selected.value === '__new__') return;
+                    const selectedId = selected.value as string;
+                    // Signal deletion — caller handles actual file deletion and re-shows picker
+                    resolved = true;
+                    clearInterval(pollInterval);
+                    this.renderer.keyInput.off('keypress', handleKey);
+                    resolve({ type: 'saved', id: `__delete__${selectedId}` });
+                }
+            };
+            this.renderer.keyInput.on('keypress', handleKey);
+
+            const cleanup = () => {
+                this.renderer.keyInput.off('keypress', handleKey);
             };
             menu.on(SelectRenderableEvents.ITEM_SELECTED, cleanup);
         });

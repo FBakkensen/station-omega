@@ -18,6 +18,7 @@ import { validateGameResponse, buildGuardrailFeedback, validateStateConsistency 
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
 import { hasOpenRouterKey, setOpenRouterKey } from './src/env.js';
+import { listSavedStations, saveStation, loadStation, deleteStation } from './src/station-storage.js';
 import { GameResponseSchema } from './src/schema.js';
 import type { DisplaySegment, GameResponse } from './src/schema.js';
 import { StreamingSegmentParser } from './src/json-stream-parser.js';
@@ -823,21 +824,61 @@ async function main() {
             await setOpenRouterKey(key);
         }
 
-        // CHARACTER SELECT
+        // STATION PICKER (with delete loop)
+        let stationChoice: { type: 'new' } | { type: 'saved'; id: string } | null = null;
+        let stationPickerDone = false;
+        while (!stationPickerDone) {
+            const savedStations = listSavedStations();
+            const pick = await ui.showStationPicker(savedStations);
+            if (!pick) {
+                // ESC → back to title
+                stationPickerDone = true;
+                break;
+            }
+            // Handle delete: id prefixed with __delete__
+            if (pick.type === 'saved' && pick.id.startsWith('__delete__')) {
+                const deleteId = pick.id.slice('__delete__'.length);
+                const meta = savedStations.find(s => s.id === deleteId);
+                const name = meta?.stationName ?? 'station';
+                await ui.showBriefMessage(`Deleted: ${name}`);
+                deleteStation(deleteId);
+                continue; // Re-show picker
+            }
+            stationChoice = pick;
+            stationPickerDone = true;
+        }
+        if (!stationChoice) {
+            continue; // ESC → back to title
+        }
+
+        // CHARACTER SELECT (always, regardless of new/saved)
         const classId = await ui.showCharacterSelect(CHARACTER_BUILDS);
         if (!classId) {
             continue;
         }
 
-        // GENERATING
-        ui.showGenerating();
+        let station: GeneratedStation;
 
-        const { skeleton, creative } = await generateStation(
-            { difficulty: 'normal', characterClass: classId, model: creativeModel, providerOptions: anthropicDirect },
-            (message) => { ui.updateLoadingMessage(message); },
-            debugLog,
-        );
-        const station = assembleStation(skeleton, creative);
+        if (stationChoice.type === 'new') {
+            // GENERATE NEW STATION
+            ui.showGenerating();
+            const { skeleton, creative } = await generateStation(
+                { difficulty: 'normal', characterClass: classId, model: creativeModel, providerOptions: anthropicDirect },
+                (message) => { ui.updateLoadingMessage(message); },
+                debugLog,
+            );
+            station = assembleStation(skeleton, creative);
+            saveStation(station); // Auto-save after generation
+        } else {
+            // LOAD SAVED STATION
+            const loaded = loadStation(stationChoice.id);
+            if (!loaded) {
+                await ui.showBriefMessage('Failed to load station. File may be corrupt.');
+                continue;
+            }
+            station = loaded;
+            station.config.characterClass = classId; // Override class for replayability
+        }
 
         // GAMEPLAY
         ui.showGameplayScreen();

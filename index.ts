@@ -814,15 +814,22 @@ async function main() {
             continue;
         }
 
+        // NEW RUN - check for API key first
+        if (!hasOpenRouterKey()) {
+            const key = await ui.showApiKeyEntry({
+                title: 'OPENROUTER API KEY',
+                description: 'Enter your OpenRouter API key to start a new run.',
+                placeholder: 'sk-or-...',
+            });
+            if (!key) {
+                continue;
+            }
+            await setOpenRouterKey(key);
+        }
+
         // CHARACTER SELECT
         const classId = await ui.showCharacterSelect(CHARACTER_BUILDS);
         if (!classId) {
-            continue;
-        }
-
-        // Guard: OpenRouter key must be set before starting a run
-        if (!hasOpenRouterKey()) {
-            await ui.showBriefMessage('OpenRouter API key is required. Please configure it in Settings.');
             continue;
         }
 

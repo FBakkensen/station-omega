@@ -11,7 +11,7 @@ import type {
     StartingItemCreative,
 } from './types.js';
 
-const CREATIVE_PROMPT = `# Identity
+export const CREATIVE_PROMPT = `# Identity
 
 You are a creative content generator for a sci-fi engineering survival adventure with dry humor, set on a derelict space station with cascading system failures.
 
@@ -48,7 +48,7 @@ The skeleton data includes the starting room archetype (depth 0) and the player'
   - The item must NOT duplicate the character's class starting item (provided in skeleton data)`;
 
 /** Zod schema for structured output — guarantees valid JSON. */
-const CreativeOutputSchema = z.object({
+export const CreativeOutputSchema = z.object({
     stationName: z.string(),
     briefing: z.string(),
     backstory: z.string(),
@@ -145,7 +145,7 @@ interface CreativeSchemaPartial {
     };
 }
 
-function buildSkeletonSummary(skeleton: StationSkeleton): string {
+export function buildSkeletonSummary(skeleton: StationSkeleton): string {
     const roomSummaries = skeleton.rooms.map(r => ({
         id: r.id,
         archetype: r.archetype,

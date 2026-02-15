@@ -8,7 +8,7 @@ const openrouter = createOpenRouter({
     },
 });
 
-/** Shared provider routing: direct to Anthropic, no fallbacks. */
+/** Provider routing: direct to Anthropic, no fallbacks. */
 export const anthropicDirect = {
     openrouter: {
         provider: {
@@ -19,7 +19,7 @@ export const anthropicDirect = {
 };
 
 /** Model used for the main game master (tool calling + narrative). */
-export const gameMasterModel = openrouter('anthropic/claude-opus-4.6');
+export const gameMasterModel = openrouter('google/gemini-3-flash-preview');
 
 /** Model used for creative content generation (structured output only). */
-export const creativeModel = openrouter('anthropic/claude-sonnet-4.5');
+export const creativeModel = openrouter('anthropic/claude-opus-4.6');

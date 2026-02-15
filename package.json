@@ -6,7 +6,11 @@
   "scripts": {
     "start": "bun index.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:fixture": "bun test/generate-fixture.ts",
+    "test:creative": "bun test/test-creative.ts",
+    "test:gm": "bun test/test-gamemaster.ts",
+    "test:analyze": "bun test/analyze-results.ts"
   },
   "keywords": [],
   "author": "",

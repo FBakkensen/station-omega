@@ -1,5 +1,5 @@
-import { run, system, user, OutputGuardrailTripwireTriggered } from '@openai/agents';
-import type { OutputGuardrail, RunStreamEvent } from '@openai/agents';
+import { streamText, stepCountIs } from 'ai';
+import type { ModelMessage } from 'ai';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
 import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, GameStatus, StoryArc, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
@@ -10,12 +10,13 @@ import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/charact
 import { createGameToolSets } from './src/tools.js';
 import type { GameContext, ChoiceSet } from './src/tools.js';
 import { buildOrchestratorPrompt } from './src/prompt.js';
-import { createAgents } from './src/agents.js';
+import { createGameMasterConfig } from './src/agents.js';
+import { anthropicDirect } from './src/models.js';
 import { EventTracker, getEventContext } from './src/events.js';
 import { computeEnvironment, EnvironmentTracker } from './src/environment.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
-import { hasOpenAiKey, setOpenAiKey } from './src/env.js';
+import { hasOpenRouterKey, setOpenRouterKey } from './src/env.js';
 import { GameResponseSchema } from './src/schema.js';
 import type { DisplaySegment, GameResponse } from './src/schema.js';
 import { StreamingSegmentParser } from './src/json-stream-parser.js';
@@ -30,7 +31,7 @@ interface TurnSnapshot {
     rooms: Map<string, Room>;
     objectives: ObjectiveChain;
     eventLastTriggered: Map<EventType, number>;
-    lastResponseId: string | undefined;
+    conversationHistoryLength: number;
     pendingChoices: ChoiceSet | null;
 }
 
@@ -303,7 +304,37 @@ function buildTurnContext(state: GameState, station: GeneratedStation): string |
     return parts.join('\n\n');
 }
 
-// ─── Guardrail Feedback ─────────────────────────────────────────────────────
+// ─── Guardrail Validation ────────────────────────────────────────────────────
+
+/** Validate AI output against game rules. Returns issue strings or empty array. */
+function validateGameResponse(
+    response: GameResponse,
+    state: GameState,
+    station: GeneratedStation,
+): string[] {
+    const issues: string[] = [];
+
+    for (const seg of response.segments) {
+        // Dialogue must reference a living NPC in the current room
+        if (seg.type === 'dialogue' && seg.npcId) {
+            let npc = station.npcs.get(seg.npcId);
+            if (!npc) {
+                for (const n of station.npcs.values()) {
+                    if (n.name === seg.npcId) { npc = n; break; }
+                }
+            }
+            if (!npc) issues.push(`Unknown NPC ID: ${seg.npcId}`);
+            else if (npc.roomId !== state.currentRoom) issues.push(`NPC not in room: ${seg.npcId}`);
+        }
+        // Crew echo must reference a roster member
+        if (seg.type === 'crew_echo' && seg.crewName) {
+            const found = station.crewRoster.some(c => c.name === seg.crewName);
+            if (!found) issues.push(`Unknown crew name: ${seg.crewName}`);
+        }
+    }
+
+    return issues;
+}
 
 /** Build a corrective system message when the output guardrail trips. */
 function buildGuardrailFeedback(
@@ -383,7 +414,7 @@ async function runGameplay(
     ttsEngine.setNPCs(station.npcs);
     ttsEngine.setCrewRoster(station.crewRoster);
 
-    // Game context (injected into tools and instructions via RunContext)
+    // Game context (captured by tools via closure)
     const gameCtx: GameContext = {
         state,
         station,
@@ -392,7 +423,7 @@ async function runGameplay(
         turnElapsedMinutes: 0,
     };
 
-    const toolSets = createGameToolSets(classId);
+    const toolSets = createGameToolSets(classId, gameCtx);
 
     // Wire TTS reveal callback — syncs text display with audio playback
     ttsEngine.onRevealChunk = (segmentIndex, charBudget, durationSec) => {
@@ -404,42 +435,12 @@ async function runGameplay(
     debugLog('SYSTEM', buildOrchestratorPrompt(station, build));
     ui.setDebugLog(debugLog);
 
-    // Output guardrail — validates AI output against game rules (no extra LLM call)
-    const gameRulesGuardrail: OutputGuardrail<typeof GameResponseSchema> = {
-        name: 'game-rules-check',
-        execute: ({ agentOutput: response }) => {
-            const issues: string[] = [];
+    // Create game master config (model, system prompt, tools)
+    const gmConfig = createGameMasterConfig(station, build, toolSets);
 
-            for (const seg of response.segments) {
-                // Dialogue must reference a living NPC in the current room
-                if (seg.type === 'dialogue' && seg.npcId) {
-                    let npc = station.npcs.get(seg.npcId);
-                    if (!npc) {
-                        for (const n of station.npcs.values()) {
-                            if (n.name === seg.npcId) { npc = n; break; }
-                        }
-                    }
-                    if (!npc) issues.push(`Unknown NPC ID: ${seg.npcId}`);
-                    else if (npc.roomId !== state.currentRoom) issues.push(`NPC not in room: ${seg.npcId}`);
-                }
-                // Crew echo must reference a roster member
-                if (seg.type === 'crew_echo' && seg.crewName) {
-                    const found = station.crewRoster.some(c => c.name === seg.crewName);
-                    if (!found) issues.push(`Unknown crew name: ${seg.crewName}`);
-                }
-            }
+    // Client-side conversation history
+    const conversationHistory: ModelMessage[] = [];
 
-            return Promise.resolve({
-                tripwireTriggered: issues.length > 0,
-                outputInfo: { issues },
-            });
-        },
-    };
-
-    // Create orchestrator + specialist agents with handoffs
-    const { gameMaster } = createAgents(station, build, toolSets, gameRulesGuardrail);
-
-    let lastResponseId: string | undefined;
     let turnId = 0;
 
     /** Advance time after AI run completes. Tools accumulate elapsed minutes in gameCtx.turnElapsedMinutes. */
@@ -477,7 +478,7 @@ async function runGameplay(
             rooms: structuredClone(station.rooms),
             objectives: structuredClone(station.objectives),
             eventLastTriggered: structuredClone(eventTracker.lastTriggered),
-            lastResponseId,
+            conversationHistoryLength: conversationHistory.length,
             pendingChoices: pendingChoices ? structuredClone(pendingChoices) : null,
         };
     }
@@ -502,8 +503,10 @@ async function runGameplay(
         // Event tracker cooldowns
         eventTracker.lastTriggered = snapshot.eventLastTriggered;
 
+        // Conversation history: truncate to snapshot length
+        conversationHistory.length = snapshot.conversationHistoryLength;
+
         // Turn-level variables
-        lastResponseId = snapshot.lastResponseId;
         pendingChoices = snapshot.pendingChoices;
     }
 
@@ -526,17 +529,28 @@ async function runGameplay(
 
                 // Build per-turn context as a system message (dynamic state the AI interprets)
                 const turnContext = buildTurnContext(state, station);
-                const input = [
-                    ...(guardrailFeedback ? [system(guardrailFeedback)] : []),
-                    ...(turnContext ? [system(turnContext)] : []),
-                    user(prompt),
+
+                // Build messages for this turn
+                const messages: ModelMessage[] = [
+                    ...conversationHistory,
+                    ...(guardrailFeedback ? [{ role: 'system' as const, content: guardrailFeedback }] : []),
+                    ...(turnContext ? [{ role: 'system' as const, content: turnContext }] : []),
+                    { role: 'user' as const, content: prompt },
                 ];
 
-                const stream = await run(gameMaster, input, {
-                    stream: true,
-                    context: gameCtx,
-                    maxTurns: 12,
-                    previousResponseId: lastResponseId,
+                const turnAbort = new AbortController();
+                const turnTimeout = setTimeout(() => { turnAbort.abort(); }, 120_000);
+
+                const result = streamText({
+                    model: gmConfig.model,
+                    system: gmConfig.systemPrompt,
+                    messages,
+                    tools: gmConfig.tools,
+                    temperature: 0.8,
+                    maxOutputTokens: 8192,
+                    stopWhen: stepCountIs(12),
+                    abortSignal: turnAbort.signal,
+                    providerOptions: anthropicDirect,
                 });
 
                 // Process streaming events with JSON segment parser
@@ -545,41 +559,40 @@ async function runGameplay(
                 let segmentsRendered = 0;
                 const segmentParser = new StreamingSegmentParser();
 
-                // Wrap stream + lastResponseId in a single try so guardrail
-                // errors thrown during the for-await are caught for retry.
                 try {
-                    for await (const event of stream as AsyncIterable<RunStreamEvent>) {
-                        // Log agent handoffs for debugging
-                        if (event.type === 'agent_updated_stream_event') {
-                            debugLog('HANDOFF', `Active agent: ${event.agent.name}`);
-                        }
-                        if (event.type === 'raw_model_stream_event') {
-                            const data = event.data as { type: string; delta?: string };
-                            if (data.type === 'output_text_delta' && data.delta) {
-                                rawJson += data.delta;
-                                if (!streamStarted) {
-                                    // Set narrator context for dynamic mood steering
-                                    const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
-                                    ttsEngine.setNarratorContext({
-                                        hpPercent: (state.hp / state.maxHp) * 100,
-                                        isNewRoom: visitCount <= 1,
-                                    });
-                                    ttsEngine.beginStream();
-                                    streamStarted = true;
-                                }
-                                // Extract complete segments from incremental JSON
-                                const segments = segmentParser.push(data.delta);
-                                for (const seg of segments) {
-                                    const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
-                                    const chunks = segmentToStyledChunks(display);
-                                    const headerChars = getHeaderCharCount(display);
-                                    const bodyChars = countChunkChars(chunks) - headerChars;
-                                    ui.pushSegmentCard(display, chunks, headerChars);
-                                    ttsEngine.pushSegment(seg, bodyChars);
-                                    segmentsRendered++;
-                                    debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
-                                }
+                    for await (const part of result.fullStream) {
+                        if (part.type === 'text-delta') {
+                            rawJson += part.text;
+                            if (!streamStarted) {
+                                // Set narrator context for dynamic mood steering
+                                const visitCount = state.roomVisitCount.get(state.currentRoom) ?? 0;
+                                ttsEngine.setNarratorContext({
+                                    hpPercent: (state.hp / state.maxHp) * 100,
+                                    isNewRoom: visitCount <= 1,
+                                });
+                                ttsEngine.beginStream();
+                                streamStarted = true;
                             }
+                            // Extract complete segments from incremental JSON
+                            const segments = segmentParser.push(part.text);
+                            for (const seg of segments) {
+                                const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
+                                const chunks = segmentToStyledChunks(display);
+                                const headerChars = getHeaderCharCount(display);
+                                const bodyChars = countChunkChars(chunks) - headerChars;
+                                ui.pushSegmentCard(display, chunks, headerChars);
+                                ttsEngine.pushSegment(seg, bodyChars);
+                                segmentsRendered++;
+                                debugLog('SEGMENT', `[${seg.type}] ${seg.text.slice(0, 80)}...`);
+                            }
+                        } else if (part.type === 'tool-call') {
+                            debugLog('TOOL-CALL', `${part.toolName}(${JSON.stringify(part.input).slice(0, 200)})`);
+                        } else if (part.type === 'tool-result') {
+                            debugLog('TOOL-RESULT', `${part.toolName}: ${JSON.stringify(part.output).slice(0, 200)}`);
+                        } else if (part.type === 'error') {
+                            debugLog('STREAM-ERROR', String(part.error));
+                        } else if (part.type === 'finish') {
+                            debugLog('STREAM-FINISH', `reason=${part.finishReason}`);
                         }
                     }
 
@@ -610,23 +623,34 @@ async function runGameplay(
                         }
                     }
 
-                    // Capture response ID for conversation chaining
-                    lastResponseId = stream.lastResponseId;
+                    clearTimeout(turnTimeout);
 
                     // Advance time based on accumulated tool durations (after AI run)
                     tickTime();
+
+                    // Guardrail validation: parse rawJson and validate
+                    if (rawJson) {
+                        try {
+                            const parsed = GameResponseSchema.parse(JSON.parse(rawJson));
+                            const issues = validateGameResponse(parsed, state, station);
+                            if (issues.length > 0 && attempt === 0) {
+                                guardrailFeedback = buildGuardrailFeedback(issues, state, station);
+                                debugLog('GUARDRAIL-RETRY', `Attempt 1 failed: ${issues.join('; ')} — retrying`);
+                                continue;
+                            }
+                            if (issues.length > 0) {
+                                debugLog('GUARDRAIL-FINAL', `Retry also failed: ${issues.join('; ')}`);
+                            }
+                        } catch {
+                            debugLog('GUARDRAIL-SKIP', 'Could not parse response for validation');
+                        }
+                    }
+
+                    // Update conversation history with this turn
+                    conversationHistory.push({ role: 'user', content: prompt });
+                    conversationHistory.push({ role: 'assistant', content: rawJson || '{}' });
                 } catch (err: unknown) {
-                    if (err instanceof OutputGuardrailTripwireTriggered && attempt === 0) {
-                        const issues = (err.result.output.outputInfo as { issues: string[] }).issues;
-                        guardrailFeedback = buildGuardrailFeedback(issues, state, station);
-                        debugLog('GUARDRAIL-RETRY', `Attempt 1 failed: ${issues.join('; ')} — retrying`);
-                        continue;
-                    }
-                    // Attempt 2 failure or non-guardrail error: re-throw to outer catch
-                    if (err instanceof OutputGuardrailTripwireTriggered) {
-                        const issues = (err.result.output.outputInfo as { issues: string[] }).issues;
-                        debugLog('GUARDRAIL-FINAL', `Retry also failed: ${issues.join('; ')}`);
-                    }
+                    // Non-guardrail streaming error: re-throw to outer catch
                     throw err;
                 }
 
@@ -817,21 +841,21 @@ async function main() {
             let inSettings = true;
             while (inSettings) {
                 const action = await ui.showSettingsScreen({
-                    hasOpenAiKey: hasOpenAiKey(),
+                    hasOpenRouterKey: hasOpenRouterKey(),
                     hasInworldKey: !!process.env['INWORLD_API_KEY'],
                     voiceReady: globalTTS.hasApiKey(),
                     voiceEnabled: globalTTS.isAudioEnabled(),
                 });
 
-                if (action === 'openai_key') {
+                if (action === 'openrouter_key') {
                     const key = await ui.showApiKeyEntry({
-                        title: 'OPENAI API KEY',
-                        description: 'Enter your OpenAI API key (required for the AI game master).',
-                        placeholder: 'sk-...',
+                        title: 'OPENROUTER API KEY',
+                        description: 'Enter your OpenRouter API key (required for the AI game master).',
+                        placeholder: 'sk-or-...',
                     });
                     if (key) {
-                        await setOpenAiKey(key);
-                        await ui.showBriefMessage('OpenAI API key saved.');
+                        await setOpenRouterKey(key);
+                        await ui.showBriefMessage('OpenRouter API key saved.');
                     }
                 } else if (action === 'inworld_key') {
                     const key = await ui.showApiKeyEntry({
@@ -862,9 +886,9 @@ async function main() {
         // CHARACTER SELECT
         const classId = await ui.showCharacterSelect(CHARACTER_BUILDS);
 
-        // Guard: OpenAI key must be set before starting a run
-        if (!hasOpenAiKey()) {
-            await ui.showBriefMessage('OpenAI API key is required. Please configure it in Settings.');
+        // Guard: OpenRouter key must be set before starting a run
+        if (!hasOpenRouterKey()) {
+            await ui.showBriefMessage('OpenRouter API key is required. Please configure it in Settings.');
             continue;
         }
 

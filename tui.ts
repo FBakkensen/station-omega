@@ -929,11 +929,11 @@ export class GameUI {
     // ─── Settings Screen ─────────────────────────────────────────────────────
 
     showSettingsScreen(options: {
-        hasOpenAiKey: boolean;
+        hasOpenRouterKey: boolean;
         hasInworldKey: boolean;
         voiceReady: boolean;
         voiceEnabled: boolean;
-    }): Promise<'openai_key' | 'inworld_key' | 'voice_toggle' | 'back'> {
+    }): Promise<'openrouter_key' | 'inworld_key' | 'voice_toggle' | 'back'> {
         this.clearLayout();
 
         const header = new TextRenderable(this.renderer, {
@@ -941,16 +941,16 @@ export class GameUI {
             content: t`${bold(fg(COLORS.title)('SETTINGS'))}`,
         });
 
-        const openAiStatus = options.hasOpenAiKey ? '[configured]' : '[not set]';
+        const openRouterStatus = options.hasOpenRouterKey ? '[configured]' : '[not set]';
         const inworldStatus = options.hasInworldKey
             ? (options.voiceReady ? '[configured]' : '[key set — ffplay missing]')
             : '[not set]';
 
         const menuOptions = [
             {
-                name: `OpenAI API Key  ${openAiStatus}`,
+                name: `OpenRouter API Key  ${openRouterStatus}`,
                 description: 'Required for the AI game master',
-                value: 'openai_key',
+                value: 'openrouter_key',
             },
             {
                 name: `Inworld API Key  ${inworldStatus}`,
@@ -1009,7 +1009,7 @@ export class GameUI {
             menu.on(SelectRenderableEvents.ITEM_SELECTED, () => {
                 const selected = menu.getSelectedOption();
                 if (!selected) return;
-                resolve(selected.value as 'openai_key' | 'inworld_key' | 'voice_toggle' | 'back');
+                resolve(selected.value as 'openrouter_key' | 'inworld_key' | 'voice_toggle' | 'back');
             });
         });
     }

@@ -1,5 +1,6 @@
-import { Agent, run } from '@openai/agents';
+import { streamText, Output } from 'ai';
 import { z } from 'zod';
+import { creativeModel, anthropicDirect } from './models.js';
 import type {
     StationSkeleton,
     CreativeContent,
@@ -46,7 +47,7 @@ The skeleton data includes the starting room archetype (depth 0) and the player'
   - Materials: category "material", effectType "material", effectValue 1
   - The item must NOT duplicate the character's class starting item (provided in skeleton data)`;
 
-/** Zod schema for structured output — guarantees valid JSON from gpt-5-mini. */
+/** Zod schema for structured output — guarantees valid JSON. */
 const CreativeOutputSchema = z.object({
     stationName: z.string(),
     briefing: z.string(),
@@ -143,15 +144,6 @@ interface CreativeSchemaPartial {
         useNarration?: string;
     };
 }
-
-// Module-level creative agent (reusable, stateless)
-const creativeAgent = new Agent({
-    name: 'CreativeGenerator',
-    model: 'gpt-5-mini',
-    instructions: CREATIVE_PROMPT,
-    modelSettings: { store: false, reasoning: { effort: 'low' } },
-    outputType: CreativeOutputSchema,
-});
 
 function buildSkeletonSummary(skeleton: StationSkeleton): string {
     const roomSummaries = skeleton.rooms.map(r => ({
@@ -350,34 +342,40 @@ ${summary}
 Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 sentences each focusing on engineering state. engineeringNotes: 1-2 sentences of technical readings. Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis. arrivalScenario: connect the character class to the starting room archetype. startingItem: appropriate for the scenario and starting room (medical heal 15-40, tool/material effectValue 1).`;
 
     try {
-        const stream = await run(creativeAgent, userPrompt, {
-            maxTurns: 1,
-            stream: true,
+        debugLog?.('CREATIVE', 'Starting creative generation...');
+
+        const abort = new AbortController();
+        const timeout = setTimeout(() => { abort.abort(); }, 90_000);
+
+        const result = streamText({
+            model: creativeModel,
+            system: CREATIVE_PROMPT,
+            prompt: userPrompt,
+            output: Output.object({ schema: CreativeOutputSchema }),
+            temperature: 1.0,
+            maxOutputTokens: 8192,
+            abortSignal: abort.signal,
+            providerOptions: anthropicDirect,
         });
 
         const phases = buildProgressPhases(skeleton);
         let accumulated = '';
         let phaseIndex = 0;
-        for await (const event of stream) {
-            if (onProgress && event.type === 'raw_model_stream_event') {
-                const data = event.data as { type: string; delta?: string };
-                if (data.type === 'output_text_delta' && data.delta) {
-                    accumulated += data.delta;
-                    // Check if we've reached the next JSON section
-                    while (phaseIndex < phases.length
-                        && accumulated.includes(phases[phaseIndex].pattern)) {
-                        onProgress(phases[phaseIndex].message);
-                        phaseIndex++;
-                    }
-                }
+        for await (const delta of result.textStream) {
+            accumulated += delta;
+            // Check if we've reached the next JSON section
+            while (phaseIndex < phases.length
+                && accumulated.includes(phases[phaseIndex].pattern)) {
+                onProgress?.(phases[phaseIndex].message);
+                phaseIndex++;
             }
         }
+        clearTimeout(timeout);
 
-        // Structured output: finalOutput is already parsed and validated by Zod
-        const parsed = stream.finalOutput;
-        if (!parsed) {
-            throw new Error('Creative agent produced no output');
-        }
+        debugLog?.('CREATIVE', `Stream completed (${String(accumulated.length)} chars)`);
+
+        // SDK parses + validates automatically via Output.object
+        const parsed = await result.output;
         return validateCreative(parsed, skeleton);
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

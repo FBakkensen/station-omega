@@ -12,11 +12,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@openai/agents": "^0.4.5",
+    "@openrouter/ai-sdk-provider": "^2.2.3",
     "@opentui/core": "^0.1.77",
     "@picovoice/pvspeaker-node": "^1.0.3",
+    "ai": "^6.0.86",
     "marked": "^17.0.1",
-    "openai": "^4.90.0",
     "zod": "^4"
   },
   "devDependencies": {

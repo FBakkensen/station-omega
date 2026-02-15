@@ -18,12 +18,12 @@ Station Omega is a Bun-powered TypeScript game.
 
 ## Architecture
 - Gameplay is AI-narrated but tool-driven: the LLM calls tools for stateful actions, while narration is produced from tool/state results.
-- `index.ts` uses `previousResponseId` chaining so only new player input is sent each turn.
-- Instructions are cached in the `Agent` and dynamic context is passed per turn via system messages.
-- `src/tools.ts` uses `RunContext<GameContext>` injection (no closure-captured global state).
+- `index.ts` maintains client-side `ModelMessage[]` conversation history, sent each turn via `streamText({ messages })`.
+- System prompt is static; dynamic context is passed per turn via system-role messages.
+- `src/tools.ts` uses closure-captured `GameContext` in the `createGameToolSets()` factory.
 
 ### Streaming & Rendering Flow
-1. `run()` streams JSON deltas from the model.
+1. `streamText()` streams JSON deltas from the model via `fullStream`.
 2. `StreamingSegmentParser` extracts complete `GameSegment` objects.
 3. Segments are normalized/resolved (`resolveSegment`) and converted to display-safe markdown/chunks.
 4. TUI renders each segment as a typed card.

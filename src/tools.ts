@@ -1,5 +1,5 @@
-import { tool } from '@openai/agents';
-import type { RunContext, Tool } from '@openai/agents';
+import { tool } from 'ai';
+import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import type {
     GameState,
@@ -50,7 +50,7 @@ export interface ChoiceSet {
 }
 export type ChoicesCallback = (choiceSet: ChoiceSet) => void;
 
-// ─── Game Context (injected via RunContext) ─────────────────────────────────
+// ─── Game Context (captured via closure) ─────────────────────────────────
 
 export interface GameContext {
     state: GameState;
@@ -60,62 +60,46 @@ export interface GameContext {
     turnElapsedMinutes: number;
 }
 
-function getCtx(ctx: RunContext<GameContext> | undefined): GameContext {
-    if (!ctx) throw new Error('RunContext missing — tool called outside of agent run');
-    return ctx.context;
-}
-
-// ─── Suggest Tool Helper ────────────────────────────────────────────────────
-
-function defineSuggestTool(
-    name: string, description: string, title: string,
-    fieldName: string, fieldDesc: string, note: string,
-): Tool<GameContext> {
-    // Zod schema for suggestion tools: an array of {label, description} under a dynamic key
-    const schema = z.object({
-        [fieldName]: z.array(z.object({
-            label: z.string().describe('Short punchy name (2-6 words)'),
-            description: z.string().describe('One-sentence evocative description'),
-        })).describe(fieldDesc),
-    });
-
-    return tool({
-        name,
-        description,
-        parameters: schema,
-        execute: (args: z.infer<typeof schema>, ctx?: RunContext<GameContext>) => {
-            const choices = (args as Record<string, { label: string; description: string }[]>)[fieldName];
-            ctx?.context.onChoices({ title, choices });
-            return JSON.stringify({ presented: true, note });
-        },
-    });
-}
-
 // ─── Tool Sets ──────────────────────────────────────────────────────────────
 
 export interface GameToolSets {
-    all: Tool<GameContext>[];           // All tools (orchestrator)
-    engineering: Tool<GameContext>[];   // diagnose, stabilize, repair, improvise, craft, attack, use_item
-    diagnostics: Tool<GameContext>[];   // check_environment, analyze_item, look_around, suggest_diagnostics
-    exploration: Tool<GameContext>[];   // look_around, move_to, pick_up_item, attempt_action,
-                                        // suggest_actions, complete_objective, field_surgery,
-                                        // [bypass_system], [crisis_assessment]
+    all: ToolSet;
 }
 
-export function createGameToolSets(classId: string): GameToolSets {
+export function createGameToolSets(classId: string, gameCtx: GameContext): GameToolSets {
+
+    function defineSuggestTool(
+        description: string, title: string,
+        fieldName: string, fieldDesc: string, note: string,
+    ) {
+        const schema = z.object({
+            [fieldName]: z.array(z.object({
+                label: z.string().describe('Short punchy name (2-6 words)'),
+                description: z.string().describe('One-sentence evocative description'),
+            })).describe(fieldDesc),
+        });
+
+        return tool({
+            description,
+            inputSchema: schema,
+            execute: (args: z.infer<typeof schema>) => {
+                const choices = (args as Record<string, { label: string; description: string }[]>)[fieldName];
+                gameCtx.onChoices({ title, choices });
+                return JSON.stringify({ presented: true, note });
+            },
+        });
+    }
 
     const lookAround = tool({
-        name: 'look_around',
         description: 'Look around the current room. Returns details about the environment, items, threats, and exits.',
-        parameters: z.object({}),
-        execute: (_args, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        inputSchema: z.object({}),
+        execute: () => {
+            const { state, station } = gameCtx;
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('look_around', state, state.activeEvents, room);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
 
@@ -176,14 +160,12 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const moveTo = tool({
-        name: 'move_to',
         description: 'Move to an adjacent room by name. Use the room names from look_around exits.',
-        parameters: z.object({
+        inputSchema: z.object({
             room: z.string().describe('Name of the room to move to'),
         }),
-        execute: (args: { room: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        execute: (args: { room: string }) => {
+            const { state, station } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             // Find room by name
@@ -216,7 +198,7 @@ export function createGameToolSets(classId: string): GameToolSets {
             const fromRoom = station.rooms.get(state.currentRoom);
             if (fromRoom) {
                 const minutes = computeActionMinutes('move_to', state, state.activeEvents, fromRoom);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             // Win condition: reaching escape room with objectives complete
@@ -267,21 +249,19 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const pickUpItem = tool({
-        name: 'pick_up_item',
         description: 'Pick up an item in the current room and add it to your inventory.',
-        parameters: z.object({
+        inputSchema: z.object({
             item: z.string().describe('Name of the item to pick up'),
         }),
-        execute: (args: { item: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        execute: (args: { item: string }) => {
+            const { state, station } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('pick_up_item', state, state.activeEvents, room);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             // Find item by name
             const itemName = args.item.toLowerCase();
@@ -337,20 +317,18 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const useItem = tool({
-        name: 'use_item',
         description: 'Use an item from your inventory. Effects vary by item type: medical items heal, weapon items boost damage, utility items have special effects.',
-        parameters: z.object({
+        inputSchema: z.object({
             item: z.string().describe('Name of the item to use'),
         }),
-        execute: (args: { item: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { item: string }) => {
+            const { state, station, build } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('use_item', state, state.activeEvents, room);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             const itemName = args.item.toLowerCase();
@@ -408,18 +386,16 @@ export function createGameToolSets(classId: string): GameToolSets {
     // ─── Action Tools ──────────────────────────────────────────────────────────
 
     const attemptAction = tool({
-        name: 'attempt_action',
         description: 'Resolve a creative player action through dice roll. The AI assesses domain and difficulty; the game engine resolves outcome. Use for any non-standard action (barricading, hacking, improvising, etc.).',
-        parameters: z.object({
+        inputSchema: z.object({
             action: z.string().describe('What the player is attempting'),
             domain: z.enum(['tech', 'medical', 'social', 'survival', 'science']).describe('The skill domain'),
             difficulty: z.enum(['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible']).describe('How hard this is'),
             relevant_items: z.array(z.string()).default([]).describe('Inventory items that help'),
             environmental_factors: z.array(z.string()).default([]).describe('Room features that help'),
         }),
-        execute: (args: { action: string; domain: ActionDomain; difficulty: ActionDifficulty; relevant_items: string[]; environmental_factors: string[] }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { action: string; domain: ActionDomain; difficulty: ActionDifficulty; relevant_items: string[]; environmental_factors: string[] }) => {
+            const { state, station, build } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const { domain, difficulty } = args;
@@ -427,7 +403,7 @@ export function createGameToolSets(classId: string): GameToolSets {
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('attempt_action', state, state.activeEvents, room, difficulty);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             const TARGETS: Record<ActionDifficulty, number> = {
@@ -523,23 +499,21 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const interactNPC = tool({
-        name: 'interact_npc',
         description: 'Interact with an NPC non-violently. Negotiate, intimidate, trade, or recruit. Only works on NPCs with appropriate behavior flags.',
-        parameters: z.object({
+        inputSchema: z.object({
             approach: z.enum(['negotiate', 'intimidate', 'offer_mercy', 'trade', 'ask_info', 'recruit']).describe('Interaction approach'),
             target_npc: z.string().describe('Name of the NPC'),
             leverage: z.string().default('').describe('What the player is offering or using as leverage'),
             tone: z.enum(['aggressive', 'calm', 'desperate', 'commanding', 'empathetic']).describe('Tone of approach'),
         }),
-        execute: (args: { approach: string; target_npc: string; leverage: string; tone: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { approach: string; target_npc: string; leverage: string; tone: string }) => {
+            const { state, station, build } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('interact_npc', state, state.activeEvents, room);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             // Find NPC by name
@@ -644,15 +618,14 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const recordMoralChoice = tool({
-        name: 'record_moral_choice',
         description: 'Record a significant moral choice the player made. Call this when the player spares an enemy, sacrifices resources, ignores a plea for help, or makes any morally significant decision.',
-        parameters: z.object({
+        inputSchema: z.object({
             description: z.string().describe('What the player chose to do'),
             tendency: z.enum(['mercy', 'sacrifice', 'pragmatic']).describe('Which moral tendency this represents'),
             magnitude: z.number().describe('How significant (1-3): 1=minor, 2=moderate, 3=major'),
         }),
-        execute: (args: { description: string; tendency: 'mercy' | 'sacrifice' | 'pragmatic'; magnitude: number }, ctx?: RunContext<GameContext>) => {
-            const { state } = getCtx(ctx);
+        execute: (args: { description: string; tendency: 'mercy' | 'sacrifice' | 'pragmatic'; magnitude: number }) => {
+            const { state } = gameCtx;
             const magnitude = Math.max(1, Math.min(3, args.magnitude));
 
             state.moralProfile.choices.push({
@@ -668,7 +641,6 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const suggestActions = defineSuggestTool(
-        'suggest_actions',
         'Present 3-5 contextual creative actions the player can attempt in the current situation. Use for non-combat situations. Actions are displayed as interactive UI buttons.',
         'What Do You Do?',
         'actions',
@@ -677,7 +649,6 @@ export function createGameToolSets(classId: string): GameToolSets {
     );
 
     const suggestInteractions = defineSuggestTool(
-        'suggest_interactions',
         'Present 3-5 contextual NPC interaction approaches. Call BEFORE interact_npc when player wants to interact but hasn\'t specified an approach.',
         'How Do You Approach?',
         'interactions',
@@ -686,19 +657,17 @@ export function createGameToolSets(classId: string): GameToolSets {
     );
 
     const completeObjective = tool({
-        name: 'complete_objective',
         description: 'Mark the current objective step as complete when the player performs the required action in the correct room.',
-        parameters: z.object({
+        inputSchema: z.object({
             step_description: z.string().describe('Description of what was accomplished'),
         }),
-        execute: (args: { step_description: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        execute: (args: { step_description: string }) => {
+            const { state, station } = gameCtx;
 
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('complete_objective', state, state.activeEvents, room);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             const objectives = station.objectives;
@@ -754,19 +723,17 @@ export function createGameToolSets(classId: string): GameToolSets {
     // ─── Engineering Tools ─────────────────────────────────────────────────
 
     const diagnoseSystem = tool({
-        name: 'diagnose_system',
         description: 'Scan a failing system in the current room to determine root cause, required materials, and repair difficulty. Transitions system from detected → characterized.',
-        parameters: z.object({
+        inputSchema: z.object({
             system: z.string().describe('System ID to diagnose (e.g. "coolant_loop", "power_relay")'),
         }),
-        execute: (args: { system: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        execute: (args: { system: string }) => {
+            const { state, station } = gameCtx;
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('diagnose_system', state, state.activeEvents, room);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             const failure = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'detected');
             if (!failure) {
@@ -799,20 +766,18 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const stabilizeHazard = tool({
-        name: 'stabilize_hazard',
         description: 'Apply temporary mitigation to a diagnosed system failure. Buys time by doubling the cascade timer but does not fix the root cause. Easier than full repair.',
-        parameters: z.object({
+        inputSchema: z.object({
             system: z.string().describe('System ID to stabilize'),
             method: z.string().describe('How you are stabilizing it'),
         }),
-        execute: (args: { system: string; method: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { system: string; method: string }) => {
+            const { state, station, build } = gameCtx;
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('stabilize_hazard', state, state.activeEvents, room);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             const failure = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'characterized');
             if (!failure) return JSON.stringify({ error: `No characterized ${args.system} failure to stabilize. Diagnose it first.` });
@@ -839,15 +804,13 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const repairSystem = tool({
-        name: 'repair_system',
         description: 'Perform a full repair on a diagnosed or stabilized system failure. Requires correct materials (consumed) and a skill check. Tools are reusable.',
-        parameters: z.object({
+        inputSchema: z.object({
             system: z.string().describe('System ID to repair'),
             materials_used: z.array(z.string()).describe('Names of materials from inventory to use'),
         }),
-        execute: (args: { system: string; materials_used: string[] }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { system: string; materials_used: string[] }) => {
+            const { state, station, build } = gameCtx;
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
@@ -862,7 +825,7 @@ export function createGameToolSets(classId: string): GameToolSets {
 
             // Compute time for repair (uses failure difficulty)
             const minutes = computeActionMinutes('repair_system', state, state.activeEvents, room, failure.difficulty);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             // Check required materials are in inventory
             const missing: string[] = [];
@@ -946,21 +909,19 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const improviseRepair = tool({
-        name: 'improvise_repair',
         description: '"Science the hell out of it" — fix a system failure with non-standard materials and creative reasoning. Higher difficulty but always possible.',
-        parameters: z.object({
+        inputSchema: z.object({
             system: z.string().describe('System ID to repair'),
             approach: z.string().describe('How you plan to improvise the repair'),
             materials_used: z.array(z.string()).describe('Non-standard materials you are using'),
         }),
-        execute: (args: { system: string; approach: string; materials_used: string[] }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { system: string; approach: string; materials_used: string[] }) => {
+            const { state, station, build } = gameCtx;
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('improvise_repair', state, state.activeEvents, room);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             const failure = room.systemFailures.find(f =>
                 f.systemId === args.system && (f.challengeState === 'characterized' || f.challengeState === 'stabilized')
@@ -1028,21 +989,19 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const craftItem = tool({
-        name: 'craft_item',
         description: 'Combine inventory materials to create a new component. Uses known recipes. Consumes ingredients on success.',
-        parameters: z.object({
+        inputSchema: z.object({
             ingredients: z.array(z.string()).describe('Names of materials to combine'),
             intended_result: z.string().describe('What you are trying to create'),
         }),
-        execute: (args: { ingredients: string[]; intended_result: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station, build } = gc;
+        execute: (args: { ingredients: string[]; intended_result: string }) => {
+            const { state, station, build } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
 
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('craft_item', state, state.activeEvents, room);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             const normalizedIngredients = args.ingredients.map(n => n.toLowerCase());
@@ -1124,19 +1083,17 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const analyzeItem = tool({
-        name: 'analyze_item',
         description: 'Examine an inventory item to understand its properties, repair applications, and combination potential.',
-        parameters: z.object({
+        inputSchema: z.object({
             item: z.string().describe('Name of the item to analyze'),
         }),
-        execute: (args: { item: string }, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        execute: (args: { item: string }) => {
+            const { state, station } = gameCtx;
 
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('analyze_item', state, state.activeEvents, room);
-                gc.turnElapsedMinutes += minutes;
+                gameCtx.turnElapsedMinutes += minutes;
             }
 
             const itemName = args.item.toLowerCase();
@@ -1179,17 +1136,15 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const checkEnvironment = tool({
-        name: 'check_environment',
         description: 'Read environmental sensors in the current room: atmosphere composition, pressure, temperature, radiation, structural data, and derived physics (partial pressures, boiling points, dose equivalents). Returns raw numbers plus computed values for engineering assessment.',
-        parameters: z.object({}),
-        execute: (_args, ctx?: RunContext<GameContext>) => {
-            const gc = getCtx(ctx);
-            const { state, station } = gc;
+        inputSchema: z.object({}),
+        execute: () => {
+            const { state, station } = gameCtx;
             const room = station.rooms.get(state.currentRoom);
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('check_environment', state, state.activeEvents, room);
-            gc.turnElapsedMinutes += minutes;
+            gameCtx.turnElapsedMinutes += minutes;
 
             const env = computeEnvironment(room, state.activeEvents);
             const failures = room.systemFailures.filter(f => f.challengeState !== 'resolved');
@@ -1243,7 +1198,6 @@ export function createGameToolSets(classId: string): GameToolSets {
     });
 
     const suggestDiagnostics = defineSuggestTool(
-        'suggest_diagnostics',
         'Present 3-5 contextual engineering diagnostic actions. Call when the player wants to investigate or repair systems but hasn\'t specified a specific action.',
         'Engineering Assessment',
         'diagnostics',
@@ -1253,20 +1207,18 @@ export function createGameToolSets(classId: string): GameToolSets {
 
     // ─── Class-Specific Tools ───────────────────────────────────────────────
 
-    let bypassSystem: Tool<GameContext> | null = null;
-    let fieldSurgery: Tool<GameContext> | null = null;
-    let crisisAssessment: Tool<GameContext> | null = null;
+    let bypassSystem: ToolSet[string] | null = null;
+    let fieldSurgery: ToolSet[string] | null = null;
+    let crisisAssessment: ToolSet[string] | null = null;
 
     if (classId === 'engineer') {
         bypassSystem = tool({
-            name: 'bypass_system',
             description: 'Bypass a locked door without a keycard, repair severity-1 failures without materials, or reveal secret passages. Engineer class ability. Requires multitool.',
-            parameters: z.object({
+            inputSchema: z.object({
                 target: z.string().describe('What to bypass or repair'),
             }),
-            execute: (args: { target: string }, ctx?: RunContext<GameContext>) => {
-                const gc = getCtx(ctx);
-                const { state, station } = gc;
+            execute: (args: { target: string }) => {
+                const { state, station } = gameCtx;
                 if (!state.inventory.some(id => id === 'multitool' || station.items.get(id)?.name.toLowerCase().includes('multitool'))) {
                     return JSON.stringify({ error: 'You need a multitool for this.' });
                 }
@@ -1274,7 +1226,7 @@ export function createGameToolSets(classId: string): GameToolSets {
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     const minutes = computeActionMinutes('bypass_system', state, state.activeEvents, room);
-                    gc.turnElapsedMinutes += minutes;
+                    gameCtx.turnElapsedMinutes += minutes;
                 }
 
                 // Check for severity-1 system failures to auto-repair
@@ -1315,24 +1267,22 @@ export function createGameToolSets(classId: string): GameToolSets {
 
                 return JSON.stringify({ success: true, action: 'generic' });
             },
-        }) as Tool<GameContext>;
+        });
     }
 
     if (classId === 'medic') {
         fieldSurgery = tool({
-            name: 'field_surgery',
             description: 'Heal 15 HP using medical expertise. Usable once per room. Medic class ability.',
-            parameters: z.object({}),
-            execute: (_args, ctx?: RunContext<GameContext>) => {
-                const gc = getCtx(ctx);
-                const { state, station } = gc;
+            inputSchema: z.object({}),
+            execute: () => {
+                const { state, station } = gameCtx;
                 if (state.fieldSurgeryUsedInRoom.has(state.currentRoom)) {
                     return JSON.stringify({ error: 'You already performed field surgery in this room.' });
                 }
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     const minutes = computeActionMinutes('field_surgery', state, state.activeEvents, room);
-                    gc.turnElapsedMinutes += minutes;
+                    gameCtx.turnElapsedMinutes += minutes;
                 }
                 const healed = Math.min(15, state.maxHp - state.hp);
                 state.hp += healed;
@@ -1340,22 +1290,20 @@ export function createGameToolSets(classId: string): GameToolSets {
                 state.fieldSurgeryUsedInRoom.add(state.currentRoom);
                 return JSON.stringify({ success: true, healed, player_hp: state.hp, player_maxHp: state.maxHp });
             },
-        }) as Tool<GameContext>;
+        });
     }
 
     if (classId === 'commander') {
         crisisAssessment = tool({
-            name: 'crisis_assessment',
             description: 'Reveal cascade timers and failure states in all adjacent rooms. Commander class ability.',
-            parameters: z.object({}),
-            execute: (_args, ctx?: RunContext<GameContext>) => {
-                const gc = getCtx(ctx);
-                const { state, station } = gc;
+            inputSchema: z.object({}),
+            execute: () => {
+                const { state, station } = gameCtx;
 
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     const minutes = computeActionMinutes('crisis_assessment', state, state.activeEvents, room);
-                    gc.turnElapsedMinutes += minutes;
+                    gameCtx.turnElapsedMinutes += minutes;
                 }
 
                 const adjacent = getAdjacentRooms(state, station);
@@ -1377,41 +1325,36 @@ export function createGameToolSets(classId: string): GameToolSets {
                 });
                 return JSON.stringify({ success: true, adjacent_assessments: assessments });
             },
-        }) as Tool<GameContext>;
+        });
     }
 
     // ─── Assemble Tool Sets ─────────────────────────────────────────────────
 
-    const all: Tool<GameContext>[] = [
-        lookAround, moveTo, pickUpItem, useItem,
-        diagnoseSystem, stabilizeHazard, repairSystem, improviseRepair,
-        craftItem, analyzeItem, checkEnvironment,
-        suggestDiagnostics, suggestActions, suggestInteractions,
-        attemptAction, interactNPC, recordMoralChoice, completeObjective,
-    ];
-    if (bypassSystem) all.push(bypassSystem);
-    if (fieldSurgery) all.push(fieldSurgery);
-    if (crisisAssessment) all.push(crisisAssessment);
+    const all: ToolSet = {
+        look_around: lookAround,
+        move_to: moveTo,
+        pick_up_item: pickUpItem,
+        use_item: useItem,
+        diagnose_system: diagnoseSystem,
+        stabilize_hazard: stabilizeHazard,
+        repair_system: repairSystem,
+        improvise_repair: improviseRepair,
+        craft_item: craftItem,
+        analyze_item: analyzeItem,
+        check_environment: checkEnvironment,
+        suggest_diagnostics: suggestDiagnostics,
+        suggest_actions: suggestActions,
+        suggest_interactions: suggestInteractions,
+        attempt_action: attemptAction,
+        interact_npc: interactNPC,
+        record_moral_choice: recordMoralChoice,
+        complete_objective: completeObjective,
+    };
+    if (bypassSystem) all['bypass_system'] = bypassSystem;
+    if (fieldSurgery) all['field_surgery'] = fieldSurgery;
+    if (crisisAssessment) all['crisis_assessment'] = crisisAssessment;
 
-    const engineering: Tool<GameContext>[] = [
-        diagnoseSystem, stabilizeHazard, repairSystem, improviseRepair,
-        craftItem, attemptAction, suggestDiagnostics, useItem,
-    ];
-    if (bypassSystem) engineering.push(bypassSystem);
-
-    const diagnostics: Tool<GameContext>[] = [
-        checkEnvironment, analyzeItem, lookAround, suggestDiagnostics, useItem,
-    ];
-
-    const exploration: Tool<GameContext>[] = [
-        lookAround, moveTo, pickUpItem, attemptAction,
-        suggestActions, completeObjective,
-    ];
-    if (fieldSurgery) exploration.push(fieldSurgery);
-    if (bypassSystem) exploration.push(bypassSystem);
-    if (crisisAssessment) exploration.push(crisisAssessment);
-
-    return { all, engineering, diagnostics, exploration };
+    return { all };
 }
 
 // ─── Tone Matching ──────────────────────────────────────────────────────────

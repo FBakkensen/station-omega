@@ -1,15 +1,15 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/** Check if OPENAI_API_KEY is set in the environment. */
-export function hasOpenAiKey(): boolean {
-    return !!process.env['OPENAI_API_KEY'];
+/** Check if OPENROUTER_API_KEY is set in the environment. */
+export function hasOpenRouterKey(): boolean {
+    return !!process.env['OPENROUTER_API_KEY'];
 }
 
-/** Set the OpenAI API key at runtime and persist to .env.local. */
-export async function setOpenAiKey(key: string): Promise<void> {
-    process.env['OPENAI_API_KEY'] = key;
-    await persistEnvVar('OPENAI_API_KEY', key);
+/** Set the OpenRouter API key at runtime and persist to .env.local. */
+export async function setOpenRouterKey(key: string): Promise<void> {
+    process.env['OPENROUTER_API_KEY'] = key;
+    await persistEnvVar('OPENROUTER_API_KEY', key);
 }
 
 /** Read/write a single env var into .env.local (upsert pattern). */

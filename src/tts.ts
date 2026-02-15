@@ -739,6 +739,10 @@ export class TTSEngine {
         return this.audioEnabled;
     }
 
+    isStreamActive(): boolean {
+        return this.streamActive;
+    }
+
     setAudioEnabled(value: boolean, persist = false): void {
         // Can't enable audio without an API key
         if (value && !this.inworldApiKey) return;

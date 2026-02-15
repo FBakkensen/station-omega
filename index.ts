@@ -607,19 +607,24 @@ async function runGameplay(
 
                 // Flush TTS pipeline and finalize UI
                 const thisTurn = turnId;
-                debugLog('SESSION', 'Waiting for TTS flushStream...');
-                try {
-                    await ttsEngine.flushStream();
-                    if (turnId !== thisTurn) {
-                        debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
-                        return;
+                if (ttsEngine.isStreamActive()) {
+                    debugLog('SESSION', 'Waiting for TTS flushStream...');
+                    try {
+                        await ttsEngine.flushStream();
+                        if (turnId !== thisTurn) {
+                            debugLog('SESSION', 'flushStream resolved but turn changed — skipping afterStream');
+                            return;
+                        }
+                        debugLog('SESSION', 'flushStream resolved');
+                        afterStream();
+                    } catch (err: unknown) {
+                        debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
+                        ttsEngine.stop();
+                        ui.appendNarrative('*Voice system error — audio disabled for this response.*');
+                        afterStream();
                     }
-                    debugLog('SESSION', 'flushStream resolved');
-                    afterStream();
-                } catch (err: unknown) {
-                    debugLog('SESSION', `TTS flushStream error: ${String(err)}`);
-                    ttsEngine.stop();
-                    ui.appendNarrative('*Voice system error — audio disabled for this response.*');
+                } else {
+                    debugLog('SESSION', 'TTS stream not active — skipping flush');
                     afterStream();
                 }
 

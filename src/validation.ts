@@ -36,6 +36,7 @@ export function buildGuardrailFeedback(
     issues: string[],
     state: GameState,
     station: GeneratedStation,
+    toolFailures?: { tool: string; summary: string }[],
 ): string {
     const parts: string[] = [
         'PREVIOUS RESPONSE REJECTED — validation errors:',
@@ -58,6 +59,14 @@ export function buildGuardrailFeedback(
     if (station.crewRoster.length > 0) {
         parts.push('Valid crew roster names (use exact name for crewName):');
         parts.push(`- ${station.crewRoster.map(c => c.name).join(', ')}`);
+        parts.push('');
+    }
+
+    if (toolFailures && toolFailures.length > 0) {
+        parts.push('Tool calls that FAILED this turn (do NOT narrate as successful):');
+        for (const f of toolFailures) {
+            parts.push(`- ${f.tool}: ${f.summary}`);
+        }
         parts.push('');
     }
 

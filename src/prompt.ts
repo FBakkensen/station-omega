@@ -228,6 +228,7 @@ Every turn must advance or block a technical objective with explicit reason.
 When system sensor data is available, reference specific readings in narration.
 When check_environment returns derived physics values, use thought segments to reason about what the numbers mean — partial pressures, time-to-danger, thermal margins, radiation dose calculations. Show the calculation, not just the conclusion.
 suggest_actions and suggest_diagnostics must present engineering options by default — repair approaches, diagnostic methods, system workarounds.
+Tool results are ground truth — if a tool call fails, narrate the failure honestly. Never claim an action succeeded when the tool returned an error.
 Weir voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity. (6) Machine diagnostics in narration, body consequences in thought segments — what does the broken system mean for ME?`;
 }
 
@@ -377,6 +378,7 @@ ${buildEndingsSection()}
 ## Rules
 - Always use the available tools to resolve player actions. Do not make up game state.
 - Do not invent rooms, logs, sensor readings, or sensory details not provided by tools.
+- If a tool returns an error or success: false, you MUST narrate the failure. NEVER narrate an action as successful when the tool result says otherwise. Tool results are ground truth.
 - Items must be narratively described before I can pick them up.
 - Before resolving any action, consider my class, inventory, active events, system states, and health.
 - Before calling a tool, write a brief line that narratively sets up the action.
@@ -605,6 +607,7 @@ ${buildEndingsSection()}
 ## Rules
 - Always use the available tools to resolve player actions. Do not make up game state.
 - Do not invent rooms, logs, sensor readings, or sensory details not provided by tools. Use ONLY the data returned by tool calls.
+- If a tool returns an error or success: false, you MUST narrate the failure. NEVER narrate an action as successful when the tool result says otherwise. Tool results are ground truth.
 - Before calling a tool, write a brief line that narratively sets up the action.
 - The orientation segment presents exits as architecture, not options: "A corridor stretches north, emergency lighting marking the way every ten meters or so" — not "I can go north to the Reactor Room."
 - dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction.

@@ -42,6 +42,10 @@ function getItemName(itemId: string, station: GeneratedStation): string {
     return station.items.get(itemId)?.name ?? itemId;
 }
 
+function inventoryList(state: GameState, station: GeneratedStation): { id: string; name: string }[] {
+    return state.inventory.map(id => ({ id, name: getItemName(id, station) }));
+}
+
 // ─── Callbacks ──────────────────────────────────────────────────────────────
 
 export interface ChoiceSet {
@@ -120,6 +124,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 room_name: room.name,
                 room_index: `${String([...station.rooms.keys()].indexOf(state.currentRoom) + 1)} of ${String(station.rooms.size)}`,
                 description: room.descriptionSeed,
+                item_id: lootPresent && room.loot ? room.loot : null,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
                 npcs_present: getNPCsInRoom(state.currentRoom, station).map(npc => ({
                     id: npc.id,
@@ -130,7 +135,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 exits,
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
-                inventory: state.inventory.length > 0 ? state.inventory.map(id => getItemName(id, station)) : ['empty'],
+                inventory: inventoryList(state, station),
                 sensory: room.sensory,
                 crew_logs: room.crewLogs,
                 room_modifiers: room.roomModifiers,
@@ -232,6 +237,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 room_name: room?.name ?? targetId,
                 room_index: `${String([...station.rooms.keys()].indexOf(targetId) + 1)} of ${String(station.rooms.size)}`,
                 description: room?.descriptionSeed ?? '',
+                item_id: lootPresent && room.loot ? room.loot : null,
                 item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
@@ -249,7 +255,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
     });
 
     const pickUpItem = tool({
-        description: 'Pick up an item in the current room and add it to your inventory.',
+        description: 'Pick up an item in the current room. Use the item_id from move_to or look_around.',
         inputSchema: z.object({
             item: z.string().describe('Name of the item to pick up'),
         }),
@@ -304,7 +310,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     success: true,
                     item_id: actualId,
                     item_name: item?.name ?? actualId,
-                    inventory: state.inventory.map(id => getItemName(id, station)),
+                    inventory: inventoryList(state, station),
                     slots_remaining: state.maxInventory - state.inventory.length,
                 });
             }
@@ -312,14 +318,20 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!roomLootAvailable) {
                 return JSON.stringify({ success: false, reason: 'nothing_available' });
             }
-            return JSON.stringify({ success: false, reason: 'not_found', requested: args.item });
+            const lootItem = room.loot ? station.items.get(room.loot) : null;
+            return JSON.stringify({
+                success: false,
+                reason: 'not_found',
+                requested: args.item,
+                available_item: lootItem ? { id: room.loot, name: lootItem.name } : null,
+            });
         },
     });
 
     const useItem = tool({
-        description: 'Use an item from your inventory. Effects vary by item type: medical items heal, weapon items boost damage, utility items have special effects.',
+        description: 'Use an item from your inventory. Use the item_id from look_around or pick_up_item.',
         inputSchema: z.object({
-            item: z.string().describe('Name of the item to use'),
+            item: z.string().describe('Item ID or name'),
         }),
         execute: (args: { item: string }) => {
             const { state, station, build } = gameCtx;
@@ -345,7 +357,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             }
 
             if (foundIdx === -1) {
-                return JSON.stringify({ error: `You don't have "${args.item}" in your inventory.`, inventory: state.inventory.map(id => getItemName(id, station)) });
+                return JSON.stringify({ error: `You don't have "${args.item}" in your inventory.`, inventory: inventoryList(state, station) });
             }
 
             const item = station.items.get(foundId);
@@ -391,7 +403,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             action: z.string().describe('What the player is attempting'),
             domain: z.enum(['tech', 'medical', 'social', 'survival', 'science']).describe('The skill domain'),
             difficulty: z.enum(['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible']).describe('How hard this is'),
-            relevant_items: z.array(z.string()).default([]).describe('Inventory items that help'),
+            relevant_items: z.array(z.string()).default([]).describe('Item IDs or names of inventory items that help'),
             environmental_factors: z.array(z.string()).default([]).describe('Room features that help'),
         }),
         execute: (args: { action: string; domain: ActionDomain; difficulty: ActionDifficulty; relevant_items: string[]; environmental_factors: string[] }) => {
@@ -499,10 +511,10 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
     });
 
     const interactNPC = tool({
-        description: 'Interact with an NPC non-violently. Negotiate, intimidate, trade, or recruit. Only works on NPCs with appropriate behavior flags.',
+        description: 'Interact with an NPC non-violently. Use the npc id from look_around. Only works on NPCs with appropriate behavior flags.',
         inputSchema: z.object({
             approach: z.enum(['negotiate', 'intimidate', 'offer_mercy', 'trade', 'ask_info', 'recruit']).describe('Interaction approach'),
-            target_npc: z.string().describe('Name of the NPC'),
+            target_npc: z.string().describe('NPC ID or name'),
             leverage: z.string().default('').describe('What the player is offering or using as leverage'),
             tone: z.enum(['aggressive', 'calm', 'desperate', 'commanding', 'empathetic']).describe('Tone of approach'),
         }),
@@ -516,15 +528,19 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 gameCtx.turnElapsedMinutes += minutes;
             }
 
-            // Find NPC by name
+            // Find NPC by ID or name
             let npc: NPC | null = null;
+            const npcQuery = args.target_npc.toLowerCase();
             for (const n of station.npcs.values()) {
-                if (n.name.toLowerCase() === args.target_npc.toLowerCase() && n.roomId === state.currentRoom) {
+                if (n.roomId === state.currentRoom && (n.id.toLowerCase() === npcQuery || n.name.toLowerCase() === npcQuery)) {
                     npc = n;
                     break;
                 }
             }
-            if (!npc) return JSON.stringify({ error: `No NPC named "${args.target_npc}" is here.` });
+            if (!npc) {
+                const npcsHere = getNPCsInRoom(state.currentRoom, station).map(n => ({ id: n.id, name: n.name, disposition: n.disposition }));
+                return JSON.stringify({ error: `No NPC "${args.target_npc}" is here.`, npcs_in_room: npcsHere });
+            }
 
             // Check behavior compatibility
             const approach = args.approach;
@@ -807,7 +823,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         description: 'Perform a full repair on a diagnosed or stabilized system failure. Requires correct materials (consumed) and a skill check. Tools are reusable.',
         inputSchema: z.object({
             system: z.string().describe('System ID to repair'),
-            materials_used: z.array(z.string()).describe('Names of materials from inventory to use'),
+            materials_used: z.array(z.string()).describe('Item IDs or names of materials from inventory'),
         }),
         execute: (args: { system: string; materials_used: string[] }) => {
             const { state, station, build } = gameCtx;
@@ -836,7 +852,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 if (!found) missing.push(mat);
             }
             if (missing.length > 0) {
-                return JSON.stringify({ error: 'Missing required materials.', missing, required: failure.requiredMaterials });
+                return JSON.stringify({ error: 'Missing required materials.', missing, required: failure.requiredMaterials, inventory: inventoryList(state, station) });
             }
 
             // Skill check
@@ -873,7 +889,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 return JSON.stringify({
                     action_minutes: minutes,
                     success: true, outcome, system_id: failure.systemId, roll, target,
-                    inventory: state.inventory.map(id => getItemName(id, station)),
+                    inventory: inventoryList(state, station),
                 });
             }
             if (outcome === 'partial_success') {
@@ -885,7 +901,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     action_minutes: minutes,
                     success: false, partial: true, outcome, system_id: failure.systemId, roll, target,
                     note: 'Repair incomplete but system stabilized.',
-                    inventory: state.inventory.map(id => getItemName(id, station)),
+                    inventory: inventoryList(state, station),
                 });
             }
             // Failure or critical failure
@@ -903,7 +919,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 success: false, outcome, system_id: failure.systemId, roll, target,
                 damage_taken: dmg > 0 ? dmg : undefined,
                 player_hp: state.hp,
-                inventory: state.inventory.map(id => getItemName(id, station)),
+                inventory: inventoryList(state, station),
             });
         },
     });
@@ -913,7 +929,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         inputSchema: z.object({
             system: z.string().describe('System ID to repair'),
             approach: z.string().describe('How you plan to improvise the repair'),
-            materials_used: z.array(z.string()).describe('Non-standard materials you are using'),
+            materials_used: z.array(z.string()).describe('Item IDs or names of non-standard materials from inventory'),
         }),
         execute: (args: { system: string; approach: string; materials_used: string[] }) => {
             const { state, station, build } = gameCtx;
@@ -936,7 +952,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 })
             );
             if (validMaterials.length === 0) {
-                return JSON.stringify({ error: 'You need at least one material from your inventory.' });
+                return JSON.stringify({ error: 'You need at least one material from your inventory.', inventory: inventoryList(state, station) });
             }
 
             // Higher difficulty than standard repair
@@ -977,13 +993,13 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 return JSON.stringify({
                     success: true, system_id: failure.systemId, approach: args.approach,
                     roll, target, improvised: true,
-                    inventory: state.inventory.map(id => getItemName(id, station)),
+                    inventory: inventoryList(state, station),
                 });
             }
 
             return JSON.stringify({
                 success: false, system_id: failure.systemId, approach: args.approach, roll, target,
-                inventory: state.inventory.map(id => getItemName(id, station)),
+                inventory: inventoryList(state, station),
             });
         },
     });
@@ -991,7 +1007,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
     const craftItem = tool({
         description: 'Combine inventory materials to create a new component. Uses known recipes. Consumes ingredients on success.',
         inputSchema: z.object({
-            ingredients: z.array(z.string()).describe('Names of materials to combine'),
+            ingredients: z.array(z.string()).describe('Item IDs or names of materials to combine'),
             intended_result: z.string().describe('What you are trying to create'),
         }),
         execute: (args: { ingredients: string[]; intended_result: string }) => {
@@ -1077,15 +1093,15 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
 
             return JSON.stringify({
                 success: true, crafted: recipe.resultName, roll, target,
-                inventory: state.inventory.map(id => getItemName(id, station)),
+                inventory: inventoryList(state, station),
             });
         },
     });
 
     const analyzeItem = tool({
-        description: 'Examine an inventory item to understand its properties, repair applications, and combination potential.',
+        description: 'Examine an inventory item. Use the item_id from look_around or pick_up_item.',
         inputSchema: z.object({
-            item: z.string().describe('Name of the item to analyze'),
+            item: z.string().describe('Item ID or name'),
         }),
         execute: (args: { item: string }) => {
             const { state, station } = gameCtx;
@@ -1106,7 +1122,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     break;
                 }
             }
-            if (!itemId) return JSON.stringify({ error: `"${args.item}" not in inventory.` });
+            if (!itemId) return JSON.stringify({ error: `"${args.item}" not in inventory.`, inventory: inventoryList(state, station) });
 
             const item = station.items.get(itemId);
             if (!item) return JSON.stringify({ error: 'Item data missing.' });

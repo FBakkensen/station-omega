@@ -425,6 +425,7 @@ async function runGameplay(
                 let streamStarted = false;
                 let segmentsRendered = 0;
                 const segmentParser = new StreamingSegmentParser();
+                const toolOutcomes: { tool: string; succeeded: boolean; summary: string }[] = [];
 
                 try {
                     for await (const part of result.fullStream) {
@@ -455,7 +456,23 @@ async function runGameplay(
                         } else if (part.type === 'tool-call') {
                             debugLog('TOOL-CALL', `${part.toolName}(${JSON.stringify(part.input).slice(0, 200)})`);
                         } else if (part.type === 'tool-result') {
-                            debugLog('TOOL-RESULT', `${part.toolName}: ${JSON.stringify(part.output).slice(0, 200)}`);
+                            const raw = typeof part.output === 'string' ? part.output : JSON.stringify(part.output);
+                            debugLog('TOOL-RESULT', `${part.toolName}: ${raw.slice(0, 200)}`);
+                            let succeeded = true;
+                            let summary = '';
+                            try {
+                                const parsed: unknown = JSON.parse(raw);
+                                if (typeof parsed === 'object' && parsed !== null) {
+                                    const obj = parsed as Record<string, unknown>;
+                                    succeeded = !obj['error'] && obj['success'] !== false;
+                                    summary = typeof obj['error'] === 'string'
+                                        ? obj['error']
+                                        : typeof obj['reason'] === 'string'
+                                            ? obj['reason']
+                                            : (succeeded ? 'ok' : 'failed');
+                                }
+                            } catch { /* non-JSON tool result — treat as success */ }
+                            toolOutcomes.push({ tool: part.toolName, succeeded, summary });
                         } else if (part.type === 'error') {
                             debugLog('STREAM-ERROR', String(part.error));
                         } else if (part.type === 'finish') {
@@ -501,7 +518,11 @@ async function runGameplay(
                             const parsed = GameResponseSchema.parse(JSON.parse(rawJson));
                             const issues = validateGameResponse(parsed, state, station);
                             if (issues.length > 0 && attempt === 0) {
-                                guardrailFeedback = buildGuardrailFeedback(issues, state, station);
+                                const failures = toolOutcomes.filter(t => !t.succeeded);
+                                guardrailFeedback = buildGuardrailFeedback(
+                                    issues, state, station,
+                                    failures.length > 0 ? failures.map(f => ({ tool: f.tool, summary: f.summary })) : undefined,
+                                );
                                 debugLog('GUARDRAIL-RETRY', `Attempt 1 failed: ${issues.join('; ')} — retrying`);
                                 continue;
                             }
@@ -516,6 +537,17 @@ async function runGameplay(
                     // Update conversation history with this turn
                     conversationHistory.push({ role: 'user', content: prompt });
                     conversationHistory.push({ role: 'assistant', content: rawJson || '{}' });
+
+                    // Append ground-truth tool outcome digest to prevent narrative drift
+                    if (toolOutcomes.length > 0) {
+                        const digest = toolOutcomes
+                            .map(t => `${t.tool}: ${t.succeeded ? 'OK' : `FAILED (${t.summary})`}`)
+                            .join('; ');
+                        conversationHistory.push({
+                            role: 'system' as const,
+                            content: `[Tool outcomes: ${digest}]`,
+                        });
+                    }
                 } catch (err: unknown) {
                     // Non-guardrail streaming error: re-throw to outer catch
                     throw err;

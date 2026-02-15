@@ -267,7 +267,7 @@ export class EventTracker {
         return context;
     }
 
-    tickCascadeTimers(state: GameState, station: GeneratedStation, elapsedMinutes: number): string[] {
+    processCascadeEffects(state: GameState, station: GeneratedStation, elapsedMinutes: number): string[] {
         const context: string[] = [];
 
         for (const [roomId, room] of station.rooms) {
@@ -276,13 +276,6 @@ export class EventTracker {
                 if (failure.challengeState === 'resolved' || failure.challengeState === 'failed') continue;
                 // Skip failures with no cascade timer
                 if (failure.minutesUntilCascade <= 0) continue;
-
-                // Stabilized failures tick at half rate
-                const effectiveElapsed = failure.challengeState === 'stabilized'
-                    ? elapsedMinutes / 2
-                    : elapsedMinutes;
-
-                failure.minutesUntilCascade -= effectiveElapsed;
 
                 // Apply proportional hazard if player is in the room
                 if (roomId === state.currentRoom && failure.hazardPerMinute > 0) {
@@ -337,6 +330,19 @@ export class EventTracker {
         }
 
         return context;
+    }
+}
+
+// ─── Cascade Countdown (standalone, called incrementally as tools consume time) ──
+
+export function advanceCascadeCountdowns(station: GeneratedStation, minutes: number): void {
+    for (const room of station.rooms.values()) {
+        for (const failure of room.systemFailures) {
+            if (failure.challengeState === 'resolved' || failure.challengeState === 'failed') continue;
+            if (failure.minutesUntilCascade <= 0) continue;
+            const effective = failure.challengeState === 'stabilized' ? minutes / 2 : minutes;
+            failure.minutesUntilCascade -= effective;
+        }
     }
 }
 

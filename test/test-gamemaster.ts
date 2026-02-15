@@ -209,6 +209,7 @@ async function runGMTest(
         build,
         onChoices: (cs) => { pendingChoices = cs; },
         turnElapsedMinutes: 0,
+        cascadeAdvancedMinutes: 0,
     };
 
     const toolSets = createGameToolSets('engineer', gameCtx);

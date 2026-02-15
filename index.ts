@@ -11,7 +11,7 @@ import { createGameToolSets } from './src/tools.js';
 import type { GameContext, ChoiceSet } from './src/tools.js';
 import { buildOrchestratorPrompt } from './src/prompt.js';
 import { createGameMasterConfig } from './src/agents.js';
-import { EventTracker } from './src/events.js';
+import { EventTracker, advanceCascadeCountdowns } from './src/events.js';
 import { EnvironmentTracker } from './src/environment.js';
 import { buildTurnContext } from './src/turn-context.js';
 import { validateGameResponse, buildGuardrailFeedback } from './src/validation.js';
@@ -289,6 +289,7 @@ async function runGameplay(
         build,
         onChoices: (cs) => { pendingChoices = cs; },
         turnElapsedMinutes: 0,
+        cascadeAdvancedMinutes: 0,
     };
 
     const toolSets = createGameToolSets(classId, gameCtx);
@@ -319,6 +320,12 @@ async function runGameplay(
         state.turnCount++;
         state.metrics.turnCount++;
 
+        // Advance cascade countdown for any remaining time not yet applied during tools
+        const remainingCascade = elapsed - gameCtx.cascadeAdvancedMinutes;
+        if (remainingCascade > 0) {
+            advanceCascadeCountdowns(station, remainingCascade);
+        }
+
         // Tick active events with proportional damage
         const eventContext = eventTracker.tickActiveEvents(state, elapsed);
 
@@ -329,8 +336,8 @@ async function runGameplay(
             eventContext.push(`NEW EVENT: ${newEvent.type.replace(/_/g, ' ').toUpperCase()} — ${newEvent.effect}`);
         }
 
-        // Tick cascade timers with proportional time
-        const cascadeContext = eventTracker.tickCascadeTimers(state, station, elapsed);
+        // Process cascade effects (hazard damage, triggers, propagation — countdown already applied)
+        const cascadeContext = eventTracker.processCascadeEffects(state, station, elapsed);
         eventContext.push(...cascadeContext);
 
         // Log event context for debugging
@@ -392,8 +399,9 @@ async function runGameplay(
                     ui.discardTurnCards();
                 }
 
-                // Reset elapsed time accumulator — tools will add their durations during the AI run
+                // Reset elapsed time accumulators — tools will add their durations during the AI run
                 gameCtx.turnElapsedMinutes = 0;
+                gameCtx.cascadeAdvancedMinutes = 0;
 
                 // Build per-turn context as a system message (dynamic state the AI interprets)
                 const turnContext = buildTurnContext(state, station);

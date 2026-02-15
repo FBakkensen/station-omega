@@ -14,6 +14,7 @@ import type {
 import { getProficiencyModifier } from './character.js';
 import { CRAFT_RECIPES, computeActionMinutes } from './data.js';
 import { computeEnvironment } from './environment.js';
+import { advanceCascadeCountdowns } from './events.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ export interface GameContext {
     build: CharacterBuild;
     onChoices: ChoicesCallback;
     turnElapsedMinutes: number;
+    cascadeAdvancedMinutes: number;
 }
 
 // ─── Tool Sets ──────────────────────────────────────────────────────────────
@@ -71,6 +73,12 @@ export interface GameToolSets {
 }
 
 export function createGameToolSets(classId: string, gameCtx: GameContext): GameToolSets {
+
+    function advanceTime(minutes: number): void {
+        gameCtx.turnElapsedMinutes += minutes;
+        advanceCascadeCountdowns(gameCtx.station, minutes);
+        gameCtx.cascadeAdvancedMinutes += minutes;
+    }
 
     function defineSuggestTool(
         description: string, title: string,
@@ -103,7 +111,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('look_around', state, state.activeEvents, room);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
 
@@ -203,7 +211,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const fromRoom = station.rooms.get(state.currentRoom);
             if (fromRoom) {
                 const minutes = computeActionMinutes('move_to', state, state.activeEvents, fromRoom);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             // Win condition: reaching escape room with objectives complete
@@ -267,7 +275,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('pick_up_item', state, state.activeEvents, room);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             // Find item by name
             const itemName = args.item.toLowerCase();
@@ -340,7 +348,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('use_item', state, state.activeEvents, room);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             const itemName = args.item.toLowerCase();
@@ -415,7 +423,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('attempt_action', state, state.activeEvents, room, difficulty);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             const TARGETS: Record<ActionDifficulty, number> = {
@@ -525,7 +533,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('interact_npc', state, state.activeEvents, room);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             // Find NPC by ID or name
@@ -683,7 +691,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('complete_objective', state, state.activeEvents, room);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             const objectives = station.objectives;
@@ -749,7 +757,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('diagnose_system', state, state.activeEvents, room);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             const failure = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'detected');
             if (!failure) {
@@ -793,7 +801,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('stabilize_hazard', state, state.activeEvents, room);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             const failure = room.systemFailures.find(f => f.systemId === args.system && f.challengeState === 'characterized');
             if (!failure) return JSON.stringify({ error: `No characterized ${args.system} failure to stabilize. Diagnose it first.` });
@@ -841,7 +849,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
 
             // Compute time for repair (uses failure difficulty)
             const minutes = computeActionMinutes('repair_system', state, state.activeEvents, room, failure.difficulty);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             // Check required materials are in inventory
             const missing: string[] = [];
@@ -937,7 +945,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('improvise_repair', state, state.activeEvents, room);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             const failure = room.systemFailures.find(f =>
                 f.systemId === args.system && (f.challengeState === 'characterized' || f.challengeState === 'stabilized')
@@ -1017,7 +1025,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('craft_item', state, state.activeEvents, room);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             const normalizedIngredients = args.ingredients.map(n => n.toLowerCase());
@@ -1109,7 +1117,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(state.currentRoom);
             if (room) {
                 const minutes = computeActionMinutes('analyze_item', state, state.activeEvents, room);
-                gameCtx.turnElapsedMinutes += minutes;
+                advanceTime(minutes);
             }
 
             const itemName = args.item.toLowerCase();
@@ -1160,7 +1168,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             if (!room) return JSON.stringify({ error: 'Invalid room.' });
 
             const minutes = computeActionMinutes('check_environment', state, state.activeEvents, room);
-            gameCtx.turnElapsedMinutes += minutes;
+            advanceTime(minutes);
 
             const env = computeEnvironment(room, state.activeEvents);
             const failures = room.systemFailures.filter(f => f.challengeState !== 'resolved');
@@ -1242,7 +1250,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     const minutes = computeActionMinutes('bypass_system', state, state.activeEvents, room);
-                    gameCtx.turnElapsedMinutes += minutes;
+                    advanceTime(minutes);
                 }
 
                 // Check for severity-1 system failures to auto-repair
@@ -1298,7 +1306,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     const minutes = computeActionMinutes('field_surgery', state, state.activeEvents, room);
-                    gameCtx.turnElapsedMinutes += minutes;
+                    advanceTime(minutes);
                 }
                 const healed = Math.min(15, state.maxHp - state.hp);
                 state.hp += healed;
@@ -1319,7 +1327,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     const minutes = computeActionMinutes('crisis_assessment', state, state.activeEvents, room);
-                    gameCtx.turnElapsedMinutes += minutes;
+                    advanceTime(minutes);
                 }
 
                 const adjacent = getAdjacentRooms(state, station);

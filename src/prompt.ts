@@ -12,7 +12,13 @@ function knowledgeLevelGuidance(level: ArrivalScenario['knowledgeLevel']): strin
 
 function formatRoomList(station: GeneratedStation): string {
     return [...station.rooms.values()]
-        .map(r => `- **${r.name}** (${r.id}): ${r.archetype}, depth ${String(r.depth)}, connects to [${r.connections.join(', ')}]${r.lockedBy ? ` [LOCKED by ${r.lockedBy}]` : ''}`)
+        .map(r => {
+            const connNames = r.connections.map(cid => {
+                const cr = station.rooms.get(cid);
+                return cr ? cr.name : cid;
+            });
+            return `- **${r.name}** (${r.id}): ${r.archetype}, depth ${String(r.depth)}, connects to [${connNames.join(', ')}]${r.lockedBy ? ` [LOCKED by ${r.lockedBy}]` : ''}`;
+        })
         .join('\n');
 }
 

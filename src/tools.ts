@@ -189,6 +189,10 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     break;
                 }
             }
+            // Fallback: try as room ID
+            if (!targetId && station.rooms.has(args.room)) {
+                targetId = args.room;
+            }
             if (!targetId) return JSON.stringify({ error: `Unknown room: "${args.room}".` });
 
             const adjacent = getAdjacentRooms(state, station);

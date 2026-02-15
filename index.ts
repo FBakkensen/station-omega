@@ -14,7 +14,7 @@ import { createGameMasterConfig } from './src/agents.js';
 import { EventTracker, advanceCascadeCountdowns } from './src/events.js';
 import { EnvironmentTracker } from './src/environment.js';
 import { buildTurnContext } from './src/turn-context.js';
-import { validateGameResponse, buildGuardrailFeedback } from './src/validation.js';
+import { validateGameResponse, buildGuardrailFeedback, validateStateConsistency } from './src/validation.js';
 import { computeScore, saveRunToHistory, loadRunHistory } from './src/scoring.js';
 import { TTSEngine } from './src/tts.js';
 import { hasOpenRouterKey, setOpenRouterKey } from './src/env.js';
@@ -433,7 +433,7 @@ async function runGameplay(
                 let streamStarted = false;
                 let segmentsRendered = 0;
                 const segmentParser = new StreamingSegmentParser();
-                const toolOutcomes: { tool: string; succeeded: boolean; summary: string }[] = [];
+                const toolOutcomes: { tool: string; status: 'ok' | 'error' | 'game_fail'; summary: string }[] = [];
 
                 try {
                     for await (const part of result.fullStream) {
@@ -466,21 +466,22 @@ async function runGameplay(
                         } else if (part.type === 'tool-result') {
                             const raw = typeof part.output === 'string' ? part.output : JSON.stringify(part.output);
                             debugLog('TOOL-RESULT', `${part.toolName}: ${raw.slice(0, 200)}`);
-                            let succeeded = true;
+                            let status: 'ok' | 'error' | 'game_fail' = 'ok';
                             let summary = '';
                             try {
                                 const parsed: unknown = JSON.parse(raw);
                                 if (typeof parsed === 'object' && parsed !== null) {
                                     const obj = parsed as Record<string, unknown>;
-                                    succeeded = !obj['error'] && obj['success'] !== false;
-                                    summary = typeof obj['error'] === 'string'
-                                        ? obj['error']
-                                        : typeof obj['reason'] === 'string'
-                                            ? obj['reason']
-                                            : (succeeded ? 'ok' : 'failed');
+                                    if (typeof obj['error'] === 'string') {
+                                        status = 'error';
+                                        summary = obj['error'];
+                                    } else if (obj['success'] === false) {
+                                        status = 'game_fail';
+                                        summary = typeof obj['reason'] === 'string' ? obj['reason'] : 'failed';
+                                    }
                                 }
-                            } catch { /* non-JSON tool result — treat as success */ }
-                            toolOutcomes.push({ tool: part.toolName, succeeded, summary });
+                            } catch { /* non-JSON tool result — treat as ok */ }
+                            toolOutcomes.push({ tool: part.toolName, status, summary });
                         } else if (part.type === 'error') {
                             debugLog('STREAM-ERROR', String(part.error));
                         } else if (part.type === 'finish') {
@@ -525,21 +526,40 @@ async function runGameplay(
                         try {
                             const parsed = GameResponseSchema.parse(JSON.parse(rawJson));
                             const issues = validateGameResponse(parsed, state, station);
-                            if (issues.length > 0 && attempt === 0) {
-                                const failures = toolOutcomes.filter(t => !t.succeeded);
+                            const toolErrors = toolOutcomes.filter(t => t.status === 'error');
+                            const hasProblems = issues.length > 0 || toolErrors.length > 0;
+
+                            if (hasProblems && attempt === 0) {
                                 guardrailFeedback = buildGuardrailFeedback(
                                     issues, state, station,
-                                    failures.length > 0 ? failures.map(f => ({ tool: f.tool, summary: f.summary })) : undefined,
+                                    toolErrors.length > 0 ? toolErrors.map(e => ({ tool: e.tool, summary: e.summary })) : undefined,
                                 );
-                                debugLog('GUARDRAIL-RETRY', `Attempt 1 failed: ${issues.join('; ')} — retrying`);
+                                const reasons = [
+                                    ...issues,
+                                    ...toolErrors.map(e => `tool error: ${e.tool} — ${e.summary}`),
+                                ];
+                                debugLog('GUARDRAIL-RETRY', `Attempt 1 failed: ${reasons.join('; ')} — retrying`);
                                 continue;
                             }
-                            if (issues.length > 0) {
-                                debugLog('GUARDRAIL-FINAL', `Retry also failed: ${issues.join('; ')}`);
+                            if (hasProblems) {
+                                const reasons = [
+                                    ...issues,
+                                    ...toolErrors.map(e => `tool error: ${e.tool} — ${e.summary}`),
+                                ];
+                                debugLog('GUARDRAIL-FINAL', `Retry also failed: ${reasons.join('; ')}`);
                             }
                         } catch {
                             debugLog('GUARDRAIL-SKIP', 'Could not parse response for validation');
                         }
+                    }
+
+                    // Post-turn state consistency check (catches tool bugs, out-of-bounds values)
+                    const stateIssues = validateStateConsistency(state, station);
+                    if (stateIssues.length > 0) {
+                        const summary = stateIssues
+                            .map(i => `${i.field}: ${i.problem}${i.fixed ? ' [auto-fixed]' : ' [WARNING]'}`)
+                            .join('; ');
+                        debugLog('STATE-CHECK', summary);
                     }
 
                     // Update conversation history with this turn
@@ -549,7 +569,11 @@ async function runGameplay(
                     // Append ground-truth tool outcome digest to prevent narrative drift
                     if (toolOutcomes.length > 0) {
                         const digest = toolOutcomes
-                            .map(t => `${t.tool}: ${t.succeeded ? 'OK' : `FAILED (${t.summary})`}`)
+                            .map(t => {
+                                if (t.status === 'ok') return `${t.tool}: OK`;
+                                if (t.status === 'game_fail') return `${t.tool}: GAME_FAIL (${t.summary})`;
+                                return `${t.tool}: ERROR (${t.summary})`;
+                            })
                             .join('; ');
                         conversationHistory.push({
                             role: 'system' as const,

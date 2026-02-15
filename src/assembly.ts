@@ -80,6 +80,32 @@ export function assembleStation(
         });
     }
 
+    // Build NPC map from skeleton concepts + creative content
+    if (skeleton.npcConcepts && skeleton.npcConcepts.length > 0) {
+        for (const concept of skeleton.npcConcepts) {
+            const cr = creative.npcCreative?.find(n => n.npcId === concept.id);
+
+            npcs.set(concept.id, {
+                id: concept.id,
+                name: cr?.name ?? concept.role,
+                roomId: concept.roomId,
+                disposition: concept.disposition,
+                behaviors: new Set(concept.behaviors),
+                memory: {
+                    playerActions: [],
+                    dispositionHistory: [],
+                    wasSpared: false,
+                    wasHelped: false,
+                    tradeInventory: [],
+                },
+                personality: cr?.personality ?? '',
+                isAlly: false,
+                appearance: cr?.appearance ?? '',
+                soundSignature: cr?.soundSignature ?? '',
+            });
+        }
+    }
+
     // Create AI-generated starting item and place in entry room
     const startItem = creative.startingItem;
     items.set(startItem.id, {

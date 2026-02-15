@@ -2,10 +2,10 @@ import { streamText, stepCountIs } from 'ai';
 import type { ModelMessage } from 'ai';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
-import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, GameStatus, StoryArc, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
-import { generateSkeleton } from './src/skeleton.js';
-import { generateCreativeContent } from './src/creative.js';
+import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, GameStatus, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
+import { generateStation } from './src/generation/index.js';
 import { assembleStation } from './src/assembly.js';
+import { creativeModel, anthropicDirect } from './src/models.js';
 import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/character.js';
 import { createGameToolSets } from './src/tools.js';
 import type { GameContext, ChoiceSet } from './src/tools.js';
@@ -50,15 +50,6 @@ function debugLog(label: string, content: string): void {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-const STORY_ARCS: StoryArc[] = [
-    'cascade_failure', 'atmosphere_breach', 'reactor_meltdown',
-    'contamination_crisis', 'power_death_spiral', 'orbital_decay',
-];
-
-function randomStoryArc(): StoryArc {
-    return STORY_ARCS[Math.floor(Math.random() * STORY_ARCS.length)];
-}
 
 function getStatus(state: GameState, station: GeneratedStation, envTracker?: EnvironmentTracker): GameStatus {
     const room = station.rooms.get(state.currentRoom);
@@ -839,14 +830,13 @@ async function main() {
         }
 
         // GENERATING
-        const seed = Math.floor(Math.random() * 2147483647);
-        const arc = randomStoryArc();
         ui.showGenerating();
 
-        const skeleton = generateSkeleton({ seed, difficulty: 'normal', storyArc: arc, characterClass: classId });
-        const creative = await generateCreativeContent(skeleton, (message) => {
-            ui.updateLoadingMessage(message);
-        }, debugLog);
+        const { skeleton, creative } = await generateStation(
+            { difficulty: 'normal', characterClass: classId, model: creativeModel, providerOptions: anthropicDirect },
+            (message) => { ui.updateLoadingMessage(message); },
+            debugLog,
+        );
         const station = assembleStation(skeleton, creative);
 
         // GAMEPLAY

@@ -8,11 +8,11 @@
  */
 
 import { join } from 'node:path';
-import { generateSkeleton } from '../src/skeleton.js';
-import { generateCreativeContent } from '../src/creative.js';
+import { generateStation } from '../src/generation/index.js';
+import { creativeModel, anthropicDirect } from '../src/models.js';
 import { assembleStation } from '../src/assembly.js';
 import { ensureFixturesDir, writeResult } from './model-config.js';
-import type { GeneratedStation, StationSkeleton, CreativeContent } from '../src/types.js';
+import type { GeneratedStation } from '../src/types.js';
 
 // ─── Serialization Helpers ──────────────────────────────────────────────────
 
@@ -42,23 +42,14 @@ function serializeStation(station: GeneratedStation): Record<string, unknown> {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
-    console.log('Generating test fixture (seed 42, engineer, normal, cascade_failure)...');
+    console.log('Generating test fixture (AI-driven, engineer, normal)...');
 
-    const skeleton: StationSkeleton = generateSkeleton({
-        seed: 42,
-        difficulty: 'normal',
-        storyArc: 'cascade_failure',
-        characterClass: 'engineer',
-    });
-
-    console.log(`Skeleton: ${String(skeleton.rooms.length)} rooms, ${String(skeleton.items.length)} items`);
-
-    console.log('Generating creative content with current creativeModel (Sonnet 4.5)...');
-    const creative: CreativeContent = await generateCreativeContent(
-        skeleton,
+    const { skeleton, creative } = await generateStation(
+        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel, providerOptions: anthropicDirect },
         (msg) => { console.log(`  ${msg}`); },
     );
 
+    console.log(`Skeleton: ${String(skeleton.rooms.length)} rooms, ${String(skeleton.items.length)} items`);
     console.log(`Creative: ${creative.stationName}, ${String(creative.crewRoster.length)} crew`);
 
     const station = assembleStation(skeleton, creative);

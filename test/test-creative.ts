@@ -7,7 +7,8 @@
 
 import { streamText, Output } from 'ai';
 import { join } from 'node:path';
-import { generateSkeleton } from '../src/skeleton.js';
+import { generateStation } from '../src/generation/index.js';
+import { creativeModel, anthropicDirect } from '../src/models.js';
 import {
     CREATIVE_PROMPT,
     CreativeOutputSchema,
@@ -194,13 +195,12 @@ async function main() {
     console.log(`Creative Model Test — ${String(models.length)} models × ${String(runs)} runs`);
     console.log(`Models: ${models.map(m => m.label).join(', ')}\n`);
 
-    // Generate skeleton with fixed seed
-    const skeleton = generateSkeleton({
-        seed: 42,
-        difficulty: 'normal',
-        storyArc: 'cascade_failure',
-        characterClass: 'engineer',
-    });
+    // Generate skeleton via AI-driven pipeline
+    console.log('Generating station skeleton...');
+    const { skeleton } = await generateStation(
+        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel, providerOptions: anthropicDirect },
+        (msg) => { console.log(`  ${msg}`); },
+    );
     const skeletonSummary = buildSkeletonSummary(skeleton);
 
     console.log(`Skeleton: ${String(skeleton.rooms.length)} rooms, ${String(skeleton.items.length)} items\n`);

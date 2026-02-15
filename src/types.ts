@@ -136,6 +136,24 @@ export interface NPCMemory {
     tradeInventory: string[];
 }
 
+/** Structural NPC concept from AI generation Layer 3 (before creative names/descriptions). */
+export interface NPCConcept {
+    id: string;
+    roomId: string;
+    disposition: Disposition;
+    behaviors: NPCBehaviorFlag[];
+    role: string;
+}
+
+/** Creative content for an NPC, generated in Layer 4. */
+export interface NPCCreative {
+    npcId: string;
+    name: string;
+    appearance: string;
+    personality: string;
+    soundSignature: string;
+}
+
 // ─── Item System ────────────────────────────────────────────────────────────
 
 export type ItemEffectType = 'heal' | 'key' | 'objective' | 'utility' | 'trade' | 'material' | 'tool' | 'component' | 'chemical';
@@ -192,6 +210,8 @@ export interface StationSkeleton {
     objectives: ObjectiveChain;
     entryRoomId: string;
     escapeRoomId: string;
+    npcConcepts?: NPCConcept[];
+    scenario?: { theme: string; centralTension: string };
 }
 
 // ─── Map Layout (procedural, topology-safe) ────────────────────────────────
@@ -253,6 +273,7 @@ export interface CreativeContent {
     items: ItemCreative[];
     arrivalScenario: ArrivalScenario;
     startingItem: StartingItemCreative;
+    npcCreative?: NPCCreative[];
 }
 
 // ─── Assembled World (final, used during gameplay) ──────────────────────────

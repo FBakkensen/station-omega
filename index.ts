@@ -427,6 +427,7 @@ async function runGameplay(
                 let rawJson = '';
                 let streamStarted = false;
                 let segmentsRendered = 0;
+                let segmentsSkipped = 0;
                 const segmentParser = new StreamingSegmentParser();
                 const toolOutcomes: { tool: string; status: 'ok' | 'error' | 'game_fail'; summary: string }[] = [];
 
@@ -447,6 +448,10 @@ async function runGameplay(
                             // Extract complete segments from incremental JSON
                             const segments = segmentParser.push(part.text);
                             for (const seg of segments) {
+                                if (typeof seg.text !== 'string' || !seg.text) {
+                                    segmentsSkipped++;
+                                    continue;
+                                }
                                 const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
                                 const chunks = segmentToStyledChunks(display);
                                 const headerChars = getHeaderCharCount(display);
@@ -490,6 +495,10 @@ async function runGameplay(
                         try {
                             const parsed = JSON.parse(rawJson) as GameResponse;
                             for (const seg of parsed.segments) {
+                                if (typeof seg.text !== 'string' || !seg.text) {
+                                    segmentsSkipped++;
+                                    continue;
+                                }
                                 const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
                                 const chunks = segmentToStyledChunks(display);
                                 const headerChars = getHeaderCharCount(display);
@@ -517,11 +526,17 @@ async function runGameplay(
                     tickTime();
 
                     // Guardrail validation: parse rawJson and validate
+                    if (segmentsSkipped > 0) {
+                        debugLog('GUARDRAIL-WARN', `${String(segmentsSkipped)} malformed segments skipped during streaming`);
+                    }
                     if (rawJson) {
                         try {
                             const parsed = GameResponseSchema.parse(JSON.parse(rawJson));
                             const issues = validateGameResponse(parsed, state, station);
                             const toolErrors = toolOutcomes.filter(t => t.status === 'error');
+                            if (segmentsSkipped > 0) {
+                                issues.push(`${String(segmentsSkipped)} segments had missing or empty text fields`);
+                            }
                             const hasProblems = issues.length > 0 || toolErrors.length > 0;
 
                             if (hasProblems && attempt === 0) {
@@ -544,7 +559,12 @@ async function runGameplay(
                                 debugLog('GUARDRAIL-FINAL', `Retry also failed: ${reasons.join('; ')}`);
                             }
                         } catch {
-                            debugLog('GUARDRAIL-SKIP', 'Could not parse response for validation');
+                            if (attempt === 0) {
+                                debugLog('GUARDRAIL-RETRY', 'Response failed schema validation — retrying');
+                                guardrailFeedback = 'Your previous response was not valid JSON matching the required schema. Respond with a JSON object containing a "segments" array. Each segment must have: type (narration|dialogue|thought|station_pa|crew_echo|diagnostic_readout), text (non-empty string), npcId (string or null), crewName (string or null).';
+                                continue;
+                            }
+                            debugLog('GUARDRAIL-FINAL', 'Retry also failed schema validation');
                         }
                     }
 

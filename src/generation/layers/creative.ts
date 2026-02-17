@@ -7,7 +7,10 @@
  */
 
 import { z } from 'zod';
+import type { LanguageModel } from 'ai';
+import type { streamText } from 'ai';
 import type { LayerConfig, LayerContext } from '../layer-runner.js';
+import { runLayer, LayerGenerationError } from '../layer-runner.js';
 import {
     validationSuccess,
     validationFailure,
@@ -25,6 +28,13 @@ import type {
     StartingItemCreative,
     NPCCreative,
 } from '../../types.js';
+import { identitySeedLayer } from './creative-identity.js';
+import { createSingleRoomLayer } from './creative-rooms.js';
+import { itemsCreativeLayer } from './creative-items.js';
+import { npcsCreativeLayer } from './creative-npcs.js';
+import { arrivalCreativeLayer } from './creative-arrival.js';
+
+type ProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -192,12 +202,12 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
 
 // ─── Validator ───────────────────────────────────────────────────────────────
 
-const VALID_LOG_TYPES = new Set([
+export const VALID_LOG_TYPES = new Set([
     'datapad', 'wall_scrawl', 'audio_recording', 'terminal_entry',
     'engineering_report', 'calibration_record', 'failure_analysis',
 ]);
 
-function findCrewMatch(author: string, crewNames: Set<string>): string | null {
+export function findCrewMatch(author: string, crewNames: Set<string>): string | null {
     if (crewNames.has(author)) return author;
     const lower = author.toLowerCase();
     for (const name of crewNames) {
@@ -378,6 +388,7 @@ function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContex
 
 // ─── Layer Config ────────────────────────────────────────────────────────────
 
+/** @deprecated Use runCreativeSublayers() instead — kept for backwards compatibility. */
 export const creativeLayer: LayerConfig<CreativeLayerOutput, CreativeContent> = {
     name: 'Creative',
     schema: CreativeLayerSchema,
@@ -398,3 +409,141 @@ export const creativeLayer: LayerConfig<CreativeLayerOutput, CreativeContent> = 
         ].join('\n');
     },
 };
+
+// ─── Parallel Sub-Layer Orchestrator ─────────────────────────────────────────
+
+/**
+ * Runs creative content generation as parallel sub-layers:
+ * 1. Identity seed (sequential) — station name, crew roster, tone
+ * 2. Rooms + Items + NPCs + Arrival (parallel via Promise.allSettled)
+ *
+ * Only failed sub-layers retry, preserving successful results.
+ */
+export async function runCreativeSublayers(
+    context: LayerContext,
+    model: LanguageModel,
+    onProgress?: (msg: string) => void,
+    providerOptions?: ProviderOptions,
+    debugLog?: (label: string, content: string) => void,
+): Promise<CreativeContent> {
+    // ─── Phase 1: Identity Seed (sequential) ─────────────────────────────────
+    onProgress?.('Crafting station identity...');
+    debugLog?.('GENERATION', 'Starting Creative Phase 1: Identity Seed');
+
+    const identity = await runLayer(identitySeedLayer, context, model, onProgress, providerOptions, debugLog);
+    context['identitySeed'] = identity;
+    debugLog?.('GENERATION', `Identity seed complete: "${identity.stationName}", crew: ${identity.crewRoster.map(c => c.name).join(', ')}`);
+
+    // ─── Phase 2: Parallel Sub-Layers ────────────────────────────────────────
+    const topology = context['topology'] as ValidatedTopology;
+    const objectivesNPCs = context['objectivesNPCs'] as ValidatedObjectivesNPCs;
+    const hasNPCs = objectivesNPCs.npcs.length > 0;
+
+    const roomCount = topology.rooms.length;
+    const sublayerNames = [`${String(roomCount)} rooms`, 'items', ...(hasNPCs ? ['NPCs'] : []), 'arrival'];
+    onProgress?.(`Generating ${sublayerNames.join(', ')}...`);
+    debugLog?.('GENERATION', `Starting Creative Phase 2: ${sublayerNames.join(', ')} (parallel)`);
+
+    type SublayerResult = {
+        label: string;
+        promise: Promise<{ label: string; value: unknown }>;
+    };
+
+    // Per-room parallel calls — each room is an independent sub-layer
+    const sublayers: SublayerResult[] = topology.rooms.map((room, i) => {
+        const roomLayer = createSingleRoomLayer(room.id, i);
+        return {
+            label: `room:${room.id}`,
+            promise: runLayer(roomLayer, context, model, undefined, providerOptions, debugLog)
+                .then(value => ({ label: `room:${room.id}`, value })),
+        };
+    });
+
+    // Items, arrival, NPCs
+    sublayers.push({
+        label: 'items',
+        promise: runLayer(itemsCreativeLayer, context, model, onProgress, providerOptions, debugLog)
+            .then(value => ({ label: 'items', value })),
+    });
+    sublayers.push({
+        label: 'arrival',
+        promise: runLayer(arrivalCreativeLayer, context, model, onProgress, providerOptions, debugLog)
+            .then(value => ({ label: 'arrival', value })),
+    });
+
+    if (hasNPCs) {
+        sublayers.push({
+            label: 'NPCs',
+            promise: runLayer(npcsCreativeLayer, context, model, onProgress, providerOptions, debugLog)
+                .then(value => ({ label: 'NPCs', value })),
+        });
+    }
+
+    const results = await Promise.allSettled(sublayers.map(s => s.promise));
+
+    // Collect successes and failures
+    const failures: string[] = [];
+    const roomResults: RoomCreative[] = [];
+    let items: ItemCreative[] | undefined;
+    let npcCreative: NPCCreative[] | undefined;
+    let arrival: { arrivalScenario: ArrivalScenario; startingItem: StartingItemCreative } | undefined;
+
+    for (const result of results) {
+        if (result.status === 'fulfilled') {
+            const { label, value } = result.value;
+            if (label.startsWith('room:')) roomResults.push(value as RoomCreative);
+            else if (label === 'items') items = value as ItemCreative[];
+            else if (label === 'NPCs') npcCreative = value as NPCCreative[];
+            else if (label === 'arrival') arrival = value as { arrivalScenario: ArrivalScenario; startingItem: StartingItemCreative };
+        } else {
+            const err = result.reason instanceof LayerGenerationError
+                ? result.reason.message
+                : String(result.reason);
+            failures.push(err);
+        }
+    }
+
+    if (failures.length > 0) {
+        const successCount = roomResults.length;
+        const successLabels = [
+            successCount > 0 ? `${String(successCount)}/${String(roomCount)} rooms` : null,
+            items ? 'items' : null,
+            npcCreative ? 'NPCs' : null,
+            arrival ? 'arrival' : null,
+        ].filter(Boolean);
+        debugLog?.('GENERATION-FAIL', `Creative sub-layer failures (${String(failures.length)}):\n${failures.join('\n\n')}\nSuccessful: [${successLabels.join(', ')}]`);
+        throw new LayerGenerationError('Creative (parallel)', failures.length, failures.map(f => [f]));
+    }
+
+    // All sub-layers succeeded — assemble CreativeContent
+    if (!items || !arrival || roomResults.length !== roomCount) {
+        throw new Error(`Creative sub-layer results incomplete: ${String(roomResults.length)}/${String(roomCount)} rooms, items=${String(!!items)}, arrival=${String(!!arrival)}`);
+    }
+
+    // Sort rooms back to topology order
+    const roomOrderMap = new Map(topology.rooms.map((r, i) => [r.id, i]));
+    roomResults.sort((a, b) => (roomOrderMap.get(a.roomId) ?? 0) - (roomOrderMap.get(b.roomId) ?? 0));
+
+    onProgress?.('Finalizing station narrative...');
+    debugLog?.('GENERATION', 'All creative sub-layers complete, assembling CreativeContent');
+
+    const creative: CreativeContent = {
+        stationName: identity.stationName,
+        briefing: identity.briefing,
+        backstory: identity.backstory,
+        crewRoster: identity.crewRoster.map(c => ({
+            name: c.name,
+            role: c.role,
+            fate: c.fate,
+        })),
+        rooms: roomResults,
+        items,
+        arrivalScenario: arrival.arrivalScenario,
+        startingItem: arrival.startingItem,
+        npcCreative: npcCreative && npcCreative.length > 0 ? npcCreative : undefined,
+    };
+
+    debugLog?.('GENERATION', `Creative assembly complete: "${creative.stationName}" — ${String(creative.rooms.length)} rooms, ${String(creative.items.length)} items, ${String(creative.npcCreative?.length ?? 0)} NPCs`);
+
+    return creative;
+}

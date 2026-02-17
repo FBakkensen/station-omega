@@ -8,6 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 bun run start        # Run the game (bun index.ts)
 bun run typecheck    # Type-check with tsc --noEmit
 bun run lint         # Lint with ESLint (strict type-checked rules)
+
+# Test scripts (require OPENROUTER_API_KEY)
+bun run test:fixture   # Generate a station fixture to test/fixtures/
+bun run test:creative  # Test creative content generation
+bun run test:gm        # Test game master responses
+bun run test:analyze   # Analyze test results
 ```
 
 Always run both `bun run typecheck` and `bun run lint` before considering a task complete. All errors must be resolved.
@@ -20,16 +26,30 @@ Station Omega is an AI-powered text adventure game using the Vercel AI SDK (`ai`
 
 - **`index.ts`** — Main game loop: uses `streamText()` with client-side `ModelMessage[]` conversation history, per-turn system context messages, inline guardrail validation, and `fullStream` iteration. Manages TTS, UI, event tracking, and player input.
 - **`tui.ts`** — Terminal UI built with `@opentui/core`. Exports `GameUI` class with a scrollable narrative panel, per-segment card rendering, status bar, character selection, and input field.
-- **`src/tools.ts`** — All 21 game tools defined via `tool()` from `ai` with Zod schemas. Tools access shared `GameContext` via closure capture in a factory function `createGameToolSets()`. Defines `GameContext` and `ChoiceSet` types.
+- **`src/tools.ts`** — All 19 game tools defined via `tool()` from `ai` with Zod schemas. Tools access shared `GameContext` via closure capture in a factory function `createGameToolSets()`. Defines `GameContext` and `ChoiceSet` types.
 - **`src/prompt.ts`** — Builds the static system prompt. Dynamic state is passed per-turn via system-role messages in the messages array.
 - **`src/models.ts`** — Centralized model configuration. Uses `createOpenRouter()` to define `gameMasterModel` and `creativeModel`. Model swaps are a one-line string change.
 - **`src/agents.ts`** — Exports `GameMasterConfig` interface and `createGameMasterConfig()` factory. Combines model, system prompt, and tool set.
 - **`src/schema.ts`** — Zod schema for structured JSON output (`GameResponseSchema`). Defines `GameSegment` (5 types: narration, dialogue, thought, station_pa, crew_echo), `DisplaySegment` (with resolved speaker name + index), and `segmentToMarkdown()`.
 - **`src/types.ts`** — All TypeScript types: game state, station structure, NPC/item/room models, character builds, moral choices, scoring, events.
-- **`src/skeleton.ts`** — Phase 1 of station generation: deterministic room graph, items, enemies, and objectives using a seeded PRNG (LCG). Pure TypeScript, no AI calls.
-- **`src/creative.ts`** — Phase 2: AI-powered creative content generation using `streamText()` with `Output.object()` (Zod structured output). Generates names, descriptions, sensory details, crew logs.
-- **`src/assembly.ts`** — Phase 3: merges skeleton + creative content into a final `GeneratedStation` with `Map<string, Room/NPC/Item>`.
-- **`src/data.ts`** — Static game data: character builds, difficulty multipliers/targets, starting items, room archetypes, disposition configs.
+- **`src/env.ts`** — API key management: checks/sets `OPENROUTER_API_KEY`, persists to `.env.local`.
+- **`src/environment.ts`** — `EnvironmentSnapshot` (O2, CO2, pressure, temp, radiation, gravity) computed per-room from system failures and events.
+- **`src/turn-context.ts`** — `buildTurnContext()`: assembles dynamic per-turn system message from game state (elapsed time, events, environment).
+- **`src/validation.ts`** — `validateGameResponse()`: post-stream guardrails checking NPC IDs, crew names, segment validity.
+- **`src/station-storage.ts`** — Saved station persistence: save/load/list/delete `GeneratedStation` to disk as JSON.
+- **`src/audio-player.ts`** — PvSpeaker wrapper for PCM audio playback with graceful fallback if native module unavailable.
+- **`src/map-layout.ts`** — Force-directed layout algorithm: converts room graph into `MapLayout` (x/y coordinates per room).
+- **`src/map-render.ts`** — Renders `MapLayout` to styled `TextChunk[]` for TUI display with archetype icons and connection lines.
+- **`src/creative.ts`** — Legacy creative content generation (still used as fallback). `streamText()` with `Output.object()` for names, descriptions, sensory details, crew logs.
+- **`src/assembly.ts`** — Merges `StationSkeleton` + `CreativeContent` into final `GeneratedStation` with `Map<string, Room/NPC/Item>`.
+- **`src/generation/index.ts`** — Station generation orchestrator: runs 4 AI layers sequentially via `generateStation()`, assembles `StationSkeleton` + `CreativeContent`.
+- **`src/generation/layer-runner.ts`** — Generic layer execution engine: `runLayer()` handles prompt building, AI call, validation, and retry with error feedback.
+- **`src/generation/validate.ts`** — Shared generation validators: connectivity checks, bidirectional edges, room existence, material reachability.
+- **`src/generation/layers/topology.ts`** — Layer 1: AI generates room graph (IDs, archetypes, connections, locked doors, entry/escape, scenario theme).
+- **`src/generation/layers/systems-items.ts`** — Layer 2: AI places system failures and distributes engineering materials/tools across rooms.
+- **`src/generation/layers/objectives-npcs.ts`** — Layer 3: AI designs objective chain and NPC placement given topology + systems.
+- **`src/generation/layers/creative.ts`** — Layer 4: AI generates names, descriptions, sensory details, crew logs, arrival scenario, NPC creative content.
+- **`src/data.ts`** — Static game data: character builds, difficulty multipliers/targets, starting items, room archetypes, disposition configs, engineering items.
 - **`src/character.ts`** — Character class logic: proficiency/weakness modifiers, `initializePlayerState()`, re-exports `CHARACTER_BUILDS`.
 - **`src/events.ts`** — Random event system: `EventTracker` manages cooldowns/triggers, `getEventContext()` serializes active events for the prompt.
 - **`src/scoring.ts`** — End-of-run scoring: `computeScore()` calculates 5 category scores + grade, `saveRunToHistory()`/`loadRunHistory()` persist to `run-history.json`.
@@ -41,11 +61,15 @@ Station Omega is an AI-powered text adventure game using the Vercel AI SDK (`ai`
 
 ### Station Generation Pipeline
 
-Station creation is a 3-phase pipeline:
+Station creation uses a 4-layer AI-driven pipeline (`src/generation/`) plus assembly:
 
-1. **Skeleton** (`src/skeleton.ts`) — Seeded PRNG generates deterministic room graph, enemy placement, item distribution, objective chain, and locked-door dependencies. No AI calls.
-2. **Creative** (`src/creative.ts`) — `streamText()` with `Output.object()` generates thematic names, descriptions, sensory details, crew logs, and backstory. IDs must match the skeleton.
-3. **Assembly** (`src/assembly.ts`) — Merges skeleton structure + creative content into the final `GeneratedStation` used during gameplay (Maps of rooms, NPCs, items).
+1. **Topology** (`layers/topology.ts`) — AI generates room graph: room IDs, archetypes, connections, locked doors, entry/escape rooms, and scenario theme.
+2. **Systems & Items** (`layers/systems-items.ts`) — AI places system failures and distributes engineering materials/tools. Validated against topology (room existence, material reachability).
+3. **Objectives & NPCs** (`layers/objectives-npcs.ts`) — AI designs the objective chain and NPC placement. Receives validated topology + systems as context.
+4. **Creative** (`layers/creative.ts`) — AI generates names, descriptions, sensory details, crew logs, arrival scenario, and NPC creative content.
+5. **Assembly** (`src/assembly.ts`) — Merges the `StationSkeleton` (assembled from layers 1-3 in `generation/index.ts`) + `CreativeContent` (layer 4) into the final `GeneratedStation`.
+
+Each layer uses `runLayer()` (`layer-runner.ts`) which handles: prompt building → `streamText()` with `Output.object()` → validation → retry with error feedback (up to `maxRetries`). Layers pass validated output forward via `LayerContext`.
 
 ### Streaming & Rendering Pipeline
 
@@ -77,7 +101,7 @@ This game uses an AI narrator — the design should leverage that, not fight it.
 - **Instructions vs Context.** System prompt = static game rules. Dynamic state (events, NPC hints, moral profile) = system-role message in the messages array each turn. Rules are rules; state is context to interpret.
 - **Events are conditions, not scripts.** A power failure means the AI shifts to non-visual narration — not that tools strip data.
 - **NPC behaviors are tendencies.** Flags like `can_flee` indicate capability. The AI decides when and how they manifest.
-- **Output guardrails verify, not narrate.** The game engine validates AI output against rules (valid NPC IDs, crew names) via inline `validateGameResponse()` after stream completes — pure TypeScript checks, no extra LLM call.
+- **Output guardrails verify, not narrate.** The game engine validates AI output against rules (valid NPC IDs, crew names) via `validateGameResponse()` in `src/validation.ts` after stream completes — pure TypeScript checks, no extra LLM call.
 
 When adding mechanics: "Is this physics (tool) or narration (AI)?" Dice rolls, HP, state transitions = tool. How it looks, sounds, feels = AI.
 
@@ -88,6 +112,7 @@ When adding mechanics: "Is this physics (tool) or narration (AI)?" Dice rolls, H
 - **Schema validation**: Zod v4 (tool parameter schemas + structured output)
 - **Markdown parsing**: `marked` Lexer (for inline format extraction in `markdown-reveal.ts`)
 - **TUI**: `@opentui/core` (Box/Text/Input renderables, `StyledText`, `TextChunk`)
+- **Audio**: `@picovoice/pvspeaker-node` (native PCM playback with graceful fallback)
 - **ESM modules**: `"type": "module"` in package.json
 - **TypeScript**: `strict: true`, `noEmit: true`, target ES2022, bundler module resolution
 - **ESLint**: Flat config with `typescript-eslint` `strictTypeChecked` rules
@@ -109,7 +134,7 @@ When adding mechanics: "Is this physics (tool) or narration (AI)?" Dice rolls, H
 
 ### System Prompt Guidelines (src/prompt.ts)
 
-The Game Master model is configurable via `src/models.ts` (default: `anthropic/claude-sonnet-4` via OpenRouter). Key rules when editing the system prompt:
+The Game Master model is configurable via `src/models.ts` (current: `google/gemini-3-flash-preview` for GM, `anthropic/claude-opus-4.6` for creative generation). Key rules when editing the system prompt:
 
 - **Use markdown headers** (`#`, `##`) to structure the system prompt, and **XML tags** (`<station_rooms>`, `<npc_list>`) to delineate data sections from instructions.
 - **Dedicated `# Output Format` section** near the top for response formatting rules.

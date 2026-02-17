@@ -26,7 +26,7 @@ import type { LayerContext } from './layer-runner.js';
 import { topologyLayer } from './layers/topology.js';
 import { systemsItemsLayer } from './layers/systems-items.js';
 import { objectivesNPCsLayer } from './layers/objectives-npcs.js';
-import { creativeLayer } from './layers/creative.js';
+import { runCreativeSublayers } from './layers/creative.js';
 
 type ProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
 
@@ -79,11 +79,10 @@ export async function generateStation(
     context['objectivesNPCs'] = objectivesNPCs;
     debugLog?.('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps, ${String(objectivesNPCs.npcs.length)} NPCs`);
 
-    // ─── Layer 4: Creative Content ───────────────────────────────────────────
-    onProgress?.('Generating station narrative...');
-    debugLog?.('GENERATION', 'Starting Layer 4: Creative');
+    // ─── Layer 4: Creative Content (parallel sub-layers) ────────────────────
+    debugLog?.('GENERATION', 'Starting Layer 4: Creative (parallel sub-layers)');
 
-    const creative = await runLayer(creativeLayer, context, config.model, onProgress, po, debugLog);
+    const creative = await runCreativeSublayers(context, config.model, onProgress, po, debugLog);
     debugLog?.('GENERATION', `Layer 4 complete: ${creative.stationName}`);
 
     // ─── Assemble StationSkeleton from validated layers ──────────────────────

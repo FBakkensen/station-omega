@@ -92,6 +92,7 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
 - The LAST step MUST target the escape room (${topology.escapeRoomId})
 - requiredItemId: reference an existing item ID from the items list, or null
 - requiredSystemRepair: reference a system that has a failure in the target room, or null
+- IMPORTANT: When a step requires BOTH a requiredItemId AND a requiredSystemRepair, the requiredItemId must be one of the materials needed for that system repair. The step description MUST mention ALL required materials for the repair (not just the objective item) so the player knows what to collect
 - Step IDs must be unique (like "step_0", "step_1", etc.)
 - Make descriptions action-oriented and specific to the scenario
 
@@ -199,7 +200,20 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
         }
     }
 
-    // 5. Last step must target escape room
+    // 5. Cross-check: when a step has both requiredItemId and requiredSystemRepair,
+    //    verify the item's baseItemKey appears in the failure's requiredMaterials
+    for (const step of output.objectives.steps) {
+        if (step.requiredItemId && step.requiredSystemRepair && roomIdSet.has(step.roomId) && itemIdSet.has(step.requiredItemId)) {
+            const item = systemsItems.items.find(i => i.id === step.requiredItemId);
+            const roomFailures = systemsItems.roomFailures.find(rf => rf.roomId === step.roomId);
+            const failure = roomFailures?.failures.find(f => f.systemId === step.requiredSystemRepair);
+            if (item && failure && !failure.requiredMaterials.includes(item.baseItemKey)) {
+                errors.push(`Objective step '${step.id}' requires item '${step.requiredItemId}' (${item.baseItemKey}) for repair of '${step.requiredSystemRepair}', but that system's requiredMaterials are [${failure.requiredMaterials.join(', ')}]. The objective item must be one of the repair materials`);
+            }
+        }
+    }
+
+    // 6. Last step must target escape room
     if (output.objectives.steps.length > 0) {
         const lastStep = output.objectives.steps[output.objectives.steps.length - 1];
         if (lastStep.roomId !== topology.escapeRoomId) {
@@ -207,7 +221,7 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
         }
     }
 
-    // 6. NPC room validity
+    // 7. NPC room validity
     for (const npc of output.npcs) {
         if (!roomIdSet.has(npc.roomId)) {
             errors.push(`NPC '${npc.id}' is placed in room '${npc.roomId}' which does not exist. Valid rooms: [${[...roomIdSet].join(', ')}]`);
@@ -220,7 +234,7 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
         }
     }
 
-    // 7. NPC ID uniqueness
+    // 8. NPC ID uniqueness
     const npcIds = output.npcs.map(n => n.id);
     const npcIdSet = new Set(npcIds);
     if (npcIdSet.size !== npcIds.length) {

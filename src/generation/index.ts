@@ -23,6 +23,7 @@ import { ENGINEERING_ITEMS } from '../data.js';
 import { computeDepths } from '../graph.js';
 import { runLayer } from './layer-runner.js';
 import type { LayerContext } from './layer-runner.js';
+import { createGenerationLogger } from '../generation-log.js';
 import { topologyLayer } from './layers/topology.js';
 import { systemsItemsLayer } from './layers/systems-items.js';
 import { objectivesNPCsLayer } from './layers/objectives-npcs.js';
@@ -53,37 +54,47 @@ export async function generateStation(
         characterClass: config.characterClass,
     };
 
+    // Combined logger: writes to both the per-station log file and the external debugLog callback
+    const logger = createGenerationLogger(config.difficulty, config.characterClass);
+    const combinedLog = (label: string, content: string): void => {
+        logger.log(label, content);
+        debugLog?.(label, content);
+    };
+
     // ─── Layer 1: Topology ───────────────────────────────────────────────────
     onProgress?.('Designing station layout...');
-    debugLog?.('GENERATION', 'Starting Layer 1: Topology');
+    combinedLog('GENERATION', 'Starting Layer 1: Topology');
 
     const po = config.providerOptions;
 
-    const topology = await runLayer(topologyLayer, context, config.model, onProgress, po, debugLog);
+    const topology = await runLayer(topologyLayer, context, config.model, onProgress, po, combinedLog);
     context['topology'] = topology;
-    debugLog?.('GENERATION', `Layer 1 complete: ${String(topology.rooms.length)} rooms, ${topology.topology} topology`);
+    combinedLog('GENERATION', `Layer 1 complete: ${String(topology.rooms.length)} rooms, ${topology.topology} topology`);
 
     // ─── Layer 2: Systems & Items ────────────────────────────────────────────
     onProgress?.('Engineering system failures...');
-    debugLog?.('GENERATION', 'Starting Layer 2: Systems & Items');
+    combinedLog('GENERATION', 'Starting Layer 2: Systems & Items');
 
-    const systemsItems = await runLayer(systemsItemsLayer, context, config.model, onProgress, po, debugLog);
+    const systemsItems = await runLayer(systemsItemsLayer, context, config.model, onProgress, po, combinedLog);
     context['systemsItems'] = systemsItems;
-    debugLog?.('GENERATION', `Layer 2 complete: ${String(systemsItems.roomFailures.length)} rooms with failures, ${String(systemsItems.items.length)} items`);
+    combinedLog('GENERATION', `Layer 2 complete: ${String(systemsItems.roomFailures.length)} rooms with failures, ${String(systemsItems.items.length)} items`);
 
     // ─── Layer 3: Objectives & NPCs ──────────────────────────────────────────
     onProgress?.('Designing mission objectives...');
-    debugLog?.('GENERATION', 'Starting Layer 3: Objectives & NPCs');
+    combinedLog('GENERATION', 'Starting Layer 3: Objectives & NPCs');
 
-    const objectivesNPCs = await runLayer(objectivesNPCsLayer, context, config.model, onProgress, po, debugLog);
+    const objectivesNPCs = await runLayer(objectivesNPCsLayer, context, config.model, onProgress, po, combinedLog);
     context['objectivesNPCs'] = objectivesNPCs;
-    debugLog?.('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps, ${String(objectivesNPCs.npcs.length)} NPCs`);
+    combinedLog('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps, ${String(objectivesNPCs.npcs.length)} NPCs`);
 
     // ─── Layer 4: Creative Content (parallel sub-layers) ────────────────────
-    debugLog?.('GENERATION', 'Starting Layer 4: Creative (parallel sub-layers)');
+    combinedLog('GENERATION', 'Starting Layer 4: Creative (parallel sub-layers)');
 
-    const creative = await runCreativeSublayers(context, config.model, onProgress, po, debugLog);
-    debugLog?.('GENERATION', `Layer 4 complete: ${creative.stationName}`);
+    const creative = await runCreativeSublayers(context, config.model, onProgress, po, combinedLog);
+    combinedLog('GENERATION', `Layer 4 complete: ${creative.stationName}`);
+
+    // Rename log file with station name
+    logger.finalize(creative.stationName);
 
     // ─── Assemble StationSkeleton from validated layers ──────────────────────
     onProgress?.('Assembling station data...');

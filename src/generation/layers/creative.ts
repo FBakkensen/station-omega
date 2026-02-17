@@ -357,6 +357,7 @@ function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContex
         id: output.startingItem.id,
         name: output.startingItem.name,
         description: output.startingItem.description,
+        effectDescription: output.startingItem.name,
         category: output.startingItem.category,
         effectType: output.startingItem.effectType,
         effectValue: output.startingItem.effectValue,

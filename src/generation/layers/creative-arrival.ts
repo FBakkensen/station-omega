@@ -35,6 +35,7 @@ export const ArrivalCreativeSchema = z.object({
         effectType: z.enum(['heal', 'tool', 'material']),
         effectValue: z.number(),
         useNarration: z.string(),
+        effectDescription: z.string(),
     }),
 });
 
@@ -84,7 +85,8 @@ An item the player finds immediately in the starting room. Must fit the scenario
 - Tools: category "tool", effectType "tool", effectValue 1
 - Materials: category "material", effectType "material", effectValue 1
 - CRITICAL: startingItem.id must be UNIQUE — it must NOT match any of these existing item IDs: [${existingItemIds.join(', ')}]
-- Use a descriptive ID like "starting_medkit" or "emergency_toolkit"`;
+- Use a descriptive ID like "starting_medkit" or "emergency_toolkit"
+- effectDescription: A SHORT mechanical effect summary (5-10 words) like "Emergency thermal wrap — treats burns" or "Multi-tool — bypasses simple locks". This is NOT the full description — it's a brief gameplay label`;
 
     let user = `Generate arrival scenario and starting item:
 
@@ -138,6 +140,7 @@ function validateArrivalCreative(output: ArrivalCreativeOutput, context: LayerCo
             id: output.startingItem.id,
             name: output.startingItem.name,
             description: output.startingItem.description,
+            effectDescription: output.startingItem.effectDescription,
             category: output.startingItem.category,
             effectType: output.startingItem.effectType,
             effectValue: output.startingItem.effectValue,

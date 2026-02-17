@@ -116,7 +116,7 @@ export function assembleStation(
         effect: {
             type: startItem.effectType,
             value: startItem.effectValue,
-            description: startItem.description,
+            description: startItem.effectDescription,
         },
         isKeyItem: false,
         useNarration: startItem.useNarration,

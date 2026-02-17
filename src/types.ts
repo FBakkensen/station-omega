@@ -236,6 +236,7 @@ export interface StartingItemCreative {
     id: string;
     name: string;
     description: string;
+    effectDescription: string;
     category: 'medical' | 'tool' | 'material';
     effectType: 'heal' | 'tool' | 'material';
     effectValue: number;

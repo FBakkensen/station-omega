@@ -65,6 +65,8 @@ export async function runLayer<TSchema, TValidated>(
         const errors = attempt > 0 ? allErrors[attempt - 1] : undefined;
         const { system, user } = config.buildPrompt(context, errors);
 
+        debugLog?.('LAYER-PROMPT', `${config.name} [attempt ${String(attempt + 1)}]\n\n=== System ===\n${system}\n\n=== User ===\n${user}`);
+
         if (attempt > 0) {
             onProgress?.(`Retrying ${config.name} (attempt ${String(attempt + 1)}/${String(maxAttempts)})...`);
         }
@@ -90,6 +92,9 @@ export async function runLayer<TSchema, TValidated>(
             for await (const _ of result.textStream) { /* drive stream */ }
 
             const parsed = await result.output;
+
+            debugLog?.('LAYER-RESPONSE', `${config.name} [attempt ${String(attempt + 1)}]\n${JSON.stringify(parsed, null, 2)}`);
+
             const validation = config.validate(parsed, context);
 
             if (validation.success && validation.value !== undefined) {

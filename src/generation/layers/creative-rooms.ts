@@ -93,7 +93,15 @@ export function createSingleRoomLayer(
 - Generate 1-2 crew logs
 - Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis
 - CRITICAL: Crew log authors MUST come from this roster: ${crewNames}. Do NOT invent new authors.
-- Logs should read like frustrated engineering reports, sarcastic maintenance memos, or panicked calibration records`;
+- Logs should read like frustrated engineering reports, sarcastic maintenance memos, or panicked calibration records
+
+# Sensory Variety
+- Each sound must describe a DIFFERENT source mechanism — avoid repeating "ticking", "hissing", or "humming" across rooms. Use unique mechanical sources (pump cavitation, relay chatter, valve stutter, bearing whine, etc.)
+- Tactile descriptions must vary — not every room should mention boot soles or heat. Use vibrations, air currents, surface textures, condensation, static charge, etc.
+- At least one sound per room should be unique to that room's specific failure mode or archetype
+
+# Crew Log Temporal Consistency
+- If crew logs reference specific timestamps, avoid stating precise time gaps (like "two hours before the incident") unless the exact timeline is provided. Use vague references like "hours before", "earlier that shift", or "sometime before everything went sideways" instead`;
 
             let user = `Generate creative content for this room:
 

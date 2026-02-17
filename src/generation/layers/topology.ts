@@ -110,6 +110,7 @@ You design VARIED and INTERESTING station topologies. Each station should feel s
 - If a room is locked by "keycard_0", the keycard must be obtainable before reaching that room
 - Mix archetypes for variety — don't repeat the same archetype more than 3 times
 - Entry and escape rooms should NOT be directly connected
+- STRONGLY PREFER that ALL paths from entry to escape pass through at least one locked door. This ensures keycards serve as meaningful progression gates. The escape room should not be freely reachable without unlocking at least one door
 
 # Scenario
 Design a unique scenario theme and central tension for each station. Examples:
@@ -225,6 +226,39 @@ function validateTopology(output: TopologyOutput, context: LayerContext): Valida
     for (const room of output.rooms) {
         if (room.connections.includes(room.id)) {
             errors.push(`${room.id} has a self-connection — rooms cannot connect to themselves`);
+        }
+    }
+
+    // 12. Warn if escape room is reachable from entry without passing through any locked door
+    if (idSet.has(output.entryRoomId) && idSet.has(output.escapeRoomId) && errors.length === 0) {
+        const lockedEdges = new Set<string>();
+        for (const room of output.rooms) {
+            if (room.lockedBy) {
+                // Mark edges TO this locked room
+                for (const conn of room.connections) {
+                    lockedEdges.add(`${conn}->${room.id}`);
+                }
+            }
+        }
+        // BFS from entry, only traversing unlocked edges
+        const visited = new Set<string>();
+        const queue = [output.entryRoomId];
+        visited.add(output.entryRoomId);
+        while (queue.length > 0) {
+            const current = queue.shift();
+            if (!current) break;
+            const currentRoom = output.rooms.find(r => r.id === current);
+            if (currentRoom) {
+                for (const conn of currentRoom.connections) {
+                    if (!visited.has(conn) && !lockedEdges.has(`${current}->${conn}`)) {
+                        visited.add(conn);
+                        queue.push(conn);
+                    }
+                }
+            }
+        }
+        if (visited.has(output.escapeRoomId)) {
+            repairs.push(`Warning: escape room ${output.escapeRoomId} is reachable from entry without passing through any locked door. Consider gating escape behind a keycard.`);
         }
     }
 

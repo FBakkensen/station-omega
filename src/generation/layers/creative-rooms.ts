@@ -27,9 +27,9 @@ const SingleRoomSchema = z.object({
     descriptionSeed: z.string(),
     engineeringNotes: z.string(),
     sensory: z.object({
-        sounds: z.array(z.string().min(1)).min(1).max(5),
-        smells: z.array(z.string().min(1)).min(1).max(4),
-        visuals: z.array(z.string().min(1)).min(1).max(5),
+        sounds: z.array(z.string().min(1)),
+        smells: z.array(z.string().min(1)),
+        visuals: z.array(z.string().min(1)),
         tactile: z.string().min(1),
     }),
     crewLogs: z.array(z.object({
@@ -132,6 +132,11 @@ ${identity.crewRoster.map(c => `  ${c.name} — ${c.role}, ${c.fate}`).join('\n'
             if (output.crewLogs.length === 0) {
                 errors.push(`Room '${targetRoomId}' has no crew logs — generate at least 1`);
             }
+
+            // Sensory array count checks (minItems/maxItems not supported by Anthropic's structured output)
+            if (output.sensory.sounds.length === 0) errors.push('sensory.sounds is empty — provide at least 1');
+            if (output.sensory.smells.length === 0) errors.push('sensory.smells is empty — provide at least 1');
+            if (output.sensory.visuals.length === 0) errors.push('sensory.visuals is empty — provide at least 1');
 
             // Reject whitespace-only sensory strings (trim() can't be in schema — breaks Output.object())
             const sensoryFields: [string, string[]][] = [

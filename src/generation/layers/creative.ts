@@ -11,6 +11,7 @@ import type { LanguageModel } from 'ai';
 import type { streamText } from 'ai';
 import type { LayerConfig, LayerContext } from '../layer-runner.js';
 import { runLayer, LayerGenerationError } from '../layer-runner.js';
+import { ConcurrencyLimiter } from '../concurrency.js';
 import {
     validationSuccess,
     validationFailure,
@@ -53,9 +54,9 @@ export const CreativeLayerSchema = z.object({
         descriptionSeed: z.string(),
         engineeringNotes: z.string(),
         sensory: z.object({
-            sounds: z.array(z.string().min(1)).min(1).max(5),
-            smells: z.array(z.string().min(1)).min(1).max(4),
-            visuals: z.array(z.string().min(1)).min(1).max(5),
+            sounds: z.array(z.string().min(1)),
+            smells: z.array(z.string().min(1)),
+            visuals: z.array(z.string().min(1)),
             tactile: z.string().min(1),
         }),
         crewLogs: z.array(z.object({
@@ -459,22 +460,25 @@ export async function runCreativeSublayers(
     const objectivesNPCs = context['objectivesNPCs'] as ValidatedObjectivesNPCs;
     const hasNPCs = objectivesNPCs.npcs.length > 0;
 
+    const maxConcurrent = 4;
+    const limiter = new ConcurrencyLimiter(maxConcurrent);
+
     const roomCount = topology.rooms.length;
     const sublayerNames = [`${String(roomCount)} rooms`, 'items', ...(hasNPCs ? ['NPCs'] : []), 'arrival'];
     onProgress?.(`Generating ${sublayerNames.join(', ')}...`);
-    debugLog?.('GENERATION', `Starting Creative Phase 2: ${sublayerNames.join(', ')} (parallel)`);
+    debugLog?.('GENERATION', `Starting Creative Phase 2: ${sublayerNames.join(', ')} (max ${String(maxConcurrent)} concurrent)`);
 
     type SublayerResult = {
         label: string;
         promise: Promise<{ label: string; value: unknown }>;
     };
 
-    // Per-room parallel calls — each room is an independent sub-layer
+    // Per-room parallel calls — each room is an independent sub-layer, bounded by limiter
     const sublayers: SublayerResult[] = topology.rooms.map((room, i) => {
         const roomLayer = createSingleRoomLayer(room.id, i);
         return {
             label: `room:${room.id}`,
-            promise: runLayer(roomLayer, context, model, undefined, providerOptions, debugLog)
+            promise: limiter.run(() => runLayer(roomLayer, context, model, undefined, providerOptions, debugLog))
                 .then(value => ({ label: `room:${room.id}`, value })),
         };
     });
@@ -482,19 +486,19 @@ export async function runCreativeSublayers(
     // Items, arrival, NPCs
     sublayers.push({
         label: 'items',
-        promise: runLayer(itemsCreativeLayer, context, model, onProgress, providerOptions, debugLog)
+        promise: limiter.run(() => runLayer(itemsCreativeLayer, context, model, onProgress, providerOptions, debugLog))
             .then(value => ({ label: 'items', value })),
     });
     sublayers.push({
         label: 'arrival',
-        promise: runLayer(arrivalCreativeLayer, context, model, onProgress, providerOptions, debugLog)
+        promise: limiter.run(() => runLayer(arrivalCreativeLayer, context, model, onProgress, providerOptions, debugLog))
             .then(value => ({ label: 'arrival', value })),
     });
 
     if (hasNPCs) {
         sublayers.push({
             label: 'NPCs',
-            promise: runLayer(npcsCreativeLayer, context, model, onProgress, providerOptions, debugLog)
+            promise: limiter.run(() => runLayer(npcsCreativeLayer, context, model, onProgress, providerOptions, debugLog))
                 .then(value => ({ label: 'NPCs', value })),
         });
     }

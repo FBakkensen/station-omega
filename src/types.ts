@@ -338,7 +338,7 @@ export interface GeneratedStation {
 
 // ─── Moral Choices ──────────────────────────────────────────────────────────
 
-export interface MoralChoice {
+interface MoralChoice {
     turn: number;
     description: string;
     tendency: 'mercy' | 'sacrifice' | 'pragmatic';
@@ -356,15 +356,6 @@ export interface MoralProfile {
 export type ActionDifficulty = 'trivial' | 'easy' | 'moderate' | 'hard' | 'extreme' | 'impossible';
 
 export type ActionOutcome = 'critical_success' | 'success' | 'partial_success' | 'failure' | 'critical_failure';
-
-export interface ActionResult {
-    outcome: ActionOutcome;
-    roll: number;
-    target: number;
-    modifiers: Record<string, number>;
-    damageDealt: number;
-    description: string;
-}
 
 // ─── Random Events ──────────────────────────────────────────────────────────
 

@@ -8,16 +8,6 @@ const openrouter = createOpenRouter({
     },
 });
 
-/** Provider routing: direct to Anthropic, no fallbacks. */
-export const anthropicDirect = {
-    openrouter: {
-        provider: {
-            order: ['anthropic'],
-            allow_fallbacks: false,
-        },
-    },
-};
-
 /** Model used for the main game master (tool calling + narrative). */
 export const gameMasterModel = openrouter('google/gemini-3-flash-preview');
 

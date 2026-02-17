@@ -20,7 +20,7 @@ import type { ArrivalScenario, StartingItemCreative } from '../../types.js';
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
-export const ArrivalCreativeSchema = z.object({
+const ArrivalCreativeSchema = z.object({
     arrivalScenario: z.object({
         playerBackstory: z.string(),
         arrivalCondition: z.string(),
@@ -39,11 +39,11 @@ export const ArrivalCreativeSchema = z.object({
     }),
 });
 
-export type ArrivalCreativeOutput = z.infer<typeof ArrivalCreativeSchema>;
+type ArrivalCreativeOutput = z.infer<typeof ArrivalCreativeSchema>;
 
 // ─── Validated Type ──────────────────────────────────────────────────────────
 
-export interface ValidatedArrival {
+interface ValidatedArrival {
     arrivalScenario: ArrivalScenario;
     startingItem: StartingItemCreative;
 }

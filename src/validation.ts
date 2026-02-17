@@ -94,7 +94,7 @@ export function buildGuardrailFeedback(
     return parts.join('\n');
 }
 
-export interface StateConsistencyIssue {
+interface StateConsistencyIssue {
     field: string;
     problem: string;
     fixed: boolean;

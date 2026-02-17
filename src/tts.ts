@@ -8,7 +8,7 @@ import { initAudioPlayer, isPlayerAvailable, startPlayer, writePlayer, stopPlaye
 
 // ─── Errors ────────────────────────────────────────────────────────────────
 
-export class TTSError extends Error {
+class TTSError extends Error {
     constructor(message: string) {
         super(message);
         this.name = 'TTSError';
@@ -17,7 +17,7 @@ export class TTSError extends Error {
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-export interface NarratorContext {
+interface NarratorContext {
     hpPercent: number;
     isNewRoom: boolean;
 }
@@ -181,7 +181,6 @@ export class TTSEngine {
     private audioEnabled = false;
     private debugLog: (label: string, content: string) => void;
     private npcMap = new Map<string, NPC>();
-    private crewRoster: CrewMember[] = [];
     private narratorContext: NarratorContext = { hpPercent: 100, isNewRoom: false };
     private tempDir: string | null = null;
     private abortController: AbortController | null = null;
@@ -362,8 +361,9 @@ export class TTSEngine {
         return NPC_VOICE_POOL[idx];
     }
 
-    setCrewRoster(roster: CrewMember[]): void {
-        this.crewRoster = roster;
+    setCrewRoster(_roster: CrewMember[]): void {
+        // Crew names are currently unused by TTS voice assignment, but this setter
+        // is kept for call-site compatibility with the game loop.
     }
 
     setNarratorContext(ctx: NarratorContext): void {

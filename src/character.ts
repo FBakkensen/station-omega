@@ -1,8 +1,5 @@
 import type {
-    ActionDifficulty,
     ActionDomain,
-    ActionOutcome,
-    ActionResult,
     CharacterBuild,
     CharacterClassId,
     Difficulty,
@@ -11,8 +8,6 @@ import type {
 } from './types.js';
 import {
     CHARACTER_BUILDS,
-    DIFFICULTY_MULTIPLIERS,
-    DIFFICULTY_TARGETS,
     STARTING_ITEMS,
 } from './data.js';
 
@@ -33,62 +28,9 @@ export function getProficiencyModifier(
     return 0;
 }
 
-// ─── Action Roll Resolution ─────────────────────────────────────────────────
-
-export function resolveAction(
-    build: CharacterBuild,
-    domain: ActionDomain,
-    difficulty: ActionDifficulty,
-    difficultyLevel: Difficulty,
-    extraModifiers?: Record<string, number>,
-): ActionResult {
-    const baseTarget = DIFFICULTY_TARGETS[difficulty];
-    const profMod = getProficiencyModifier(build, domain);
-    const diffMult = DIFFICULTY_MULTIPLIERS[difficultyLevel];
-
-    const modifiers: Record<string, number> = {
-        proficiency: profMod,
-        ...extraModifiers,
-    };
-
-    const totalModifier = Object.values(modifiers).reduce((sum, v) => sum + v, 0);
-    const adjustedTarget = Math.max(1, Math.min(99, Math.round((baseTarget + totalModifier) / diffMult)));
-
-    const roll = Math.floor(Math.random() * 100) + 1;
-
-    const outcome = determineOutcome(roll, adjustedTarget);
-
-    return {
-        outcome,
-        roll,
-        target: adjustedTarget,
-        modifiers,
-        damageDealt: 0,
-        description: describeOutcome(outcome),
-    };
-}
-
-function determineOutcome(roll: number, target: number): ActionOutcome {
-    if (roll <= Math.max(1, Math.floor(target * 0.15))) return 'critical_success';
-    if (roll <= target) return 'success';
-    if (roll <= target + 15) return 'partial_success';
-    if (roll >= 96) return 'critical_failure';
-    return 'failure';
-}
-
-function describeOutcome(outcome: ActionOutcome): string {
-    switch (outcome) {
-        case 'critical_success': return 'A perfect execution — everything aligns.';
-        case 'success': return 'The repair holds. Solid work.';
-        case 'partial_success': return "Partially effective — it'll hold for now, but it's not pretty.";
-        case 'failure': return 'The attempt fails. Back to the drawing board.';
-        case 'critical_failure': return 'Something goes very wrong in the process.';
-    }
-}
-
 // ─── Starting Items ─────────────────────────────────────────────────────────
 
-export function getStartingInventory(build: CharacterBuild): string[] {
+function getStartingInventory(build: CharacterBuild): string[] {
     if (build.startingItem === null) return [];
     const item = STARTING_ITEMS.get(build.startingItem);
     if (!item) return [];
@@ -183,8 +125,4 @@ export function getBuild(classId: CharacterClassId): CharacterBuild {
         throw new Error(`Unknown character class: ${classId}`);
     }
     return build;
-}
-
-export function getAllClassIds(): CharacterClassId[] {
-    return [...CHARACTER_BUILDS.keys()];
 }

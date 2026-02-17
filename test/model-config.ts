@@ -8,20 +8,19 @@ export interface TestModel {
     id: string;           // OpenRouter model ID
     label: string;        // Human-friendly name
     supportsStructured: boolean;  // Has response_format/structured_outputs
-    isAnthropic: boolean; // Needs anthropicDirect provider options
 }
 
-export const TEST_MODELS: TestModel[] = [
-    { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', supportsStructured: true, isAnthropic: true },
-    { id: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5', supportsStructured: true, isAnthropic: true },
-    { id: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro', supportsStructured: true, isAnthropic: false },
-    { id: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash', supportsStructured: true, isAnthropic: false },
-    { id: 'moonshotai/kimi-k2', label: 'Kimi K2', supportsStructured: true, isAnthropic: false },
-    { id: 'minimax/minimax-m2.5', label: 'MiniMax M2.5', supportsStructured: true, isAnthropic: false },
-    { id: 'z-ai/glm-5', label: 'GLM 5', supportsStructured: true, isAnthropic: false },
-    { id: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2', supportsStructured: true, isAnthropic: false },
-    { id: 'x-ai/grok-4.1-fast', label: 'Grok 4.1 Fast', supportsStructured: true, isAnthropic: false },
-    { id: 'stepfun/step-3.5-flash', label: 'Step 3.5 Flash', supportsStructured: false, isAnthropic: false },
+const TEST_MODELS: TestModel[] = [
+    { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6', supportsStructured: true },
+    { id: 'anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5', supportsStructured: true },
+    { id: 'google/gemini-3-pro-preview', label: 'Gemini 3.0 Pro', supportsStructured: true },
+    { id: 'google/gemini-3-flash-preview', label: 'Gemini 3.0 Flash', supportsStructured: true },
+    { id: 'moonshotai/kimi-k2', label: 'Kimi K2', supportsStructured: true },
+    { id: 'minimax/minimax-m2.5', label: 'MiniMax M2.5', supportsStructured: true },
+    { id: 'z-ai/glm-5', label: 'GLM 5', supportsStructured: true },
+    { id: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2', supportsStructured: true },
+    { id: 'x-ai/grok-4.1-fast', label: 'Grok 4.1 Fast', supportsStructured: true },
+    { id: 'stepfun/step-3.5-flash', label: 'Step 3.5 Flash', supportsStructured: false },
 ];
 
 // ─── Provider Utilities ─────────────────────────────────────────────────────
@@ -34,24 +33,6 @@ export function createTestOpenRouter() {
             'X-Title': 'Station Omega Model Tests',
         },
     });
-}
-
-/** Anthropic-direct provider options, matching models.ts anthropicDirect. */
-const anthropicDirectOptions = {
-    openrouter: {
-        provider: {
-            order: ['anthropic'],
-            allow_fallbacks: false,
-        },
-    },
-};
-
-/** Returns anthropicDirect provider options for Anthropic models, undefined otherwise. */
-export function getProviderOptions(model: TestModel): typeof anthropicDirectOptions | undefined {
-    if (model.isAnthropic) {
-        return anthropicDirectOptions;
-    }
-    return undefined;
 }
 
 // ─── File Utilities ─────────────────────────────────────────────────────────
@@ -81,7 +62,7 @@ export function sanitizeLabel(label: string): string {
 
 // ─── CLI Argument Parsing ───────────────────────────────────────────────────
 
-export interface TestArgs {
+interface TestArgs {
     runs: number;
     models: TestModel[];
     scenarios: string[];

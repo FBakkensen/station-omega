@@ -1,9 +1,10 @@
 /**
  * Station Generation Orchestrator
  *
- * Runs all 4 AI generation layers sequentially, passing validated
- * output forward. Produces a StationSkeleton + CreativeContent pair
- * ready for assembly.
+ * Runs the station generation pipeline and passes validated output
+ * forward. Layer 2 (systems/items) is deterministic; the creative
+ * phase runs parallel sub-layers. Produces a
+ * StationSkeleton + CreativeContent pair ready for assembly.
  */
 
 import { streamText } from 'ai';
@@ -31,7 +32,7 @@ import { runCreativeSublayers } from './layers/creative.js';
 
 type ProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
 
-export interface GenerationConfig {
+interface GenerationConfig {
     difficulty: Difficulty;
     characterClass: CharacterClassId;
     model: LanguageModel;

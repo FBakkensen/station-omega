@@ -3,15 +3,12 @@ import type {
     ActiveEvent,
     CharacterBuild,
     CharacterClassId,
-    Difficulty,
-    Disposition,
     FailureMode,
     GameState,
     ItemEffect,
     ItemSkeleton,
     Room,
     RoomArchetype,
-    StoryArc,
     SystemId,
 } from './types.js';
 
@@ -60,107 +57,6 @@ export const CHARACTER_BUILDS: ReadonlyMap<CharacterClassId, CharacterBuild> = n
     }],
 ]);
 
-// ─── Difficulty & Action Resolution ─────────────────────────────────────────
-
-export const DIFFICULTY_TARGETS: Readonly<Record<ActionDifficulty, number>> = {
-    trivial: 95,
-    easy: 80,
-    moderate: 60,
-    hard: 40,
-    extreme: 20,
-    impossible: 5,
-} as const;
-
-export const DIFFICULTY_MULTIPLIERS: Readonly<Record<Difficulty, number>> = {
-    normal: 1.0,
-    hard: 1.3,
-    nightmare: 1.6,
-} as const;
-
-// ─── Room Archetype Distribution ────────────────────────────────────────────
-
-export function ROOM_ARCHETYPE_BY_DEPTH(depth: number, maxDepth: number): RoomArchetype[] {
-    if (depth === 0) return ['entry'];
-    if (depth === maxDepth) return ['escape'];
-
-    const pct = (depth / maxDepth) * 100;
-
-    if (pct <= 30) return ['quarters', 'utility', 'cargo'];
-    if (pct <= 60) return ['science', 'medical', 'cargo'];
-    if (pct <= 90) return ['reactor', 'restricted', 'command'];
-    return ['command', 'restricted'];
-}
-
-// ─── Objective Templates ────────────────────────────────────────────────────
-
-export interface ObjectiveTemplate {
-    title: string;
-    steps: Array<{ description: string; archetype: RoomArchetype; needsItem: boolean; requiredSystemRepair: SystemId | null }>;
-}
-
-export const OBJECTIVE_TEMPLATES: ReadonlyMap<StoryArc, ObjectiveTemplate> = new Map<StoryArc, ObjectiveTemplate>([
-    ['cascade_failure', {
-        title: 'Cascade Recovery',
-        steps: [
-            { description: 'Diagnose the primary power relay failure', archetype: 'utility', needsItem: false, requiredSystemRepair: 'power_relay' },
-            { description: 'Restore auxiliary power to the science lab', archetype: 'science', needsItem: false, requiredSystemRepair: 'power_relay' },
-            { description: 'Repair the primary coolant loop', archetype: 'reactor', needsItem: true, requiredSystemRepair: 'coolant_loop' },
-            { description: 'Restore station communications', archetype: 'command', needsItem: true, requiredSystemRepair: 'communications' },
-            { description: 'Reach the escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
-        ],
-    }],
-    ['atmosphere_breach', {
-        title: 'Losing Air',
-        steps: [
-            { description: 'Locate and seal the hull breach in cargo', archetype: 'cargo', needsItem: false, requiredSystemRepair: 'pressure_seal' },
-            { description: 'Restore the atmosphere processor', archetype: 'science', needsItem: false, requiredSystemRepair: 'atmosphere_processor' },
-            { description: 'Synthesize a CO2 scrubber catalyst', archetype: 'medical', needsItem: true, requiredSystemRepair: null },
-            { description: 'Rebuild the CO2 scrubber assembly', archetype: 'utility', needsItem: true, requiredSystemRepair: 'life_support' },
-            { description: 'Evacuate to the escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
-        ],
-    }],
-    ['reactor_meltdown', {
-        title: 'Critical Mass',
-        steps: [
-            { description: 'Assess reactor containment status', archetype: 'reactor', needsItem: false, requiredSystemRepair: null },
-            { description: 'Repair the radiation shielding', archetype: 'restricted', needsItem: false, requiredSystemRepair: 'radiation_shielding' },
-            { description: 'Restore the coolant pumps', archetype: 'reactor', needsItem: true, requiredSystemRepair: 'coolant_loop' },
-            { description: 'Reinsert the control rods manually', archetype: 'command', needsItem: true, requiredSystemRepair: null },
-            { description: 'Reach the escape pod before meltdown', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
-        ],
-    }],
-    ['contamination_crisis', {
-        title: 'Quarantine Protocol',
-        steps: [
-            { description: 'Identify the contaminant in the water recycler', archetype: 'utility', needsItem: false, requiredSystemRepair: null },
-            { description: 'Synthesize a neutralizing agent', archetype: 'science', needsItem: false, requiredSystemRepair: null },
-            { description: 'Deploy neutralizer to the water recycler', archetype: 'medical', needsItem: true, requiredSystemRepair: 'water_recycler' },
-            { description: 'Purge the atmospheric filters', archetype: 'restricted', needsItem: true, requiredSystemRepair: 'atmosphere_processor' },
-            { description: 'Evacuate the station', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
-        ],
-    }],
-    ['power_death_spiral', {
-        title: 'Going Dark',
-        steps: [
-            { description: 'Locate the primary power fault', archetype: 'utility', needsItem: false, requiredSystemRepair: null },
-            { description: 'Restore emergency power to critical systems', archetype: 'cargo', needsItem: false, requiredSystemRepair: 'power_relay' },
-            { description: 'Repair the backup generator', archetype: 'reactor', needsItem: true, requiredSystemRepair: 'power_relay' },
-            { description: 'Re-energize the escape pod launch system', archetype: 'command', needsItem: true, requiredSystemRepair: 'power_relay' },
-            { description: 'Launch the escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
-        ],
-    }],
-    ['orbital_decay', {
-        title: 'Terminal Velocity',
-        steps: [
-            { description: 'Check orbital telemetry at the command console', archetype: 'command', needsItem: false, requiredSystemRepair: null },
-            { description: 'Repair fuel line integrity', archetype: 'cargo', needsItem: false, requiredSystemRepair: 'structural_integrity' },
-            { description: 'Restore the navigation computer', archetype: 'science', needsItem: true, requiredSystemRepair: 'communications' },
-            { description: 'Execute orbital correction burn', archetype: 'reactor', needsItem: true, requiredSystemRepair: null },
-            { description: 'Evacuate via escape pod', archetype: 'escape', needsItem: false, requiredSystemRepair: null },
-        ],
-    }],
-]);
-
 // ─── Starting Items ─────────────────────────────────────────────────────────
 
 export const STARTING_ITEMS: ReadonlyMap<string, ItemSkeleton> = new Map([
@@ -186,7 +82,7 @@ export const STARTING_ITEMS: ReadonlyMap<string, ItemSkeleton> = new Map([
 
 // ─── Engineering Items Catalog ──────────────────────────────────────────────
 
-export interface EngineeringItemDef {
+interface EngineeringItemDef {
     id: string;
     category: string;
     effect: ItemEffect;
@@ -217,7 +113,7 @@ export const ENGINEERING_ITEMS: ReadonlyMap<string, EngineeringItemDef> = new Ma
 
 // ─── Crafting Recipes ───────────────────────────────────────────────────────
 
-export interface CraftRecipe {
+interface CraftRecipe {
     resultId: string;
     resultName: string;
     ingredients: string[];
@@ -284,18 +180,10 @@ export const SYSTEM_FAILURE_POOLS: ReadonlyMap<RoomArchetype, SystemFailureTempl
     ]],
 ]);
 
-// ─── NPC Interaction ────────────────────────────────────────────────────────
-
-export const NPC_APPROACH_BASE_CHANCE: Readonly<Record<Disposition, number>> = {
-    neutral: 60,
-    friendly: 85,
-    fearful: 75,
-} as const;
-
 // ─── Action Duration Tables (time-based system) ────────────────────────────
 
 /** Base duration in minutes for each tool under ideal conditions. */
-export const BASE_DURATIONS: Readonly<Record<string, number>> = {
+const BASE_DURATIONS: Readonly<Record<string, number>> = {
     look_around: 2,
     move_to: 3,
     pick_up_item: 1,
@@ -321,7 +209,7 @@ export const BASE_DURATIONS: Readonly<Record<string, number>> = {
 } as const;
 
 /** Time multiplier per active event type (environmental conditions). */
-export const EVENT_TIME_MULTIPLIERS: Readonly<Record<string, number>> = {
+const EVENT_TIME_MULTIPLIERS: Readonly<Record<string, number>> = {
     power_failure: 1.5,
     hull_breach: 1.3,
     coolant_leak: 1.4,
@@ -330,7 +218,7 @@ export const EVENT_TIME_MULTIPLIERS: Readonly<Record<string, number>> = {
 } as const;
 
 /** Time multiplier per action difficulty level. */
-export const DIFFICULTY_TIME_MULTIPLIERS: Readonly<Record<ActionDifficulty, number>> = {
+const DIFFICULTY_TIME_MULTIPLIERS: Readonly<Record<ActionDifficulty, number>> = {
     trivial: 1.0,
     easy: 1.2,
     moderate: 1.5,

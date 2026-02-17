@@ -40,7 +40,7 @@ const SingleRoomSchema = z.object({
     })),
 });
 
-export type SingleRoomOutput = z.infer<typeof SingleRoomSchema>;
+type SingleRoomOutput = z.infer<typeof SingleRoomSchema>;
 
 // ─── Per-Room Layer Factory ──────────────────────────────────────────────────
 

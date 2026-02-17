@@ -4,7 +4,7 @@ import type { GeneratedStation, CharacterBuild } from './types.js';
 import { buildOrchestratorPrompt } from './prompt.js';
 import { gameMasterModel } from './models.js';
 
-export interface GameMasterConfig {
+interface GameMasterConfig {
     model: LanguageModel;
     systemPrompt: string;
     tools: ToolSet;

@@ -10,7 +10,7 @@ import type { ModelMessage } from 'ai';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { creativeModel, anthropicDirect } from '../src/models.js';
+import { creativeModel } from '../src/models.js';
 import { assembleStation } from '../src/assembly.js';
 import { initializePlayerState, getBuild } from '../src/character.js';
 import { createGameToolSets } from '../src/tools.js';
@@ -24,7 +24,6 @@ import type { GeneratedStation, Room, NPC, ObjectiveChain } from '../src/types.j
 import {
     type TestModel,
     createTestOpenRouter,
-    getProviderOptions,
     ensureOutputDir,
     ensureFixturesDir,
     writeResult,
@@ -164,7 +163,7 @@ async function loadOrGenerateStation(): Promise<GeneratedStation> {
 
     console.log('No fixture found — generating station...');
     const { skeleton, creative } = await generateStation(
-        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel, providerOptions: anthropicDirect },
+        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel },
         (msg) => { console.log(`  ${msg}`); },
     );
     return assembleStation(skeleton, creative);
@@ -211,7 +210,6 @@ async function runGMTest(
 
     const toolSets = createGameToolSets('engineer', gameCtx);
     const systemPrompt = buildOrchestratorPrompt(testStation, build);
-    const providerOptions = getProviderOptions(model);
 
     // Build messages — for opening, just the prompt
     // For movement/complex, run a simulated opening turn first
@@ -254,10 +252,6 @@ async function runGMTest(
             stopWhen: stepCountIs(12),
             abortSignal: abort.signal,
         };
-
-        if (providerOptions) {
-            streamOptions.providerOptions = providerOptions;
-        }
 
         const result = streamText(streamOptions);
 

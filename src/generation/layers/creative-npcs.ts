@@ -18,7 +18,7 @@ import type { NPCCreative } from '../../types.js';
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
-export const NPCsCreativeSchema = z.object({
+const NPCsCreativeSchema = z.object({
     npcCreative: z.array(z.object({
         npcId: z.string(),
         name: z.string(),
@@ -28,7 +28,7 @@ export const NPCsCreativeSchema = z.object({
     })),
 });
 
-export type NPCsCreativeOutput = z.infer<typeof NPCsCreativeSchema>;
+type NPCsCreativeOutput = z.infer<typeof NPCsCreativeSchema>;
 
 // ─── Prompt Builder ──────────────────────────────────────────────────────────
 

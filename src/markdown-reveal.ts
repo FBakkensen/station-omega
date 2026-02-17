@@ -13,7 +13,7 @@ export interface ContentRun {
     formats: FormatCtx[];
 }
 
-export interface FlattenResult {
+interface FlattenResult {
     runs: ContentRun[];
     contentLength: number;
 }

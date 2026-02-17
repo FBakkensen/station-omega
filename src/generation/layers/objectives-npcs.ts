@@ -31,7 +31,7 @@ const NPCBehaviorFlagEnum = z.enum([
     'can_negotiate', 'can_ally', 'can_trade', 'is_intelligent',
 ]);
 
-export const ObjectivesNPCsSchema = z.object({
+const ObjectivesNPCsSchema = z.object({
     objectives: z.object({
         title: z.string(),
         // Constraints (3-7 steps, max 3 NPCs) enforced in validator, not schema,
@@ -53,7 +53,7 @@ export const ObjectivesNPCsSchema = z.object({
     })),
 });
 
-export type ObjectivesNPCsOutput = z.infer<typeof ObjectivesNPCsSchema>;
+type ObjectivesNPCsOutput = z.infer<typeof ObjectivesNPCsSchema>;
 
 // ─── Validated Type ──────────────────────────────────────────────────────────
 

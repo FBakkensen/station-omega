@@ -5,7 +5,7 @@ import { GameUI } from './tui.js';
 import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, GameStatus, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
 import { generateStation } from './src/generation/index.js';
 import { assembleStation } from './src/assembly.js';
-import { creativeModel, anthropicDirect } from './src/models.js';
+import { creativeModel } from './src/models.js';
 import { CHARACTER_BUILDS, getBuild, initializePlayerState } from './src/character.js';
 import { createGameToolSets } from './src/tools.js';
 import type { GameContext, ChoiceSet } from './src/tools.js';
@@ -893,7 +893,7 @@ async function main() {
             // GENERATE NEW STATION
             ui.showGenerating();
             const { skeleton, creative } = await generateStation(
-                { difficulty: 'normal', characterClass: classId, model: creativeModel, providerOptions: anthropicDirect },
+                { difficulty: 'normal', characterClass: classId, model: creativeModel },
                 (message) => { ui.updateLoadingMessage(message); },
                 debugLog,
             );

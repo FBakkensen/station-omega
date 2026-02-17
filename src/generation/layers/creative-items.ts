@@ -18,7 +18,7 @@ import type { ItemCreative } from '../../types.js';
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
-export const ItemsCreativeSchema = z.object({
+const ItemsCreativeSchema = z.object({
     items: z.array(z.object({
         itemId: z.string(),
         name: z.string(),
@@ -27,7 +27,7 @@ export const ItemsCreativeSchema = z.object({
     })),
 });
 
-export type ItemsCreativeOutput = z.infer<typeof ItemsCreativeSchema>;
+type ItemsCreativeOutput = z.infer<typeof ItemsCreativeSchema>;
 
 // ─── Prompt Builder ──────────────────────────────────────────────────────────
 

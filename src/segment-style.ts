@@ -34,7 +34,7 @@ const HEADER_COLORS = {
 
 // ─── Card Styling ────────────────────────────────────────────────────────────
 
-export interface CardStyle {
+interface CardStyle {
     bgColor: string;
     borderColor?: string;
     borderStyle?: 'single' | 'rounded';

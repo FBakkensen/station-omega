@@ -41,7 +41,7 @@ function safeTimestamp(): string {
     return new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, '');
 }
 
-export class GenerationLogger {
+class GenerationLogger {
     private filePath: string;
 
     constructor(difficulty: string, characterClass: string) {

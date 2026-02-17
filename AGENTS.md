@@ -10,7 +10,10 @@ Station Omega is a Bun-powered TypeScript game.
   - `src/prompt.ts`: system prompt construction.
   - `src/schema.ts`: output schemas and segment rendering guards.
   - `src/types.ts`: game domain types.
-  - `src/skeleton.ts`, `src/creative.ts`, `src/assembly.ts`: station generation pipeline.
+  - `src/generation/index.ts`: station generation orchestrator.
+  - `src/generation/layers/`: topology/objective/creative generation layers.
+  - `src/generation/layers/systems-items-procedural.ts`: deterministic Layer 2 systems/items generation.
+  - `src/assembly.ts`: combines generated skeleton + creative payload into `GeneratedStation`.
   - `src/character.ts`, `src/events.ts`, `src/scoring.ts`, `src/graph.ts`: core game mechanics.
   - `src/json-stream-parser.ts`, `src/segment-style.ts`, `src/markdown-reveal.ts`, `src/tts.ts`: stream parsing, rendering, and speech.
 - `package.json`, `tsconfig.json`, `eslint.config.js`: project configuration.
@@ -30,9 +33,11 @@ Station Omega is a Bun-powered TypeScript game.
 5. Typewriter reveal and TTS progress from resolved chunks for synchronized output.
 
 ### Station Generation Pipeline
-1. `src/skeleton.ts`: deterministic seeded map graph, enemies, items, and objectives.
-2. `src/creative.ts`: separate generation pass for names, atmosphere, lore.
-3. `src/assembly.ts`: combines skeleton + creative payload into `GeneratedStation` maps.
+1. `src/generation/layers/topology.ts`: AI-generated topology, scenario, and connectivity constraints.
+2. `src/generation/layers/systems-items-procedural.ts`: deterministic failures/items pass from topology.
+3. `src/generation/layers/objectives-npcs.ts`: AI-generated objective chain and NPC concepts.
+4. `src/generation/layers/creative.ts`: parallel creative sub-layers (identity, per-room, items, arrival, NPC creative).
+5. `src/assembly.ts`: combines generation outputs into `GeneratedStation` maps.
 
 ### Key Design Constraints
 - Use AI-as-Game-Master model: tools produce raw state changes, not prose.
@@ -45,8 +50,9 @@ Station Omega is a Bun-powered TypeScript game.
 - `bun run start` starts the game (`bun index.ts`).
 - `bun run typecheck` runs `tsc --noEmit`.
 - `bun run lint` runs strict type-aware ESLint.
+- `bun run deadcode` runs `knip` to detect unused exports/files.
 
-Use `bun run typecheck && bun run lint` before considering changes complete.
+Always run `bun run typecheck`, `bun run lint`, and `bun run deadcode` before returning results to the user.
 
 ## Coding Style & Naming Conventions
 - TypeScript strict style with explicit, readable data shapes.
@@ -58,7 +64,7 @@ Use `bun run typecheck && bun run lint` before considering changes complete.
 ## Testing Guidelines
 There is no dedicated test framework in this repository yet.
 
-- Run `bun run typecheck` and `bun run lint` for every change.
+- Run `bun run typecheck`, `bun run lint`, and `bun run deadcode` for every change.
 - For gameplay changes, do a quick manual smoke path: movement, combat/action tools, inventory, and persistence behavior.
 
 ## Commit & Pull Request Guidelines

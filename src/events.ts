@@ -2,7 +2,7 @@ import type { GameState, EventType, ActiveEvent, GeneratedStation } from './type
 
 // ─── Event Definitions ──────────────────────────────────────────────────────
 
-export interface EventDefinition {
+interface EventDefinition {
     type: EventType;
     baseProbability: number;
     cooldownMinutes: number;
@@ -16,7 +16,7 @@ export interface EventDefinition {
     resolutionHints: string[];
 }
 
-export const EVENT_DEFINITIONS: EventDefinition[] = [
+const EVENT_DEFINITIONS: EventDefinition[] = [
     {
         type: 'hull_breach',
         baseProbability: 0.08,

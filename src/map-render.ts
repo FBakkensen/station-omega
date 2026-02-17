@@ -509,7 +509,7 @@ function buildGrid(
 
 // ─── Styled Legend ──────────────────────────────────────────────────────────
 
-export function buildMapLegend(): TextChunk[] {
+function buildMapLegend(): TextChunk[] {
     const dim = '#5a6a7a';
     return [
         bold(bg(PLAYER_BG)(fg(PLAYER_FG)(' \u25CE '))), fg(dim)(' you  '),
@@ -568,43 +568,4 @@ export function renderMapStyled(
     chunks.push(...buildMapLegend());
 
     return chunks;
-}
-
-export interface RenderMapOptions {
-    title?: string;
-    showLegend?: boolean;
-}
-
-/**
- * Backward-compatible plain-text map render.
- * Delegates to the styled grid builder but strips styling to plain characters.
- */
-export function renderMapText(
-    station: GeneratedStation,
-    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'itemsTaken'>,
-    layout: MapLayout,
-    opts: RenderMapOptions = {},
-): string {
-    const grid = buildGrid(station, state, layout);
-
-    const lines: string[] = [];
-    const title = opts.title ?? 'STATION MAP (VISITED)';
-    lines.push(title);
-    lines.push('');
-
-    for (const row of grid) {
-        lines.push(row.map(c => c.char).join('').replace(/\s+$/u, ''));
-    }
-
-    if (opts.showLegend !== false) {
-        lines.push('');
-        lines.push('Legend: \u25CE you  \u25B6 entry  \u2606 escape  \u26A0 failure  \u25C6 loot  \u2295 objective  \u25CC unknown  \u2297 locked');
-        lines.push('Hint: F1 map  F2 mission  Esc close');
-    }
-
-    while (lines.length > 4 && lines[lines.length - 1] === '' && lines[lines.length - 2] === '') {
-        lines.pop();
-    }
-
-    return lines.join('\n');
 }

@@ -34,7 +34,7 @@ const TopologyRoomSchema = z.object({
     lockedBy: z.string().nullable(),
 });
 
-export const TopologySchema = z.object({
+const TopologySchema = z.object({
     topology: TopologyStyleEnum,
     scenario: z.object({
         theme: z.string(),
@@ -45,7 +45,7 @@ export const TopologySchema = z.object({
     escapeRoomId: z.string(),
 });
 
-export type TopologyOutput = z.infer<typeof TopologySchema>;
+type TopologyOutput = z.infer<typeof TopologySchema>;
 
 // ─── Validated Type ──────────────────────────────────────────────────────────
 

@@ -17,7 +17,7 @@ import type { ValidatedTopology } from './topology.js';
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
-export const IdentitySeedSchema = z.object({
+const IdentitySeedSchema = z.object({
     stationName: z.string(),
     briefing: z.string(),
     backstory: z.string(),
@@ -29,7 +29,7 @@ export const IdentitySeedSchema = z.object({
     toneKeywords: z.array(z.string()),
 });
 
-export type IdentitySeedOutput = z.infer<typeof IdentitySeedSchema>;
+type IdentitySeedOutput = z.infer<typeof IdentitySeedSchema>;
 
 // ─── Validated Type ──────────────────────────────────────────────────────────
 
@@ -84,7 +84,6 @@ Escape: ${topology.escapeRoomId}`;
 
 // ─── Validator ───────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext): ValidationResult<ValidatedIdentitySeed> {
     const errors: string[] = [];
 

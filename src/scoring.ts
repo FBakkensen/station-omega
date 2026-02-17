@@ -36,7 +36,7 @@ export function computeScore(metrics: RunMetrics, totalRooms: number): RunScore 
     return { speed, engineeringEfficiency, exploration, resourcefulness, completion, total, grade };
 }
 
-export function computeGrade(total: number): ScoreGrade {
+function computeGrade(total: number): ScoreGrade {
     if (total >= 450) return 'S';
     if (total >= 375) return 'A';
     if (total >= 300) return 'B';
@@ -77,11 +77,4 @@ export function loadRunHistory(): RunHistoryEntry[] {
     } catch {
         return [];
     }
-}
-
-export function formatScoreBar(value: number, max: number): string {
-    const barWidth = 20;
-    const filled = Math.round((Math.min(value, max) / max) * barWidth);
-    const empty = barWidth - filled;
-    return '[' + '#'.repeat(filled) + '-'.repeat(empty) + '] ' + String(Math.round(value)) + '/' + String(max);
 }

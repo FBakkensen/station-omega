@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "tui.ts",
+    "voice-test.ts"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "ignore": [
+    "node_modules/**",
+    "saved-stations/**",
+    "generation-logs/**"
+  ]
+}

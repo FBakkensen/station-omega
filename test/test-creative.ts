@@ -8,22 +8,57 @@
 import { streamText, Output } from 'ai';
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { creativeModel, anthropicDirect } from '../src/models.js';
-import {
-    CREATIVE_PROMPT,
-    CreativeOutputSchema,
-    buildSkeletonSummary,
-} from '../src/creative.js';
+import { creativeModel } from '../src/models.js';
+import { CreativeLayerSchema } from '../src/generation/layers/creative.js';
 import type { StationSkeleton } from '../src/types.js';
 import {
     type TestModel,
     createTestOpenRouter,
-    getProviderOptions,
     ensureOutputDir,
     writeResult,
     sanitizeLabel,
     parseArgs,
 } from './model-config.js';
+
+const CreativeOutputSchema = CreativeLayerSchema;
+
+const CREATIVE_PROMPT = `You generate creative content for a grounded sci-fi engineering survival game.
+
+Rules:
+- Every roomId/itemId in output must match IDs from station data.
+- Generate practical room names, concise engineering descriptions, and crew logs.
+- Crew log type must be one of: datapad, wall_scrawl, audio_recording, terminal_entry, engineering_report, calibration_record, failure_analysis.
+- Include arrivalScenario and startingItem that fit the character class and starting room.
+- Return valid JSON only.`;
+
+function buildSkeletonSummary(skeleton: StationSkeleton): string {
+    const roomSummaries = skeleton.rooms.map(r => ({
+        id: r.id,
+        archetype: r.archetype,
+        depth: r.depth,
+        hasLoot: r.lootSlots.length > 0,
+        lootCategories: r.lootSlots.map(s => s.category),
+        isObjective: r.isObjectiveRoom,
+        systemFailures: r.systemFailures.map(f => ({ system: f.systemId, mode: f.failureMode, severity: f.severity })),
+    }));
+
+    const itemSummaries = skeleton.items.map(i => ({
+        id: i.id,
+        category: i.category,
+        effectType: i.effect.type,
+    }));
+
+    return JSON.stringify({
+        characterClass: skeleton.config.characterClass,
+        startingRoomArchetype: skeleton.rooms[0].archetype,
+        storyArc: skeleton.config.storyArc,
+        difficulty: skeleton.config.difficulty,
+        objectiveTitle: skeleton.objectives.title,
+        objectiveSteps: skeleton.objectives.steps.map(s => s.description),
+        rooms: roomSummaries,
+        items: itemSummaries,
+    }, null, 2);
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -65,8 +100,6 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
         const abort = new AbortController();
         const timeout = setTimeout(() => { abort.abort(); }, 300_000);
 
-        const providerOptions = getProviderOptions(model);
-
         // For models without structured output support, append JSON instruction
         const systemPrompt = model.supportsStructured
             ? CREATIVE_PROMPT
@@ -84,10 +117,6 @@ Briefing: 1-2 sentences. Backstory: 2-3 sentences. Room descriptions: 2-3 senten
         // Only use Output.object for models that support structured output
         if (model.supportsStructured) {
             streamOptions.output = Output.object({ schema: CreativeOutputSchema });
-        }
-
-        if (providerOptions) {
-            streamOptions.providerOptions = providerOptions;
         }
 
         const result = streamText(streamOptions);
@@ -198,7 +227,7 @@ async function main() {
     // Generate skeleton via AI-driven pipeline
     console.log('Generating station skeleton...');
     const { skeleton } = await generateStation(
-        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel, providerOptions: anthropicDirect },
+        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel },
         (msg) => { console.log(`  ${msg}`); },
     );
     const skeletonSummary = buildSkeletonSummary(skeleton);

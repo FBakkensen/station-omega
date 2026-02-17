@@ -23,21 +23,3 @@ export interface DisplaySegment extends GameSegment {
     /** Mission elapsed time string (e.g. "T+02:30") for thought segment headers. */
     missionTime?: string;
 }
-
-/** Convert a GameSegment to markdown text for TTS display-text tracking. */
-export function segmentToMarkdown(seg: GameSegment): string {
-    switch (seg.type) {
-        case 'narration':
-            return seg.text;
-        case 'dialogue':
-            return `\u2014 "${seg.text}"`;
-        case 'thought':
-            return `*\u00AB ${seg.text} \u00BB*`;
-        case 'station_pa':
-            return `\`[STATION] ${seg.text}\``;
-        case 'crew_echo':
-            return `> **${seg.crewName ?? 'Unknown'}**: "${seg.text}"`;
-        case 'diagnostic_readout':
-            return `\`[DIAGNOSTIC] ${seg.text}\``;
-    }
-}

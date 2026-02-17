@@ -12,15 +12,6 @@ interface RoomLike {
     lockedBy?: string | null;
 }
 
-/** Check that a room ID exists in the given room list. */
-export function checkRoomExists(roomId: string, rooms: RoomLike[]): string | null {
-    const ids = new Set(rooms.map(r => r.id));
-    if (!ids.has(roomId)) {
-        return `Room '${roomId}' does not exist. Valid room IDs: [${rooms.map(r => r.id).join(', ')}]`;
-    }
-    return null;
-}
-
 /** Check that all room connections are bidirectional. Returns all asymmetric errors. */
 export function checkBidirectional(rooms: RoomLike[]): string[] {
     const errors: string[] = [];

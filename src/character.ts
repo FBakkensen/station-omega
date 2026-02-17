@@ -149,7 +149,7 @@ export function initializePlayerState(
         maxInventory: build.maxInventory,
         currentRoom: entryRoomId,
         roomsVisited: new Set<string>([entryRoomId]),
-        roomLootTaken: new Set<string>(),
+        itemsTaken: new Set<string>(),
         revealedItems: new Set<string>(),
         hasObjectiveItem: false,
         gameOver: false,

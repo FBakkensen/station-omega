@@ -173,7 +173,7 @@ export interface RoomSkeleton {
     depth: number;
     connections: string[];
     lockedBy: string | null;
-    lootSlot: ItemSkeleton | null;
+    lootSlots: ItemSkeleton[];
     isObjectiveRoom: boolean;
     secretConnection: string | null;
     systemFailures: SystemFailureSkeleton[];
@@ -286,7 +286,7 @@ export interface Room {
     depth: number;
     connections: string[];
     lockedBy: string | null;
-    loot: string | null;
+    loot: string[];
     sensory: RoomSensory;
     crewLogs: CrewLog[];
     isObjectiveRoom: boolean;
@@ -444,7 +444,7 @@ export interface GameState {
     maxInventory: number;
     currentRoom: string;
     roomsVisited: Set<string>;
-    roomLootTaken: Set<string>;
+    itemsTaken: Set<string>;
     revealedItems: Set<string>;
     hasObjectiveItem: boolean;
     gameOver: boolean;

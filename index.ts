@@ -1,6 +1,6 @@
 import { streamText, stepCountIs } from 'ai';
 import type { ModelMessage } from 'ai';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { GameUI } from './tui.js';
 import type { CharacterClassId, GameState, GeneratedStation, SlashCommandDef, GameStatus, NPC, Room, ObjectiveChain, EventType } from './src/types.js';
 import { generateStation } from './src/generation/index.js';
@@ -42,7 +42,8 @@ interface TurnSnapshot {
 const DEBUG_LOG_PATH = 'debug.log';
 
 function initDebugLog(): void {
-    writeFileSync(DEBUG_LOG_PATH, `=== Station Omega Debug Log — ${new Date().toISOString()} ===\n\n`);
+    appendFileSync(DEBUG_LOG_PATH,
+        `\n${'═'.repeat(60)}\n=== Station Omega Session — ${new Date().toISOString()} ===\n${'═'.repeat(60)}\n\n`);
 }
 
 function debugLog(label: string, content: string): void {
@@ -95,7 +96,7 @@ function getStatus(state: GameState, station: GeneratedStation, envTracker?: Env
         })),
         mapText: renderMapStyled(
             station,
-            { roomsVisited: state.roomsVisited, currentRoom: state.currentRoom, roomLootTaken: state.roomLootTaken },
+            { roomsVisited: state.roomsVisited, currentRoom: state.currentRoom, itemsTaken: state.itemsTaken },
             station.mapLayout,
         ),
         environment,
@@ -148,9 +149,11 @@ function getSlashCommands(state: GameState, station: GeneratedStation, ttsEngine
                 const items: { label: string; value: string }[] = [];
                 const room = station.rooms.get(state.currentRoom);
                 if (!room) return items;
-                if (room.loot && !state.roomLootTaken.has(state.currentRoom)) {
-                    const name = station.items.get(room.loot)?.name ?? room.loot;
-                    items.push({ label: name, value: name });
+                for (const lootId of room.loot) {
+                    if (!state.itemsTaken.has(lootId)) {
+                        const name = station.items.get(lootId)?.name ?? lootId;
+                        items.push({ label: name, value: name });
+                    }
                 }
                 return items;
             },

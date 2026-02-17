@@ -150,8 +150,8 @@ export function buildSkeletonSummary(skeleton: StationSkeleton): string {
         id: r.id,
         archetype: r.archetype,
         depth: r.depth,
-        hasLoot: r.lootSlot !== null,
-        lootCategory: r.lootSlot?.category ?? null,
+        hasLoot: r.lootSlots.length > 0,
+        lootCategories: r.lootSlots.map(s => s.category),
         isObjective: r.isObjectiveRoom,
         systemFailures: r.systemFailures.map(f => ({ system: f.systemId, mode: f.failureMode, severity: f.severity })),
     }));

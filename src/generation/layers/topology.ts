@@ -169,7 +169,22 @@ function validateTopology(output: TopologyOutput, context: LayerContext): Valida
         errors.push(`Escape room ${output.escapeRoomId} must have archetype 'escape', got '${escapeRoom.archetype}'`);
     }
 
-    // 6. Bidirectional connections
+    // 6. Auto-repair bidirectional connections, then verify
+    const repairs: string[] = [];
+    const connMap = new Map(output.rooms.map(r => [r.id, new Set(r.connections)]));
+    for (const room of output.rooms) {
+        for (const conn of room.connections) {
+            const target = connMap.get(conn);
+            if (target && !target.has(room.id)) {
+                target.add(room.id);
+                const targetRoom = output.rooms.find(r => r.id === conn);
+                if (targetRoom) {
+                    targetRoom.connections.push(room.id);
+                    repairs.push(`Added missing back-connection: ${conn} → ${room.id}`);
+                }
+            }
+        }
+    }
     const bidiErrors = checkBidirectional(output.rooms);
     errors.push(...bidiErrors);
 
@@ -228,7 +243,7 @@ function validateTopology(output: TopologyOutput, context: LayerContext): Valida
         })),
         entryRoomId: output.entryRoomId,
         escapeRoomId: output.escapeRoomId,
-    });
+    }, repairs);
 }
 
 // ─── Layer Config ────────────────────────────────────────────────────────────
@@ -239,4 +254,12 @@ export const topologyLayer: LayerConfig<TopologyOutput, ValidatedTopology> = {
     buildPrompt: buildTopologyPrompt,
     validate: validateTopology,
     maxRetries: 3,
+    summarize: (v) => {
+        const locked = v.rooms.filter(r => r.lockedBy).map(r => `${r.id} [${String(r.lockedBy)}]`);
+        return [
+            `Rooms: ${String(v.rooms.length)}, topology: ${v.topology}`,
+            `Entry: ${v.entryRoomId}, Escape: ${v.escapeRoomId}`,
+            `Locked doors: ${locked.length > 0 ? locked.join(', ') : 'none'}`,
+        ].join('\n');
+    },
 };

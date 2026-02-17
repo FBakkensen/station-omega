@@ -59,7 +59,7 @@ export async function generateStation(
 
     const po = config.providerOptions;
 
-    const topology = await runLayer(topologyLayer, context, config.model, onProgress, po);
+    const topology = await runLayer(topologyLayer, context, config.model, onProgress, po, debugLog);
     context['topology'] = topology;
     debugLog?.('GENERATION', `Layer 1 complete: ${String(topology.rooms.length)} rooms, ${topology.topology} topology`);
 
@@ -67,7 +67,7 @@ export async function generateStation(
     onProgress?.('Engineering system failures...');
     debugLog?.('GENERATION', 'Starting Layer 2: Systems & Items');
 
-    const systemsItems = await runLayer(systemsItemsLayer, context, config.model, onProgress, po);
+    const systemsItems = await runLayer(systemsItemsLayer, context, config.model, onProgress, po, debugLog);
     context['systemsItems'] = systemsItems;
     debugLog?.('GENERATION', `Layer 2 complete: ${String(systemsItems.roomFailures.length)} rooms with failures, ${String(systemsItems.items.length)} items`);
 
@@ -75,7 +75,7 @@ export async function generateStation(
     onProgress?.('Designing mission objectives...');
     debugLog?.('GENERATION', 'Starting Layer 3: Objectives & NPCs');
 
-    const objectivesNPCs = await runLayer(objectivesNPCsLayer, context, config.model, onProgress, po);
+    const objectivesNPCs = await runLayer(objectivesNPCsLayer, context, config.model, onProgress, po, debugLog);
     context['objectivesNPCs'] = objectivesNPCs;
     debugLog?.('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps, ${String(objectivesNPCs.npcs.length)} NPCs`);
 
@@ -83,7 +83,7 @@ export async function generateStation(
     onProgress?.('Generating station narrative...');
     debugLog?.('GENERATION', 'Starting Layer 4: Creative');
 
-    const creative = await runLayer(creativeLayer, context, config.model, onProgress, po);
+    const creative = await runLayer(creativeLayer, context, config.model, onProgress, po, debugLog);
     debugLog?.('GENERATION', `Layer 4 complete: ${creative.stationName}`);
 
     // ─── Assemble StationSkeleton from validated layers ──────────────────────
@@ -98,12 +98,11 @@ export async function generateStation(
     const objectiveRoomIds = new Set(objectivesNPCs.objectives.steps.map(s => s.roomId));
     const roomSkeletons: RoomSkeleton[] = topology.rooms.map(r => {
         const failures = systemsItems.roomFailures.find(rf => rf.roomId === r.id);
-        const lootItem = systemsItems.items.find(i => i.roomId === r.id);
+        const lootItems = systemsItems.items.filter(i => i.roomId === r.id);
 
-        let lootSlot: ItemSkeleton | null = null;
-        if (lootItem) {
+        const lootSlots: ItemSkeleton[] = lootItems.map(lootItem => {
             const engItem = lootItem.baseItemKey === 'keycard' ? null : ENGINEERING_ITEMS.get(lootItem.baseItemKey);
-            lootSlot = {
+            return {
                 id: lootItem.id,
                 category: engItem?.category ?? (lootItem.isKeyItem ? 'key' : 'material'),
                 effect: engItem?.effect ?? {
@@ -113,7 +112,7 @@ export async function generateStation(
                 },
                 isKeyItem: lootItem.isKeyItem,
             };
-        }
+        });
 
         const skFailures: SystemFailureSkeleton[] = (failures?.failures ?? []).map(f => ({
             systemId: f.systemId,
@@ -135,16 +134,14 @@ export async function generateStation(
             depth: depths.get(r.id) ?? 0,
             connections: [...r.connections],
             lockedBy: r.lockedBy,
-            lootSlot,
+            lootSlots,
             isObjectiveRoom: objectiveRoomIds.has(r.id),
             secretConnection: null,
             systemFailures: skFailures,
         };
     });
 
-    // Build ItemSkeleton[] — items that are loot slots plus any extras
-    // We need ALL items from Layer 2, not just those that are lootSlots
-    // (a room might have multiple items but lootSlot only stores the first)
+    // Build ItemSkeleton[] — all items from Layer 2
     const itemSkeletons: ItemSkeleton[] = systemsItems.items.map(item => {
         const engItem = item.baseItemKey === 'keycard' ? null : ENGINEERING_ITEMS.get(item.baseItemKey);
         return {
@@ -174,13 +171,6 @@ export async function generateStation(
         currentStepIndex: 0,
         completed: false,
     };
-
-    // Handle rooms with multiple items — the RoomSkeleton.lootSlot only holds one,
-    // so for rooms with 2+ items, we keep the first as lootSlot. The rest still
-    // exist in itemSkeletons and will be added to the item map. We also need to track
-    // which rooms have additional items via roomDrops or similar mechanism.
-    // For now, we ensure each room's lootSlot is populated with the first item found.
-    // Additional items in the same room will be available via revealedItems.
 
     const skeleton: StationSkeleton = {
         config: {

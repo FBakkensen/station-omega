@@ -128,6 +128,7 @@ An item the player finds immediately in the starting room. Must fit the scenario
 - Medical items: category "medical", effectType "heal", effectValue 15-40
 - Tools: category "tool", effectType "tool", effectValue 1
 - Materials: category "material", effectType "material", effectValue 1
+- CRITICAL: startingItem.id must be UNIQUE — it must NOT match any item ID from the items list above. Use a descriptive ID like "starting_medkit" or "emergency_toolkit"
 
 # NPC Creative Content
 
@@ -196,6 +197,18 @@ const VALID_LOG_TYPES = new Set([
     'engineering_report', 'calibration_record', 'failure_analysis',
 ]);
 
+function findCrewMatch(author: string, crewNames: Set<string>): string | null {
+    if (crewNames.has(author)) return author;
+    const lower = author.toLowerCase();
+    for (const name of crewNames) {
+        if (name.toLowerCase() === lower) return name;
+    }
+    for (const name of crewNames) {
+        if (name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase())) return name;
+    }
+    return null;
+}
+
 function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContext): ValidationResult<CreativeContent> {
     const topology = context['topology'] as ValidatedTopology;
     const systemsItems = context['systemsItems'] as ValidatedSystemsItems;
@@ -206,42 +219,65 @@ function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContex
     const itemIds = new Set(systemsItems.items.map(i => i.id));
     const npcIds = new Set(objectivesNPCs.npcs.map(n => n.id));
 
-    // Check all rooms are covered
-    const coveredRooms = new Set(output.rooms.map(r => r.roomId));
-    const missingRooms = [...roomIds].filter(id => !coveredRooms.has(id));
-    if (missingRooms.length > 0) {
-        errors.push(`Room creative content missing for: [${missingRooms.join(', ')}] — you must provide creative content for all rooms`);
-    }
-
-    // Check all items are covered
-    const coveredItems = new Set(output.items.map(i => i.itemId));
-    const missingItems = [...itemIds].filter(id => !coveredItems.has(id));
-    if (missingItems.length > 0) {
-        errors.push(`Item creative content missing for: [${missingItems.join(', ')}] — you must provide creative content for all items`);
-    }
-
-    // Check all NPCs are covered
-    if (npcIds.size > 0) {
-        const coveredNPCs = new Set((output.npcCreative ?? []).map(n => n.npcId));
-        const missingNPCs = [...npcIds].filter(id => !coveredNPCs.has(id));
-        if (missingNPCs.length > 0) {
-            errors.push(`NPC creative content missing for: [${missingNPCs.join(', ')}] — you must provide creative content for all NPCs`);
+    // Reject creative rooms referencing non-existent roomIds
+    for (const room of output.rooms) {
+        if (!roomIds.has(room.roomId)) {
+            errors.push(`Creative content references roomId '${room.roomId}' which does not exist in the topology. Valid IDs: [${[...roomIds].join(', ')}]`);
         }
     }
 
-    // Check crew log authors against roster
-    const crewNames = new Set(output.crewRoster.map(c => c.name));
+    // Coverage checks — every skeleton entity must have creative content
+    const coveredRoomIds = new Set(output.rooms.map(r => r.roomId));
+    const missingRooms = [...roomIds].filter(id => !coveredRoomIds.has(id));
+    if (missingRooms.length > 0) {
+        errors.push(`Missing creative content for rooms: [${missingRooms.join(', ')}]`);
+    }
+
+    const coveredItemIds = new Set(output.items.map(i => i.itemId));
+    const missingItems = [...itemIds].filter(id => !coveredItemIds.has(id));
+    if (missingItems.length > 0) {
+        errors.push(`Missing creative content for items: [${missingItems.join(', ')}]`);
+    }
+
+    const coveredNpcIds = new Set((output.npcCreative ?? []).map(n => n.npcId));
+    const missingNPCs = [...npcIds].filter(id => !coveredNpcIds.has(id));
+    if (missingNPCs.length > 0) {
+        errors.push(`Missing creative content for NPCs: [${missingNPCs.join(', ')}]`);
+    }
+
+    // Starting item ID must not collide with any Layer 2 item ID
+    if (itemIds.has(output.startingItem.id)) {
+        errors.push(`startingItem.id '${output.startingItem.id}' collides with an existing item from the station data. Choose a unique ID that is NOT in: [${[...itemIds].join(', ')}]`);
+    }
+
+    // Each room must have at least 1 crew log
     for (const room of output.rooms) {
-        for (const log of room.crewLogs) {
-            if (!crewNames.has(log.author) && log.author !== 'Unknown') {
-                errors.push(`Crew log author '${log.author}' in room '${room.roomId}' does not appear in the crew roster. Roster: [${[...crewNames].join(', ')}]`);
-            }
+        if (roomIds.has(room.roomId) && room.crewLogs.length === 0) {
+            errors.push(`Room '${room.roomId}' has no crew logs — generate at least 1 per room`);
         }
     }
 
     // Check crew roster minimum
     if (output.crewRoster.length < 3) {
         errors.push(`Crew roster has ${String(output.crewRoster.length)} members — generate at least 3`);
+    }
+
+    // Check crew log authors with fuzzy matching
+    const repairs: string[] = [];
+    const crewNames = new Set(output.crewRoster.map(c => c.name));
+    for (const room of output.rooms) {
+        for (const log of room.crewLogs) {
+            if (log.author === 'Unknown') continue;
+            const match = findCrewMatch(log.author, crewNames);
+            if (match) {
+                if (match !== log.author) {
+                    repairs.push(`Crew log in ${room.roomId}: fuzzy-matched author '${log.author}' → '${match}'`);
+                }
+                log.author = match;
+            } else {
+                errors.push(`Crew log author '${log.author}' in room '${room.roomId}' does not appear in the crew roster. Roster: [${[...crewNames].join(', ')}]`);
+            }
+        }
     }
 
     if (errors.length > 0) {
@@ -283,12 +319,7 @@ function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContex
                     visuals: ['Emergency lights flicker dimly'],
                     tactile: 'The air feels stale and cold.',
                 },
-            crewLogs: validLogs.length > 0 ? validLogs : [{
-                type: 'engineering_report' as const,
-                author: crewRoster[0]?.name ?? 'Unknown',
-                content: 'Systems degrading faster than projected. Running out of workarounds.',
-                condition: 'A flickering terminal display.',
-            }],
+            crewLogs: validLogs,
             engineeringNotes: creative?.engineeringNotes ?? '',
         };
     });
@@ -342,7 +373,7 @@ function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContex
         arrivalScenario,
         startingItem,
         npcCreative: npcCreative.length > 0 ? npcCreative : undefined,
-    });
+    }, repairs);
 }
 
 // ─── Layer Config ────────────────────────────────────────────────────────────
@@ -353,6 +384,17 @@ export const creativeLayer: LayerConfig<CreativeLayerOutput, CreativeContent> = 
     buildPrompt: buildCreativePrompt,
     validate: validateCreativeLayer,
     maxRetries: 3,
-    timeoutMs: 300_000,       // 5 minutes — creative layer generates the most content
+    timeoutMs: 420_000,       // 7 minutes — creative layer generates the most content; 300s caused ~67% timeout rate
     maxOutputTokens: 16_384,  // ~8-10K tokens for all rooms, items, NPCs, crew logs
+    summarize: (v) => {
+        const crewNames = v.crewRoster.map(c => c.name);
+        const roomCoverage = v.rooms.length;
+        const itemCoverage = v.items.length;
+        const npcCoverage = v.npcCreative?.length ?? 0;
+        return [
+            `Station: "${v.stationName}"`,
+            `Crew roster: ${crewNames.join(', ')}`,
+            `Coverage: ${String(roomCoverage)} rooms, ${String(itemCoverage)} items, ${String(npcCoverage)} NPCs`,
+        ].join('\n');
+    },
 };

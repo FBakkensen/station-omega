@@ -600,7 +600,7 @@ Do NOT attempt to resolve engineering challenges yourself. Your job is to presen
 
 ## Item Discovery
 
-- Items must be narratively described before I can pick them up. When entering a room or looking around, describe visible items using the item_visible and drop_visible fields.
+- Items must be narratively described before I can pick them up. When entering a room or looking around, describe visible items using the "items" array field from move_to/look_around results.
 - The pick_up_item tool will reject items that haven't been revealed through move_to or look_around.
 - When I enter a new room, use look_around to describe it.
 - Describe items in terms of their engineering utility: what they could be used for, what they're designed to do, what condition they're in.

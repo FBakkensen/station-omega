@@ -49,7 +49,7 @@ export function assembleStation(
             depth: skRoom.depth,
             connections: [...skRoom.connections],
             lockedBy: skRoom.lockedBy,
-            loot: skRoom.lootSlot?.id ?? null,
+            loot: skRoom.lootSlots.map(s => s.id),
             sensory: cr?.sensory ?? {
                 sounds: ['Distant hum of machinery'],
                 smells: ['Stale air'],
@@ -123,8 +123,8 @@ export function assembleStation(
     });
 
     const entryRoom = rooms.get(skeleton.entryRoomId);
-    if (entryRoom && !entryRoom.loot) {
-        entryRoom.loot = startItem.id;
+    if (entryRoom) {
+        entryRoom.loot.push(startItem.id);
     }
 
     const mapLayout = generateMapLayout(rooms, skeleton.config.seed, skeleton.entryRoomId);

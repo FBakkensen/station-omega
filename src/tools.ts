@@ -113,10 +113,10 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const minutes = computeActionMinutes('look_around', state, state.activeEvents, room);
             advanceTime(minutes);
 
-            const lootPresent = room.loot && !state.roomLootTaken.has(state.currentRoom);
+            const availableItems = room.loot.filter(id => !state.itemsTaken.has(id));
 
             // Reveal items so pick_up_item can validate discovery
-            if (lootPresent && room.loot) state.revealedItems.add(room.loot);
+            for (const id of availableItems) state.revealedItems.add(id);
 
             const exits = getAdjacentRooms(state, station).map(id => {
                 const r = station.rooms.get(id);
@@ -132,8 +132,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 room_name: room.name,
                 room_index: `${String([...station.rooms.keys()].indexOf(state.currentRoom) + 1)} of ${String(station.rooms.size)}`,
                 description: room.descriptionSeed,
-                item_id: lootPresent && room.loot ? room.loot : null,
-                item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
+                items: availableItems.map(id => ({ id, name: getItemName(id, station) })),
                 npcs_present: getNPCsInRoom(state.currentRoom, station).map(npc => ({
                     id: npc.id,
                     name: npc.name,
@@ -150,7 +149,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 revisit_context: {
                     visit_count: state.roomVisitCount.get(state.currentRoom) ?? 0,
                     is_revisit: (state.roomVisitCount.get(state.currentRoom) ?? 0) > 1,
-                    loot_taken_here: state.roomLootTaken.has(state.currentRoom),
+                    all_loot_taken: availableItems.length === 0,
                 },
                 objective_hint: isObjectiveHere ? currentStep.description : null,
                 active_events: state.activeEvents.map(e => ({ type: e.type, effect: e.effect, minutes_remaining: e.minutesRemaining })),
@@ -241,16 +240,15 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const room = station.rooms.get(targetId);
 
             // Reveal items on room entry
-            const lootPresent = room?.loot && !state.roomLootTaken.has(targetId);
-            if (lootPresent && room.loot) state.revealedItems.add(room.loot);
+            const availableItems = room ? room.loot.filter(id => !state.itemsTaken.has(id)) : [];
+            for (const id of availableItems) state.revealedItems.add(id);
 
             return JSON.stringify({
                 success: true,
                 room_name: room?.name ?? targetId,
                 room_index: `${String([...station.rooms.keys()].indexOf(targetId) + 1)} of ${String(station.rooms.size)}`,
                 description: room?.descriptionSeed ?? '',
-                item_id: lootPresent && room.loot ? room.loot : null,
-                item_visible: lootPresent && room.loot ? getItemName(room.loot, station) : null,
+                items: availableItems.map(id => ({ id, name: getItemName(id, station) })),
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
                 sensory: room?.sensory ?? null,
@@ -296,46 +294,46 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             }
 
             // Check room loot
-            const roomLootAvailable = room.loot && !state.roomLootTaken.has(state.currentRoom);
-            if (roomLootAvailable && room.loot && (room.loot === itemId || room.loot.toLowerCase() === itemName)) {
-                if (!state.revealedItems.has(room.loot)) {
+            const availableItems = room.loot.filter(id => !state.itemsTaken.has(id));
+            // Find matching item in the available loot
+            const matchId = availableItems.find(id => id === itemId || id.toLowerCase() === itemName);
+            if (matchId) {
+                if (!state.revealedItems.has(matchId)) {
                     return JSON.stringify({ success: false, reason: 'not_revealed' });
                 }
-                const actualId = room.loot;
-                state.roomLootTaken.add(state.currentRoom);
-                const item = station.items.get(actualId);
+                state.itemsTaken.add(matchId);
+                const item = station.items.get(matchId);
 
                 if (item?.effect.type === 'objective') {
                     state.hasObjectiveItem = true;
-                    state.metrics.itemsCollected.push(actualId);
+                    state.metrics.itemsCollected.push(matchId);
                     return JSON.stringify({
                         success: true,
-                        item_id: actualId,
+                        item_id: matchId,
                         item_name: item.name,
                         is_objective_item: true,
                     });
                 }
 
-                state.inventory.push(actualId);
-                state.metrics.itemsCollected.push(actualId);
+                state.inventory.push(matchId);
+                state.metrics.itemsCollected.push(matchId);
                 return JSON.stringify({
                     success: true,
-                    item_id: actualId,
-                    item_name: item?.name ?? actualId,
+                    item_id: matchId,
+                    item_name: item?.name ?? matchId,
                     inventory: inventoryList(state, station),
                     slots_remaining: state.maxInventory - state.inventory.length,
                 });
             }
 
-            if (!roomLootAvailable) {
+            if (availableItems.length === 0) {
                 return JSON.stringify({ success: false, reason: 'nothing_available' });
             }
-            const lootItem = room.loot ? station.items.get(room.loot) : null;
             return JSON.stringify({
                 success: false,
                 reason: 'not_found',
                 requested: args.item,
-                available_item: lootItem ? { id: room.loot, name: lootItem.name } : null,
+                available_items: availableItems.map(id => ({ id, name: getItemName(id, station) })),
             });
         },
     });

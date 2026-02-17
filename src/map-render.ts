@@ -364,7 +364,7 @@ function cellToChunk(cell: MapCell): TextChunk {
 
 function buildGrid(
     station: GeneratedStation,
-    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'roomLootTaken'>,
+    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'itemsTaken'>,
     layout: MapLayout,
 ): MapCell[][] {
     const margin = 5;
@@ -500,7 +500,7 @@ function buildGrid(
         const { gx, gy } = toGrid(p.x, p.y);
 
         if (room.isObjectiveRoom) tryPlaceMarker(set, get, gx, gy, '\u2295', 'objective');
-        if (room.loot && !state.roomLootTaken.has(id)) tryPlaceMarker(set, get, gx, gy, '\u25C6', 'loot');
+        if (room.loot.some(itemId => !state.itemsTaken.has(itemId))) tryPlaceMarker(set, get, gx, gy, '\u25C6', 'loot');
         if (hasActiveFailure(room)) tryPlaceMarker(set, get, gx, gy, '\u26A0', 'failure');
     }
 
@@ -533,7 +533,7 @@ export function buildMapLegend(): TextChunk[] {
  */
 export function renderMapStyled(
     station: GeneratedStation,
-    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'roomLootTaken'>,
+    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'itemsTaken'>,
     layout: MapLayout,
 ): TextChunk[] {
     const grid = buildGrid(station, state, layout);
@@ -581,7 +581,7 @@ export interface RenderMapOptions {
  */
 export function renderMapText(
     station: GeneratedStation,
-    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'roomLootTaken'>,
+    state: Pick<GameState, 'roomsVisited' | 'currentRoom' | 'itemsTaken'>,
     layout: MapLayout,
     opts: RenderMapOptions = {},
 ): string {

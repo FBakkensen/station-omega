@@ -168,6 +168,7 @@ function validateSystemsItems(output: SystemsItemsOutput, context: LayerContext)
     const validMaterialKeys = new Set(ENGINEERING_ITEMS.keys());
     // Also allow keycard as a valid item key
     validMaterialKeys.add('keycard');
+    const repairs: string[] = [];
 
     // 1. Room references in failures
     for (const rf of output.roomFailures) {
@@ -186,16 +187,31 @@ function validateSystemsItems(output: SystemsItemsOutput, context: LayerContext)
         }
 
         for (const f of rf.failures) {
-            // Cascade target adjacency
+            // Auto-fix: severity 1 should have no cascade
+            if (f.severity === 1 && (f.minutesUntilCascade !== 0 || f.cascadeTarget !== null)) {
+                repairs.push(`${rf.roomId}/${f.systemId}: cleared cascade on severity-1 failure`);
+                f.minutesUntilCascade = 0;
+                f.cascadeTarget = null;
+            }
+
+            // Auto-fix: cascade target must exist and be adjacent
             if (f.cascadeTarget) {
                 if (!roomIdSet.has(f.cascadeTarget)) {
-                    errors.push(`cascadeTarget '${f.cascadeTarget}' for failure in ${rf.roomId} does not exist`);
+                    repairs.push(`${rf.roomId}/${f.systemId}: nullified cascadeTarget '${f.cascadeTarget}' (room does not exist)`);
+                    f.cascadeTarget = null;
                 } else {
                     const room = topology.rooms.find(r => r.id === rf.roomId);
                     if (room && !room.connections.includes(f.cascadeTarget)) {
-                        errors.push(`cascadeTarget '${f.cascadeTarget}' for failure in ${rf.roomId} is not adjacent to ${rf.roomId}. Adjacent rooms: [${room.connections.join(', ')}]`);
+                        repairs.push(`${rf.roomId}/${f.systemId}: nullified cascadeTarget '${f.cascadeTarget}' (not adjacent)`);
+                        f.cascadeTarget = null;
                     }
                 }
+            }
+
+            // Auto-fix: cascadeTarget with no timer is pointless
+            if (f.minutesUntilCascade === 0 && f.cascadeTarget !== null) {
+                repairs.push(`${rf.roomId}/${f.systemId}: nullified cascadeTarget (no cascade timer)`);
+                f.cascadeTarget = null;
             }
 
             // Required materials must be valid keys
@@ -203,14 +219,6 @@ function validateSystemsItems(output: SystemsItemsOutput, context: LayerContext)
                 if (!validMaterialKeys.has(mat)) {
                     errors.push(`Required material '${mat}' in ${rf.roomId} failure is not a valid material. Valid keys: [${[...ENGINEERING_ITEMS.keys()].join(', ')}]`);
                 }
-            }
-
-            // Severity/cascade consistency
-            if (f.severity === 1 && f.minutesUntilCascade > 0) {
-                errors.push(`Severity 1 failure in ${rf.roomId} should have minutesUntilCascade = 0, got ${String(f.minutesUntilCascade)}`);
-            }
-            if (f.severity >= 2 && f.minutesUntilCascade === 0 && f.cascadeTarget) {
-                errors.push(`Failure in ${rf.roomId} has cascadeTarget but minutesUntilCascade is 0`);
             }
         }
     }
@@ -238,13 +246,12 @@ function validateSystemsItems(output: SystemsItemsOutput, context: LayerContext)
         }
     }
 
-    // 3. isKeyItem correctness — only keycards should be key items
+    // 3. Auto-fix isKeyItem to match baseItemKey (only keycards are key items)
     for (const item of output.items) {
-        if (item.isKeyItem && item.baseItemKey !== 'keycard') {
-            errors.push(`Item '${item.id}' (${item.baseItemKey}) has isKeyItem true but only keycards should be key items. Materials, tools, and medical supplies are consumed on use — set isKeyItem to false`);
-        }
-        if (!item.isKeyItem && item.baseItemKey === 'keycard') {
-            errors.push(`Keycard '${item.id}' has isKeyItem false but keycards must be key items (they persist after use) — set isKeyItem to true`);
+        const shouldBeKeyItem = item.baseItemKey === 'keycard';
+        if (item.isKeyItem !== shouldBeKeyItem) {
+            repairs.push(`Item '${item.id}': corrected isKeyItem ${String(item.isKeyItem)} → ${String(shouldBeKeyItem)}`);
+            item.isKeyItem = shouldBeKeyItem;
         }
     }
 
@@ -305,7 +312,7 @@ function validateSystemsItems(output: SystemsItemsOutput, context: LayerContext)
             baseItemKey: i.baseItemKey,
             isKeyItem: i.isKeyItem,
         })),
-    });
+    }, repairs);
 }
 
 // ─── Layer Config ────────────────────────────────────────────────────────────
@@ -316,4 +323,24 @@ export const systemsItemsLayer: LayerConfig<SystemsItemsOutput, ValidatedSystems
     buildPrompt: buildSystemsItemsPrompt,
     validate: validateSystemsItems,
     maxRetries: 3,
+    summarize: (v) => {
+        const bySeverity = { 1: 0, 2: 0, 3: 0 };
+        for (const rf of v.roomFailures) {
+            for (const f of rf.failures) bySeverity[f.severity]++;
+        }
+        // Items per room distribution
+        const roomItemCounts = new Map<string, number>();
+        for (const item of v.items) {
+            roomItemCounts.set(item.roomId, (roomItemCounts.get(item.roomId) ?? 0) + 1);
+        }
+        const dist = [...roomItemCounts.values()].sort((a, b) => a - b);
+        const distStr = dist.length > 0
+            ? `min=${String(dist[0])}, max=${String(dist[dist.length - 1])}, median=${String(dist[Math.floor(dist.length / 2)])}`
+            : 'none';
+        return [
+            `Failures: ${String(bySeverity[1])} sev-1, ${String(bySeverity[2])} sev-2, ${String(bySeverity[3])} sev-3`,
+            `Items: ${String(v.items.length)} total across ${String(roomItemCounts.size)} rooms`,
+            `Items-per-room: ${distStr}`,
+        ].join('\n');
+    },
 };

@@ -261,4 +261,11 @@ export const objectivesNPCsLayer: LayerConfig<ObjectivesNPCsOutput, ValidatedObj
     buildPrompt: buildObjectivesNPCsPrompt,
     validate: validateObjectivesNPCs,
     maxRetries: 3,
+    summarize: (v) => {
+        const dispositions = v.npcs.map(n => `${n.id}(${n.disposition})`);
+        return [
+            `Objective: "${v.objectives.title}" — ${String(v.objectives.steps.length)} steps`,
+            `NPCs: ${v.npcs.length > 0 ? dispositions.join(', ') : 'none'}`,
+        ].join('\n');
+    },
 };

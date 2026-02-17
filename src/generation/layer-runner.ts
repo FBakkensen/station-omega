@@ -31,6 +31,8 @@ export interface LayerConfig<TSchema, TValidated> {
     timeoutMs?: number;
     /** Max output tokens for this layer. Default: 8192. */
     maxOutputTokens?: number;
+    /** Optional summary function for debug logging after successful validation. */
+    summarize?: (validated: TValidated) => string;
 }
 
 export class LayerGenerationError extends Error {
@@ -53,11 +55,13 @@ export async function runLayer<TSchema, TValidated>(
     model: LanguageModel,
     onProgress?: (msg: string) => void,
     providerOptions?: ProviderOptions,
+    debugLog?: (label: string, content: string) => void,
 ): Promise<TValidated> {
     const allErrors: string[][] = [];
     const maxAttempts = config.maxRetries + 1;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const attemptStart = Date.now();
         const errors = attempt > 0 ? allErrors[attempt - 1] : undefined;
         const { system, user } = config.buildPrompt(context, errors);
 
@@ -89,13 +93,23 @@ export async function runLayer<TSchema, TValidated>(
             const validation = config.validate(parsed, context);
 
             if (validation.success && validation.value !== undefined) {
+                debugLog?.('GENERATION-OK', `${config.name} succeeded on attempt ${String(attempt + 1)} (${String(Date.now() - attemptStart)}ms)`);
+                if (validation.repairs && validation.repairs.length > 0) {
+                    debugLog?.('GENERATION-REPAIR', `${config.name} auto-repairs:\n${validation.repairs.map(r => `  • ${r}`).join('\n')}`);
+                }
+                if (config.summarize) {
+                    debugLog?.('GENERATION-OUTPUT', `${config.name} summary:\n${config.summarize(validation.value)}`);
+                }
                 return validation.value;
             }
 
-            allErrors.push(validation.errors ?? ['Unknown validation error']);
+            const attemptErrors = validation.errors ?? ['Unknown validation error'];
+            allErrors.push(attemptErrors);
+            debugLog?.('GENERATION-RETRY', `${config.name} attempt ${String(attempt + 1)} failed (${String(Date.now() - attemptStart)}ms): ${attemptErrors.join('; ')}`);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             allErrors.push([`AI call failed: ${message}`]);
+            debugLog?.('GENERATION-RETRY', `${config.name} attempt ${String(attempt + 1)} crashed (${String(Date.now() - attemptStart)}ms): ${message}`);
         } finally {
             clearTimeout(timeout);
         }

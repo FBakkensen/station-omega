@@ -141,9 +141,13 @@ export interface ValidationResult<T> {
     success: boolean;
     value?: T;
     errors?: string[];
+    repairs?: string[];
 }
 
-export function validationSuccess<T>(value: T): ValidationResult<T> {
+export function validationSuccess<T>(value: T, repairs?: string[]): ValidationResult<T> {
+    if (repairs && repairs.length > 0) {
+        return { success: true, value, repairs };
+    }
     return { success: true, value };
 }
 

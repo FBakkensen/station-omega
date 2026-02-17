@@ -27,10 +27,10 @@ const SingleRoomSchema = z.object({
     descriptionSeed: z.string(),
     engineeringNotes: z.string(),
     sensory: z.object({
-        sounds: z.array(z.string()),
-        smells: z.array(z.string()),
-        visuals: z.array(z.string()),
-        tactile: z.string(),
+        sounds: z.array(z.string().min(1)).min(1).max(5),
+        smells: z.array(z.string().min(1)).min(1).max(4),
+        visuals: z.array(z.string().min(1)).min(1).max(5),
+        tactile: z.string().min(1),
     }),
     crewLogs: z.array(z.object({
         type: z.string(),
@@ -131,6 +131,23 @@ ${identity.crewRoster.map(c => `  ${c.name} — ${c.role}, ${c.fate}`).join('\n'
             // Must have at least 1 crew log
             if (output.crewLogs.length === 0) {
                 errors.push(`Room '${targetRoomId}' has no crew logs — generate at least 1`);
+            }
+
+            // Reject whitespace-only sensory strings (trim() can't be in schema — breaks Output.object())
+            const sensoryFields: [string, string[]][] = [
+                ['sounds', output.sensory.sounds],
+                ['smells', output.sensory.smells],
+                ['visuals', output.sensory.visuals],
+            ];
+            for (const [field, arr] of sensoryFields) {
+                for (let i = 0; i < arr.length; i++) {
+                    if (arr[i].trim().length === 0) {
+                        errors.push(`sensory.${field}[${String(i)}] is whitespace-only — provide real content`);
+                    }
+                }
+            }
+            if (output.sensory.tactile.trim().length === 0) {
+                errors.push(`sensory.tactile is whitespace-only — provide real content`);
             }
 
             // Crew log author validation with fuzzy matching

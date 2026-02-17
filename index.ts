@@ -428,6 +428,7 @@ async function runGameplay(
                 let streamStarted = false;
                 let segmentsRendered = 0;
                 let segmentsSkipped = 0;
+                let streamError: string | null = null;
                 const segmentParser = new StreamingSegmentParser();
                 const toolOutcomes: { tool: string; status: 'ok' | 'error' | 'game_fail'; summary: string }[] = [];
 
@@ -484,9 +485,15 @@ async function runGameplay(
                             toolOutcomes.push({ tool: part.toolName, status, summary });
                         } else if (part.type === 'error') {
                             debugLog('STREAM-ERROR', String(part.error));
+                            streamError = String(part.error);
                         } else if (part.type === 'finish') {
                             debugLog('STREAM-FINISH', `reason=${part.finishReason}`);
                         }
+                    }
+
+                    // If the stream errored and produced no content, throw to trigger rollback
+                    if (streamError && segmentsRendered === 0) {
+                        throw new Error(`Stream error with no content: ${streamError}`);
                     }
 
                     // Fallback: if streaming yielded no segments, try full parse of rawJson

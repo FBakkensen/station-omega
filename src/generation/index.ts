@@ -25,7 +25,7 @@ import { runLayer } from './layer-runner.js';
 import type { LayerContext } from './layer-runner.js';
 import { createGenerationLogger } from '../generation-log.js';
 import { topologyLayer } from './layers/topology.js';
-import { systemsItemsLayer } from './layers/systems-items.js';
+import { generateSystemsItemsProcedural } from './layers/systems-items-procedural.js';
 import { objectivesNPCsLayer } from './layers/objectives-npcs.js';
 import { runCreativeSublayers } from './layers/creative.js';
 
@@ -75,7 +75,7 @@ export async function generateStation(
     onProgress?.('Engineering system failures...');
     combinedLog('GENERATION', 'Starting Layer 2: Systems & Items');
 
-    const systemsItems = await runLayer(systemsItemsLayer, context, config.model, onProgress, po, combinedLog);
+    const systemsItems = generateSystemsItemsProcedural(topology, combinedLog);
     context['systemsItems'] = systemsItems;
     combinedLog('GENERATION', `Layer 2 complete: ${String(systemsItems.roomFailures.length)} rooms with failures, ${String(systemsItems.items.length)} items`);
 

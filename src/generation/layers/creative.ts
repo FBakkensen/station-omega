@@ -53,10 +53,10 @@ export const CreativeLayerSchema = z.object({
         descriptionSeed: z.string(),
         engineeringNotes: z.string(),
         sensory: z.object({
-            sounds: z.array(z.string()),
-            smells: z.array(z.string()),
-            visuals: z.array(z.string()),
-            tactile: z.string(),
+            sounds: z.array(z.string().min(1)).min(1).max(5),
+            smells: z.array(z.string().min(1)).min(1).max(4),
+            visuals: z.array(z.string().min(1)).min(1).max(5),
+            tactile: z.string().min(1),
         }),
         crewLogs: z.array(z.object({
             type: z.string(),
@@ -258,6 +258,25 @@ function validateCreativeLayer(output: CreativeLayerOutput, context: LayerContex
     // Starting item ID must not collide with any Layer 2 item ID
     if (itemIds.has(output.startingItem.id)) {
         errors.push(`startingItem.id '${output.startingItem.id}' collides with an existing item from the station data. Choose a unique ID that is NOT in: [${[...itemIds].join(', ')}]`);
+    }
+
+    // Reject whitespace-only sensory strings (trim() can't be in schema — breaks Output.object())
+    for (const room of output.rooms) {
+        const sensoryFields: [string, string[]][] = [
+            ['sounds', room.sensory.sounds],
+            ['smells', room.sensory.smells],
+            ['visuals', room.sensory.visuals],
+        ];
+        for (const [field, arr] of sensoryFields) {
+            for (let i = 0; i < arr.length; i++) {
+                if (arr[i].trim().length === 0) {
+                    errors.push(`Room '${room.roomId}' sensory.${field}[${String(i)}] is whitespace-only — provide real content`);
+                }
+            }
+        }
+        if (room.sensory.tactile.trim().length === 0) {
+            errors.push(`Room '${room.roomId}' sensory.tactile is whitespace-only — provide real content`);
+        }
     }
 
     // Each room must have at least 1 crew log

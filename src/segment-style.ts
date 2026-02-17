@@ -2,7 +2,6 @@ import {
     StyledText,
     bold,
     italic,
-    dim,
     fg,
     strikethrough,
 } from '@opentui/core';
@@ -24,12 +23,12 @@ const SEGMENT_COLORS = {
 
 /** Per-segment-type header colors. */
 const HEADER_COLORS = {
-    narration: '#7a8a9a',
+    narration: '#5fb6ff',
     dialogue: '#4a9acc',
     thought: '#b08adf',
     station_pa: '#3a8a3a',
-    crew_echo: '#7a5a8a',
-    diagnostic_readout: '#22aa88',
+    crew_echo: '#c39bff',
+    diagnostic_readout: '#38d6b3',
 } as const;
 
 // ─── Card Styling ────────────────────────────────────────────────────────────
@@ -89,11 +88,17 @@ function runToChunk(run: ContentRun, baseColor: string): TextChunk {
 
 // ─── Header Construction ─────────────────────────────────────────────────────
 
-/** Build header TextChunks for a segment (empty array for narration). */
+/** Build header TextChunks for a segment. */
 function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
     switch (seg.type) {
-        case 'narration':
-            return [dim(fg(HEADER_COLORS.narration)('\u2726')), fg('#5a6a7a')('\n')];
+        case 'narration': {
+            const name = seg.speakerName ?? 'Narrator';
+            return [
+                bold(fg(HEADER_COLORS.narration)('[OPERATOR] ')),
+                bold(fg('#e6f2ff')(name)),
+                fg('#5a6a7a')('\n'),
+            ];
+        }
         case 'dialogue': {
             const name = seg.speakerName ?? 'Unknown';
             return [bold(fg(HEADER_COLORS.dialogue)(name)), fg('#5a6a7a')('\n')];
@@ -106,10 +111,19 @@ function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
             return [bold(fg(HEADER_COLORS.station_pa)('[STATION PA]')), fg('#5a6a7a')('\n')];
         case 'crew_echo': {
             const name = seg.speakerName ?? seg.crewName ?? 'Unknown';
-            return [dim(fg(HEADER_COLORS.crew_echo)(`\u25B6 ${name}`)), fg('#5a6a7a')('\n')];
+            return [
+                bold(fg(HEADER_COLORS.crew_echo)('[CREW LOG] ')),
+                bold(fg('#f0e6ff')(name)),
+                fg('#5a6a7a')('\n'),
+            ];
         }
-        case 'diagnostic_readout':
-            return [bold(fg(HEADER_COLORS.diagnostic_readout)('[DIAGNOSTIC]')), fg('#5a6a7a')('\n')];
+        case 'diagnostic_readout': {
+            return [
+                bold(fg(HEADER_COLORS.diagnostic_readout)('[TERMINAL] ')),
+                bold(fg('#d8fff4')('DIAGNOSTIC READOUT')),
+                fg('#5a6a7a')('\n'),
+            ];
+        }
     }
 }
 
@@ -120,8 +134,8 @@ function buildHeaderChunks(seg: DisplaySegment): TextChunk[] {
  *
  * This parses inline markdown (bold, italic, code) ONCE using flattenMarkdown,
  * then maps each run to a TextChunk with the segment's base color and format
- * attributes. Header chunks (speaker name, prefix icons) are prepended for
- * non-narration types.
+ * attributes. Header chunks (speaker name, tags) are prepended for each
+ * segment type.
  *
  * The resulting chunks are cached and only need character-level truncation for
  * typewriter reveal — no markdown re-parsing per frame.
@@ -145,7 +159,7 @@ export function countChunkChars(chunks: TextChunk[]): number {
     return total;
 }
 
-/** Count visible characters in header chunks for a segment (0 for narration). */
+/** Count visible characters in header chunks for a segment. */
 export function getHeaderCharCount(seg: DisplaySegment): number {
     return countChunkChars(buildHeaderChunks(seg));
 }

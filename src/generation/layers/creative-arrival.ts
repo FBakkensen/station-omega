@@ -26,6 +26,7 @@ const ArrivalCreativeSchema = z.object({
         arrivalCondition: z.string(),
         knowledgeLevel: z.enum(['familiar', 'partial', 'none']),
         openingLine: z.string(),
+        playerCallsign: z.string(),
     }),
     startingItem: z.object({
         id: z.string(),
@@ -77,6 +78,9 @@ function buildArrivalPrompt(context: LayerContext, errors?: string[]): { system:
 - arrivalCondition: 1 sentence describing physical/mental state
 - knowledgeLevel: "familiar", "partial", or "none"
 - openingLine: First-person, visceral, sensory
+- playerCallsign: Operator name (2-3 words, human name style), readable on a comms display
+- MUST look like a real person name (examples: "Mara Quinn", "Iris Vale", "Jonah Reyes")
+- MUST NOT contain digits, serial/designator patterns, underscores, or hyphenated code names (forbidden examples: "Audit-7", "Ops_12", "Kestrel-4")
 
 # Starting Item Rules
 
@@ -125,6 +129,27 @@ function validateArrivalCreative(output: ArrivalCreativeOutput, context: LayerCo
         }
     }
 
+    const callsign = output.arrivalScenario.playerCallsign.trim();
+    if (callsign.length === 0) {
+        errors.push('arrivalScenario.playerCallsign must not be empty');
+    } else if (callsign.length > 24) {
+        errors.push(`arrivalScenario.playerCallsign is too long (${String(callsign.length)} chars). Keep it under 24 characters for UI readability`);
+    }
+
+    const callsignWords = callsign.split(/\s+/u).filter(Boolean);
+    if (callsignWords.length < 2 || callsignWords.length > 3) {
+        errors.push(`arrivalScenario.playerCallsign must be 2-3 words (got ${String(callsignWords.length)})`);
+    }
+    if (/\d/u.test(callsign)) {
+        errors.push('arrivalScenario.playerCallsign must not contain digits');
+    }
+    if (/[-_]/u.test(callsign)) {
+        errors.push('arrivalScenario.playerCallsign must not contain "-" or "_"');
+    }
+    if (!/^[A-Za-z]+(?:'[A-Za-z]+)?(?: [A-Za-z]+(?:'[A-Za-z]+)?){1,2}$/u.test(callsign)) {
+        errors.push('arrivalScenario.playerCallsign must look like a human name (letters and spaces, optional apostrophes)');
+    }
+
     if (errors.length > 0) {
         return validationFailure(errors);
     }
@@ -135,6 +160,7 @@ function validateArrivalCreative(output: ArrivalCreativeOutput, context: LayerCo
             arrivalCondition: output.arrivalScenario.arrivalCondition,
             knowledgeLevel: output.arrivalScenario.knowledgeLevel,
             openingLine: output.arrivalScenario.openingLine,
+            playerCallsign: callsign,
         },
         startingItem: {
             id: output.startingItem.id,
@@ -161,6 +187,7 @@ export const arrivalCreativeLayer: LayerConfig<ArrivalCreativeOutput, ValidatedA
     maxOutputTokens: 2048,
     summarize: (v) => [
         `Knowledge: ${v.arrivalScenario.knowledgeLevel}`,
+        `Callsign: ${v.arrivalScenario.playerCallsign ?? 'none'}`,
         `Starting item: ${v.startingItem.name} (${v.startingItem.category})`,
     ].join('\n'),
 };

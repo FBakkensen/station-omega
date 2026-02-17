@@ -70,6 +70,7 @@ export const CreativeLayerSchema = z.object({
         arrivalCondition: z.string(),
         knowledgeLevel: z.enum(['familiar', 'partial', 'none']),
         openingLine: z.string(),
+        playerCallsign: z.string(),
     }),
     startingItem: z.object({
         id: z.string(),

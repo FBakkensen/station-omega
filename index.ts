@@ -207,10 +207,13 @@ function resolveSegment(
     seg: { type: string; text: string; npcId: string | null; crewName: string | null },
     segmentIndex: number,
     station: GeneratedStation,
+    narratorName: string,
     missionElapsedMinutes?: number,
 ): DisplaySegment {
     let speakerName: string | null = null;
-    if (seg.type === 'dialogue' && seg.npcId) {
+    if (seg.type === 'narration') {
+        speakerName = narratorName;
+    } else if (seg.type === 'dialogue' && seg.npcId) {
         let npc = station.npcs.get(seg.npcId);
         if (!npc) {
             for (const n of station.npcs.values()) {
@@ -242,6 +245,7 @@ async function runGameplay(
     ttsEngine: TTSEngine,
 ): Promise<void> {
     const build = getBuild(classId);
+    const narratorName = (station.arrivalScenario.playerCallsign?.trim() ?? '') || build.name;
     const runId = `run_${String(Date.now())}`;
     const state = initializePlayerState(classId, station.entryRoomId, runId, station.config.storyArc, station.config.difficulty);
 
@@ -453,7 +457,7 @@ async function runGameplay(
                                     segmentsSkipped++;
                                     continue;
                                 }
-                                const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
+                                const display = resolveSegment(seg, segmentsRendered, station, narratorName, state.missionElapsedMinutes);
                                 const chunks = segmentToStyledChunks(display);
                                 const headerChars = getHeaderCharCount(display);
                                 const bodyChars = countChunkChars(chunks) - headerChars;
@@ -506,7 +510,7 @@ async function runGameplay(
                                     segmentsSkipped++;
                                     continue;
                                 }
-                                const display = resolveSegment(seg, segmentsRendered, station, state.missionElapsedMinutes);
+                                const display = resolveSegment(seg, segmentsRendered, station, narratorName, state.missionElapsedMinutes);
                                 const chunks = segmentToStyledChunks(display);
                                 const headerChars = getHeaderCharCount(display);
                                 const bodyChars = countChunkChars(chunks) - headerChars;

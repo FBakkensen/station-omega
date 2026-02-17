@@ -230,6 +230,7 @@ export interface ArrivalScenario {
     arrivalCondition: string;
     knowledgeLevel: 'familiar' | 'partial' | 'none';
     openingLine: string;
+    playerCallsign?: string;
 }
 
 export interface StartingItemCreative {

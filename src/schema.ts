@@ -16,7 +16,7 @@ export type GameResponse = z.infer<typeof GameResponseSchema>;
 
 /** A GameSegment enriched with display metadata for the TUI card system. */
 export interface DisplaySegment extends GameSegment {
-    /** Resolved display name for the speaker (NPC name, crew name, etc.), or null for narration. */
+    /** Resolved display name for the segment header (narrator callsign, NPC name, crew name, etc.). */
     speakerName: string | null;
     /** Index of this segment within the current AI response (0-based). */
     segmentIndex: number;

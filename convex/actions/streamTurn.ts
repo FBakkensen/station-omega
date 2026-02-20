@@ -151,6 +151,10 @@ export const processAITurn = internalAction({
       let rawJson = "";
       let segmentIndex = turnNumber > 1 ? 1 : 0;
 
+      // Reserve the final step for structured JSON output by disabling tools.
+      // Steps 0–10: tools available; step 11: toolChoice 'none' forces JSON.
+      const MAX_TOOL_STEPS = 11;
+
       console.time("[processAITurn] AI streaming");
       const result = streamText({
         model,
@@ -160,7 +164,13 @@ export const processAITurn = internalAction({
         output: Output.object({ schema: GameResponseSchema }),
         temperature: 0.8,
         maxOutputTokens: 8192,
-        stopWhen: stepCountIs(12),
+        stopWhen: stepCountIs(MAX_TOOL_STEPS + 1),
+        prepareStep: ({ stepNumber }) => {
+          if (stepNumber >= MAX_TOOL_STEPS) {
+            return { toolChoice: "none" as const, activeTools: [] };
+          }
+          return undefined;
+        },
       });
 
       for await (const part of result.fullStream) {
@@ -192,7 +202,6 @@ export const processAITurn = internalAction({
       console.debug("[processAITurn] Segments extracted", {
         segmentCount: segmentIndex - (turnNumber > 1 ? 1 : 0),
         rawJsonLength: rawJson.length,
-        rawJsonPreview: rawJson.slice(0, 200),
       });
 
       // ── Persist state after successful stream ────────────────────────

@@ -74,6 +74,7 @@ export default defineSchema({
         v.literal("station_pa"),
         v.literal("crew_echo"),
         v.literal("diagnostic_readout"),
+        v.literal("player_action"),
       ),
       text: v.string(),
       npcId: v.union(v.string(), v.null()),

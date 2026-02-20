@@ -38,6 +38,8 @@ export function resolveSegment(
         speakerName = crew ? `${crew.name} — ${crew.role}` : seg.crewName;
       }
       break;
+    case 'player_action':
+      break;
   }
 
   const display: DisplaySegment = {

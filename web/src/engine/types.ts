@@ -3,7 +3,7 @@
  * These mirror src/schema.ts GameSegment + DisplaySegment but without Zod dependency.
  */
 
-export type SegmentType = 'narration' | 'dialogue' | 'thought' | 'station_pa' | 'crew_echo' | 'diagnostic_readout';
+export type SegmentType = 'narration' | 'dialogue' | 'thought' | 'station_pa' | 'crew_echo' | 'diagnostic_readout' | 'player_action';
 
 export interface GameSegment {
   type: SegmentType;

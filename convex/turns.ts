@@ -48,6 +48,21 @@ export const start = mutation({
     const turnNumber = game.turnCount + 1;
     console.info("[turns.start] Lock acquired", { turnNumber });
 
+    // Insert player action segment at index 0 (skip for auto-first-turn)
+    if (turnNumber > 1) {
+      await ctx.db.insert("turnSegments", {
+        gameId: args.gameId,
+        turnNumber,
+        segmentIndex: 0,
+        segment: {
+          type: "player_action",
+          text: args.playerInput,
+          npcId: null,
+          crewName: null,
+        },
+      });
+    }
+
     // Schedule the AI processing action
     await ctx.scheduler.runAfter(0, internal.actions.streamTurn.processAITurn, {
       gameId: args.gameId,

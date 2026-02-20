@@ -57,6 +57,10 @@ function buildHeaderSpans(seg: DisplaySegment): StyledSpan[] {
         { text: 'DIAGNOSTIC READOUT', bold: true, color: '#d8fff4' },
         { text: '\n', color: '#5a6a7a' },
       ];
+    case 'player_action':
+      return [
+        { text: '> ', bold: true, color: HEADER_COLORS.player_action },
+      ];
   }
 }
 

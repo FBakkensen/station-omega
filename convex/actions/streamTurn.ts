@@ -149,7 +149,7 @@ export const processAITurn = internalAction({
       // ── Stream AI response ───────────────────────────────────────────
       const segmentParser = new StreamingSegmentParser();
       let rawJson = "";
-      let segmentIndex = 0;
+      let segmentIndex = turnNumber > 1 ? 1 : 0;
 
       console.time("[processAITurn] AI streaming");
       const result = streamText({
@@ -189,7 +189,11 @@ export const processAITurn = internalAction({
         // Tool calls/results handled internally (tools mutate gameCtx)
       }
       console.timeEnd("[processAITurn] AI streaming");
-      console.debug("[processAITurn] Segments extracted", { segmentCount: segmentIndex });
+      console.debug("[processAITurn] Segments extracted", {
+        segmentCount: segmentIndex - (turnNumber > 1 ? 1 : 0),
+        rawJsonLength: rawJson.length,
+        rawJsonPreview: rawJson.slice(0, 200),
+      });
 
       // ── Persist state after successful stream ────────────────────────
       state.turnCount = turnNumber;

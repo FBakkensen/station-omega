@@ -37,6 +37,7 @@ export const SEGMENT_COLORS = {
   station_pa: '#ff8844',
   crew_echo: '#6aad8a',
   diagnostic_readout: '#44ddaa',
+  player_action: '#e0e8f0',
 } as const;
 
 /** Per-segment-type header colors. */
@@ -47,6 +48,7 @@ export const HEADER_COLORS = {
   station_pa: '#3a8a3a',
   crew_echo: '#c39bff',
   diagnostic_readout: '#38d6b3',
+  player_action: '#00e5ff',
 } as const;
 
 /** Per-segment-type card background + border colors. */
@@ -57,6 +59,7 @@ export const CARD_STYLES = {
   station_pa: { bg: '#1a2a1a', border: '#3a8a3a' },
   crew_echo: { bg: '#2a2530', border: '#7a5a8a' },
   diagnostic_readout: { bg: '#0a2020', border: '#22aa88' },
+  player_action: { bg: '#0d1117', border: '#00e5ff' },
 } as const;
 
 /** Grade letter colors for run summary. */

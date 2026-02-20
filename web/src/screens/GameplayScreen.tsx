@@ -247,13 +247,14 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
       const isHistorical = i < latestTurnStartIndex;
-      const bodyChars = twPushSegment(seg, isHistorical);
+      const immediate = isHistorical || seg.type === 'player_action';
+      const bodyChars = twPushSegment(seg, immediate);
 
       // Only push new segments from the latest turn to TTS
       if (
         ttsEnabledRef.current &&
         seg.segmentIndex > ttsHighWaterRef.current &&
-        !isHistorical &&
+        !immediate &&
         bodyChars > 0
       ) {
         ttsHighWaterRef.current = seg.segmentIndex;
@@ -384,7 +385,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
 
         <CommandInput
           onSubmit={handleSubmit}
-          disabled={isStreaming}
+          disabled={isStreaming || !twAllFinalized}
         />
       </div>
 

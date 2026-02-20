@@ -24,7 +24,7 @@ Always run both `bun run typecheck` and `bun run lint` before considering a task
 - **Zero tolerance for warnings and errors.** All linter and type-checker output must be clean — no warnings, no errors. Fix everything, even if you believe issues were pre-existing.
 - **Always run `bun run typecheck && bun run lint` before returning to the user.** No exceptions.
 - **Always run interactive tests using the Chrome MCP.** Use the browser automation tools to verify UI changes and game behavior in the running app.
-- **Always handle the full flow.** Start the dev server, update Convex (`npx convex dev`), and ensure the full stack is running before testing.
+- **Always handle the full flow.** Start the dev server, update Convex (`npx convex dev`), and ensure the full stack is running before testing. If the default port (5173) is already in use, kill the existing dev server process before starting a new one — do not let Vite pick an alternate port.
 - **Use a pre-generated station when testing**, unless the task specifically involves testing station generation. This avoids slow generation waits during iterative testing.
 - **Disable sounds when testing**, unless the task specifically involves testing sound/TTS integration. This avoids audio issues in automated testing.
 

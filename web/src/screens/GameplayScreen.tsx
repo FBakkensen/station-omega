@@ -192,6 +192,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   const {
     cards: twCards, pushSegment: twPushSegment,
     onRevealChunk: twOnRevealChunk, finalizeAll: twFinalizeAll,
+    skipCurrent: twSkipCurrent, allFinalized: twAllFinalized,
   } = typewriter;
 
   const tts = useTTS(ttsProxyUrl, ttsEnabled, twOnRevealChunk, twFinalizeAll);
@@ -217,17 +218,19 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   }, [game, station, segments.length, isStreaming, submitTurn]);
 
   // Push new segments to typewriter + TTS as they arrive.
+  // Historical segments (before latestTurnStartIndex) are pushed as immediate (no typewriter).
   // Uses ttsHighWaterRef + latestTurnStartIndex to only push current turn to TTS.
   useEffect(() => {
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
-      twPushSegment(seg);
+      const isHistorical = i < latestTurnStartIndex;
+      twPushSegment(seg, isHistorical);
 
       // Only push new segments from the latest turn to TTS
       if (
         ttsEnabledRef.current &&
         seg.segmentIndex > ttsHighWaterRef.current &&
-        i >= latestTurnStartIndex
+        !isHistorical
       ) {
         ttsHighWaterRef.current = seg.segmentIndex;
         const card = twCards.get(seg.segmentIndex);
@@ -239,31 +242,30 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     }
   }, [segments, latestTurnStartIndex, twPushSegment, twCards]);
 
-  // Stream lifecycle: begin TTS on turn start, flush/finalize on turn end
+  // Stream lifecycle: finalize previous cards on turn start, flush TTS on turn end
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (isStreaming && !prevStreamingRef.current) {
-      // Turn just started
+      // Turn just started — finalize any lingering cards from previous turn
+      twFinalizeAll();
       if (ttsEnabledRef.current) {
         ttsRef.current.beginStream();
         ttsHighWaterRef.current = -1; // Reset for new turn
       }
     } else if (!isStreaming && prevStreamingRef.current) {
-      // Turn just ended
+      // Turn just ended — let typewriter finish naturally (no finalizeAll)
       if (ttsEnabledRef.current) {
         ttsRef.current.flushStream();
-      } else {
-        twFinalizeAll();
       }
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, twFinalizeAll]);
 
-  // Detect game over
+  // Detect game over — wait for typewriter to finish before transitioning
   const gameIsOver = game?.isOver;
   const gameWon = game?.won;
   useEffect(() => {
-    if (!gameIsOver || isStreaming) return;
+    if (!gameIsOver || isStreaming || !twAllFinalized) return;
     const timer = setTimeout(() => {
       if (gameWon) {
         onRunSummary(gameId);
@@ -272,7 +274,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
       }
     }, 2000);
     return () => { clearTimeout(timer); };
-  }, [gameIsOver, gameWon, isStreaming, gameId, onGameOver, onRunSummary]);
+  }, [gameIsOver, gameWon, isStreaming, twAllFinalized, gameId, onGameOver, onRunSummary]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -286,11 +288,19 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
       } else if (e.key === 'Escape') {
         setShowMap(false);
         setShowMission(false);
+      } else if (e.key === ' ') {
+        // Spacebar skips current typewriter card (only when input not focused)
+        const active = document.activeElement;
+        const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+        if (!isInput) {
+          e.preventDefault();
+          twSkipCurrent();
+        }
       }
     };
     window.addEventListener('keydown', handler);
     return () => { window.removeEventListener('keydown', handler); };
-  }, []);
+  }, [twSkipCurrent]);
 
   const handleSubmit = useCallback((input: string) => {
     void submitTurn(input);

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import type { DisplaySegment, Choice } from '../../engine/types';
 import { SegmentCard } from './SegmentCard';
 import { ChoiceCard } from './ChoiceCard';
@@ -20,6 +20,7 @@ export function NarrativePanel({
   isStreaming,
 }: NarrativePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
   // Track whether user has scrolled away from bottom
@@ -35,12 +36,41 @@ export function NarrativePanel({
     return () => { el.removeEventListener('scroll', handleScroll); };
   }, []);
 
-  // Auto-scroll only when near bottom and new content arrives
+  // Auto-scroll via ResizeObserver — fires when content height changes
+  // (new card appears or text grows during typewriter reveal)
   useEffect(() => {
-    if (scrollRef.current && isNearBottomRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const content = contentRef.current;
+    const scroll = scrollRef.current;
+    if (!content || !scroll) return;
+
+    const observer = new ResizeObserver(() => {
+      if (isNearBottomRef.current) {
+        scroll.scrollTop = scroll.scrollHeight;
+      }
+    });
+
+    observer.observe(content);
+    return () => { observer.disconnect(); };
+  }, []);
+
+  // Compute visible indices: all finalized cards + the first non-finalized card
+  const visibleIndices = useMemo(() => {
+    const visible = new Set<number>();
+    let foundRevealing = false;
+    for (const seg of segments) {
+      const card = typewriterCards.get(seg.segmentIndex);
+      if (!card) continue;
+      if (card.finalized) {
+        visible.add(seg.segmentIndex);
+      } else if (!foundRevealing) {
+        // First non-finalized card — show it (currently revealing)
+        visible.add(seg.segmentIndex);
+        foundRevealing = true;
+      }
+      // Remaining non-finalized cards are hidden (queued)
     }
-  }, [segments.length, isStreaming]);
+    return visible;
+  }, [segments, typewriterCards]);
 
   if (segments.length === 0 && !isStreaming) {
     return (
@@ -53,31 +83,34 @@ export function NarrativePanel({
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2">
-      {segments.map((seg) => {
-        const card = typewriterCards.get(seg.segmentIndex);
-        if (!card) return null;
-        return (
-          <SegmentCard
-            key={seg.segmentIndex}
-            type={seg.type}
-            spans={card.spans}
-            revealedChars={card.revealedChars}
-            finalized={card.finalized}
-          />
-        );
-      })}
+    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+      <div ref={contentRef} className="space-y-2">
+        {segments.map((seg) => {
+          const card = typewriterCards.get(seg.segmentIndex);
+          if (!card) return null;
+          if (!visibleIndices.has(seg.segmentIndex)) return null;
+          return (
+            <SegmentCard
+              key={seg.segmentIndex}
+              type={seg.type}
+              spans={card.spans}
+              revealedChars={card.revealedChars}
+              finalized={card.finalized}
+            />
+          );
+        })}
 
-      {isStreaming && (
-        <div className="flex items-center gap-2 px-3 py-2 text-omega-dim text-xs">
-          <span className="animate-pulse">...</span>
-          <span>Processing transmission</span>
-        </div>
-      )}
+        {isStreaming && (
+          <div className="flex items-center gap-2 px-3 py-2 text-omega-dim text-xs">
+            <span className="animate-pulse">...</span>
+            <span>Processing transmission</span>
+          </div>
+        )}
 
-      {choices && choices.length > 0 && !isStreaming && (
-        <ChoiceCard choices={choices} onChoice={onChoice} />
-      )}
+        {choices && choices.length > 0 && !isStreaming && (
+          <ChoiceCard choices={choices} onChoice={onChoice} />
+        )}
+      </div>
     </div>
   );
 }

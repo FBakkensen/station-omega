@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from 'react';
+import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import type { DisplaySegment, StyledSpan } from '../engine/types';
 import { segmentToStyledSpans, countSpanChars } from '../engine/segmentStyles';
 
@@ -24,7 +24,7 @@ interface CardRevealState {
 }
 
 /** Default reveal speed in characters per second (when no TTS). */
-const DEFAULT_CHARS_PER_SEC = 30;
+const DEFAULT_CHARS_PER_SEC = 20;
 
 export interface TypewriterCard {
   spans: StyledSpan[];
@@ -36,16 +36,18 @@ export interface TypewriterCard {
 export interface UseTypewriterResult {
   /** Map of segmentIndex -> reveal state for rendering. */
   cards: Map<number, TypewriterCard>;
-  /** Push a new segment to start revealing. */
-  pushSegment: (segment: DisplaySegment) => void;
+  /** Push a new segment to start revealing. If immediate=true, card is created already finalized. */
+  pushSegment: (segment: DisplaySegment, immediate?: boolean) => void;
   /** TTS callback: allow more characters on a specific card. */
   onRevealChunk: (segmentIndex: number, charBudget: number, durationSec: number) => void;
   /** Instantly reveal all remaining text on all cards. */
   finalizeAll: () => void;
   /** Finalize a single segment (e.g. when TTS completes it). */
   finalizeSegment: (segmentIndex: number) => void;
-  /** Skip the current card's animation (reveal fully). */
+  /** Skip the currently-revealing card's animation (reveal fully). */
   skipCurrent: () => void;
+  /** True when all pushed cards are finalized (or no cards exist). */
+  allFinalized: boolean;
 }
 
 /** Build a public snapshot Map from the mutable card ref. */
@@ -93,6 +95,7 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
 
       let anyActive = false;
 
+      // Sequential reveal: only advance the FIRST non-finalized card
       for (const card of cardsRef.current.values()) {
         if (card.finalized) continue;
 
@@ -113,9 +116,13 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
         if (card.revealedChars >= card.totalChars) {
           card.revealedChars = card.totalChars;
           card.finalized = true;
-        } else {
-          anyActive = true;
+          // Card just finalized — continue to start the next one immediately
+          continue;
         }
+
+        // Card is still revealing — stop here (sequential)
+        anyActive = true;
+        break;
       }
 
       syncSnapshot();
@@ -146,13 +153,28 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
     };
   }, []);
 
-  const pushSegment = useCallback((segment: DisplaySegment) => {
+  const pushSegment = useCallback((segment: DisplaySegment, immediate?: boolean) => {
     const map = cardsRef.current;
     if (map.has(segment.segmentIndex)) return; // Already tracked
 
     const { spans, headerCharCount } = segmentToStyledSpans(segment);
     const totalChars = countSpanChars(spans);
     const headerChars = headerCharCount;
+
+    if (immediate) {
+      // Already-finalized card (e.g. historical segments on page load)
+      map.set(segment.segmentIndex, {
+        spans,
+        totalChars,
+        headerChars,
+        revealedChars: totalChars,
+        revealAllowedChars: totalChars,
+        revealRate: DEFAULT_CHARS_PER_SEC,
+        finalized: true,
+      });
+      syncSnapshot();
+      return;
+    }
 
     const card: CardRevealState = {
       spans,
@@ -208,10 +230,8 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
   }, [syncSnapshot]);
 
   const skipCurrent = useCallback(() => {
-    // Skip the last non-finalized card
-    const entries = [...cardsRef.current.entries()];
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const card = entries[i][1];
+    // Skip the first non-finalized card (the one currently revealing)
+    for (const card of cardsRef.current.values()) {
       if (!card.finalized) {
         card.revealedChars = card.totalChars;
         card.revealAllowedChars = card.totalChars;
@@ -220,7 +240,16 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
       }
     }
     syncSnapshot();
-  }, [syncSnapshot]);
+    ensureRunning(); // Kick the loop so the next card starts immediately
+  }, [syncSnapshot, ensureRunning]);
+
+  // Derive allFinalized from snapshot: true when every card is finalized (or no cards)
+  const allFinalized = useMemo(() => {
+    for (const card of cards.values()) {
+      if (!card.finalized) return false;
+    }
+    return true;
+  }, [cards]);
 
   return {
     cards,
@@ -229,5 +258,6 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
     finalizeAll,
     finalizeSegment,
     skipCurrent,
+    allFinalized,
   };
 }

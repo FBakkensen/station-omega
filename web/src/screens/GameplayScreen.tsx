@@ -12,6 +12,7 @@ import { useTTS } from '../hooks/useTTS';
 import { countSpanChars } from '../engine/segmentStyles';
 import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
+import { usePreferences } from '../hooks/usePreferences';
 
 // ─── Convex document shapes (game.state and station.data are v.any()) ────
 
@@ -184,7 +185,8 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     return convexUrl.replace('.cloud', '.site') + '/api/tts';
   }, []);
   const ttsAvailable = ttsProxyUrl !== null;
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const { soundEnabled: initialSound, setSoundEnabled: persistSound } = usePreferences();
+  const [ttsEnabled, setTtsEnabled] = useState(initialSound);
 
   const typewriter = useTypewriter(ttsEnabled);
 
@@ -348,6 +350,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
                       tts.stop();
                       twFinalizeAll();
                     }
+                    persistSound(!prev);
                     return !prev;
                   });
                 }}

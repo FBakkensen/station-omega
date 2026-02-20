@@ -1,3 +1,5 @@
+import { usePreferences } from '../hooks/usePreferences';
+
 interface TitleScreenProps {
   onNewGame: () => void;
   onHistory: () => void;
@@ -19,6 +21,8 @@ const TITLE_ART = [
 ];
 
 export function TitleScreen({ onNewGame, onHistory }: TitleScreenProps) {
+  const { soundEnabled, setSoundEnabled } = usePreferences();
+
   return (
     <div className="flex flex-col items-center justify-center h-full gap-12">
       {/* ASCII Art Title */}
@@ -51,6 +55,16 @@ export function TitleScreen({ onNewGame, onHistory }: TitleScreenProps) {
           Run History
         </button>
       </div>
+
+      {/* Sound Toggle */}
+      <button
+        onClick={() => { setSoundEnabled(!soundEnabled); }}
+        className={`text-xs tracking-wider uppercase transition-colors ${
+          soundEnabled ? 'text-omega-title' : 'text-omega-dim hover:text-omega-text'
+        }`}
+      >
+        {soundEnabled ? 'Sound: ON' : 'Sound: OFF'}
+      </button>
 
       {/* Version */}
       <p className="text-omega-dim/50 text-xs">

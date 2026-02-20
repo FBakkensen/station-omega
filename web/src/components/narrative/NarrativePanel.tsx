@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import type { DisplaySegment, Choice } from '../../engine/types';
 import { SegmentCard } from './SegmentCard';
 import { ChoiceCard } from './ChoiceCard';
@@ -22,37 +22,29 @@ export function NarrativePanel({
   allFinalized,
 }: NarrativePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const isNearBottomRef = useRef(true);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Track whether user has scrolled away from bottom
+  // IntersectionObserver on sentinel: visible = user is at bottom, hidden = scrolled up
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const handleScroll = () => {
-      const threshold = 80; // px from bottom
-      isNearBottomRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-    };
-    el.addEventListener('scroll', handleScroll);
-    return () => { el.removeEventListener('scroll', handleScroll); };
+    const sentinel = sentinelRef.current;
+    const scroll = scrollRef.current;
+    if (!sentinel || !scroll) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setShowScrollButton(!entry.isIntersecting);
+      },
+      { root: scroll, threshold: 0 },
+    );
+
+    observer.observe(sentinel);
+    return () => { observer.disconnect(); };
   }, []);
 
-  // Auto-scroll via ResizeObserver — fires when content height changes
-  // (new card appears or text grows during typewriter reveal)
-  useEffect(() => {
-    const content = contentRef.current;
-    const scroll = scrollRef.current;
-    if (!content || !scroll) return;
-
-    const observer = new ResizeObserver(() => {
-      if (isNearBottomRef.current) {
-        scroll.scrollTop = scroll.scrollHeight;
-      }
-    });
-
-    observer.observe(content);
-    return () => { observer.disconnect(); };
+  const scrollToBottom = useCallback(() => {
+    // In column-reverse, scrollTop = 0 is the bottom of content
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   // Compute visible indices: all finalized cards + the first non-finalized card
@@ -74,45 +66,60 @@ export function NarrativePanel({
     return visible;
   }, [segments, typewriterCards]);
 
-  if (segments.length === 0 && !isStreaming) {
-    return (
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
-        <p className="text-omega-dim text-sm text-center py-8">
-          Awaiting first transmission...
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
-      <div ref={contentRef} className="space-y-2">
-        {segments.map((seg) => {
-          const card = typewriterCards.get(seg.segmentIndex);
-          if (!card) return null;
-          if (!visibleIndices.has(seg.segmentIndex)) return null;
-          return (
-            <SegmentCard
-              key={seg.segmentIndex}
-              type={seg.type}
-              spans={card.spans}
-              revealedChars={card.revealedChars}
-              finalized={card.finalized}
-            />
-          );
-        })}
+    <div className="relative flex-1 min-h-0">
+      <div ref={scrollRef} className="flex flex-col-reverse overflow-y-auto h-full p-4">
+        <div className="space-y-2">
+          {segments.length === 0 && !isStreaming ? (
+            <p className="text-omega-dim text-sm text-center py-8">
+              Awaiting first transmission...
+            </p>
+          ) : (
+            <>
+              {segments.map((seg) => {
+                const card = typewriterCards.get(seg.segmentIndex);
+                if (!card) return null;
+                if (!visibleIndices.has(seg.segmentIndex)) return null;
+                return (
+                  <SegmentCard
+                    key={seg.segmentIndex}
+                    type={seg.type}
+                    spans={card.spans}
+                    revealedChars={card.revealedChars}
+                    finalized={card.finalized}
+                  />
+                );
+              })}
 
-        {isStreaming && (
-          <div className="flex items-center gap-2 px-3 py-2 text-omega-dim text-xs">
-            <span className="animate-pulse">...</span>
-            <span>Processing transmission</span>
-          </div>
-        )}
+              {isStreaming && (
+                <div className="flex items-center gap-2 px-3 py-2 text-omega-dim text-xs">
+                  <span className="animate-pulse">...</span>
+                  <span>Processing transmission</span>
+                </div>
+              )}
 
-        {choices && choices.length > 0 && !isStreaming && allFinalized && (
-          <ChoiceCard choices={choices} onChoice={onChoice} />
-        )}
+              {choices && choices.length > 0 && !isStreaming && allFinalized && (
+                <ChoiceCard choices={choices} onChoice={onChoice} />
+              )}
+            </>
+          )}
+          {/* Sentinel for IntersectionObserver — always at the bottom of content */}
+          <div ref={sentinelRef} className="h-0" />
+        </div>
       </div>
+
+      {showScrollButton && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full
+            bg-omega-surface/90 border border-omega-border text-omega-dim text-xs
+            hover:text-omega-text hover:border-omega-accent transition-colors
+            backdrop-blur-sm shadow-lg cursor-pointer"
+        >
+          New content below ↓
+        </button>
+      )}
     </div>
   );
 }

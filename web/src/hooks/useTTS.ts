@@ -163,6 +163,7 @@ export function useTTS(
   const streamCompleteRef = useRef(false);
   const genRunningRef = useRef(false);
   const playRunningRef = useRef(false);
+  const epochRef = useRef(0);
   const onRevealChunkRef = useRef(onRevealChunk);
   const onStreamCompleteRef = useRef(onStreamComplete);
 
@@ -234,13 +235,14 @@ export function useTTS(
   const runGenerationPump = useCallback(async () => {
     if (genRunningRef.current) return;
     genRunningRef.current = true;
+    const epoch = epochRef.current;
 
     try {
-      while (isStreamActive()) {
+      while (isStreamActive() && epochRef.current === epoch) {
         const chunk = chunkQueueRef.current.shift();
         if (chunk) {
           const result = await generateSpeech(chunk);
-          if (!isStreamActive()) break;
+          if (!isStreamActive() || epochRef.current !== epoch) break;
           if (result) {
             audioQueueRef.current.push(result);
           } else {
@@ -261,7 +263,10 @@ export function useTTS(
         await new Promise<void>((r) => { setTimeout(r, 50); });
       }
     } finally {
-      genRunningRef.current = false;
+      // Only clear running flag if this pump is still the current epoch
+      if (epochRef.current === epoch) {
+        genRunningRef.current = false;
+      }
     }
   }, [generateSpeech, isStreamActive]);
 
@@ -270,9 +275,10 @@ export function useTTS(
   const runPlaybackPump = useCallback(async () => {
     if (playRunningRef.current) return;
     playRunningRef.current = true;
+    const epoch = epochRef.current;
 
     try {
-      while (isStreamActive()) {
+      while (isStreamActive() && epochRef.current === epoch) {
         const audioIdx = audioQueueRef.current.findIndex(
           (a) => a.index === nextPlayIndexRef.current,
         );
@@ -288,6 +294,7 @@ export function useTTS(
             const ctx = getAudioContext();
             try {
               const audioBuffer = await ctx.decodeAudioData(audio.buffer.slice(0));
+              if (epochRef.current !== epoch) break;
               const source = ctx.createBufferSource();
               source.buffer = audioBuffer;
               source.connect(ctx.destination);
@@ -326,11 +333,14 @@ export function useTTS(
       }
 
       // Stream fully played — notify caller
-      if (streamCompleteRef.current) {
+      if (streamCompleteRef.current && epochRef.current === epoch) {
         onStreamCompleteRef.current?.();
       }
     } finally {
-      playRunningRef.current = false;
+      // Only clear running flag if this pump is still the current epoch
+      if (epochRef.current === epoch) {
+        playRunningRef.current = false;
+      }
     }
   }, [getAudioContext, isStreamActive]);
 
@@ -344,6 +354,19 @@ export function useTTS(
   // ─── Public API ────────────────────────────────────────────────────
 
   const beginStream = useCallback(() => {
+    // Increment epoch so stale pumps from the previous turn detect the mismatch and exit
+    epochRef.current++;
+
+    // Abort any in-flight TTS fetch from the previous turn
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+
+    // Force-reset running flags so new pumps can start even if old ones haven't exited yet
+    genRunningRef.current = false;
+    playRunningRef.current = false;
+
     chunkQueueRef.current = [];
     audioQueueRef.current = [];
     nextChunkIndexRef.current = 0;

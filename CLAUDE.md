@@ -19,6 +19,37 @@ bun run test:analyze   # Analyze test results
 
 Always run both `bun run typecheck` and `bun run lint` before considering a task complete. All errors must be resolved.
 
+## Debugging & Logs
+
+Convex backend uses structured logging with severity levels (`console.debug`, `console.info`, `console.warn`, `console.error`) and `console.time`/`timeEnd` for performance tracking. All log lines use `[module]` prefixes.
+
+```bash
+# Tail logs in real-time (default: only errors/warnings)
+npx convex logs
+
+# Include successful function executions
+npx convex logs --success
+
+# Query recent historical logs (timeout prevents hang after history prints)
+timeout 5 npx convex logs --history 50 --jsonl --success 2>/dev/null | jq '.'
+
+# Filter by function name
+timeout 5 npx convex logs --history 100 --jsonl --success 2>/dev/null | \
+  jq 'select(.identifier | test("streamTurn"))'
+
+# Show only errors
+timeout 5 npx convex logs --history 100 --jsonl 2>/dev/null | \
+  jq 'select(.error != null)'
+
+# Show entries with console output
+timeout 5 npx convex logs --history 100 --jsonl --success 2>/dev/null | \
+  jq 'select(.logLines | length > 0) | {fn: .identifier, logs: .logLines, time: .executionTime}'
+
+# Trace sub-calls of an action by parentExecutionId
+timeout 5 npx convex logs --history 200 --jsonl --success 2>/dev/null | \
+  jq 'select(.parentExecutionId == "EXECUTION_ID")'
+```
+
 ## Workflow Rules
 
 - **Zero tolerance for warnings and errors.** All linter and type-checker output must be clean — no warnings, no errors. Fix everything, even if you believe issues were pre-existing.

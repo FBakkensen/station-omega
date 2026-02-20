@@ -28,16 +28,16 @@ export const processAITurn = internalAction({
   returns: v.null(),
   handler: async (ctx, args) => {
     const { gameId, playerInput, turnNumber } = args;
-    console.log("[processAITurn] Starting turn", turnNumber, "for game", gameId, "input:", playerInput);
+    console.info("[processAITurn] Turn started", { gameId, turnNumber, input: playerInput });
 
     try {
       // ── Load game data from Convex ───────────────────────────────────
-      console.log("[processAITurn] Loading game data...");
+      console.debug("[processAITurn] Loading game data...");
       const game = await ctx.runQuery(internal.games.getInternal, {
         id: gameId,
       });
       if (!game) throw new Error("Game not found");
-      console.log("[processAITurn] Game loaded, stationId:", game.stationId);
+      console.debug("[processAITurn] Game loaded", { stationId: game.stationId });
 
       const station = await ctx.runQuery(internal.stations.getInternal, {
         id: game.stationId,
@@ -151,6 +151,7 @@ export const processAITurn = internalAction({
       let rawJson = "";
       let segmentIndex = 0;
 
+      console.time("[processAITurn] AI streaming");
       const result = streamText({
         model,
         system: systemPrompt,
@@ -187,6 +188,8 @@ export const processAITurn = internalAction({
         }
         // Tool calls/results handled internally (tools mutate gameCtx)
       }
+      console.timeEnd("[processAITurn] AI streaming");
+      console.debug("[processAITurn] Segments extracted", { segmentCount: segmentIndex });
 
       // ── Persist state after successful stream ────────────────────────
       state.turnCount = turnNumber;
@@ -244,6 +247,7 @@ export const processAITurn = internalAction({
 
       // Mark turn as complete
       await ctx.runMutation(internal.turnLocks.release, { gameId });
+      console.info("[processAITurn] Turn complete", { gameId, turnNumber, segmentCount: segmentIndex });
     } catch (err) {
       // Release lock on error
       await ctx.runMutation(internal.turnLocks.release, { gameId });
@@ -251,6 +255,7 @@ export const processAITurn = internalAction({
       // Save error as a diagnostic segment so the client sees it
       const message =
         err instanceof Error ? err.message : "Unknown error during turn";
+      console.error("[processAITurn] AI error", { gameId, turnNumber, error: message });
       await ctx.runMutation(internal.turnSegments.save, {
         gameId,
         turnNumber,

@@ -36,8 +36,9 @@ export interface TypewriterCard {
 export interface UseTypewriterResult {
   /** Map of segmentIndex -> reveal state for rendering. */
   cards: Map<number, TypewriterCard>;
-  /** Push a new segment to start revealing. If immediate=true, card is created already finalized. */
-  pushSegment: (segment: DisplaySegment, immediate?: boolean) => void;
+  /** Push a new segment to start revealing. If immediate=true, card is created already finalized.
+   *  Returns the number of body characters (total minus header), or -1 if the segment was already tracked or immediate. */
+  pushSegment: (segment: DisplaySegment, immediate?: boolean) => number;
   /** TTS callback: allow more characters on a specific card. */
   onRevealChunk: (segmentIndex: number, charBudget: number, durationSec: number) => void;
   /** Instantly reveal all remaining text on all cards. */
@@ -153,9 +154,9 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
     };
   }, []);
 
-  const pushSegment = useCallback((segment: DisplaySegment, immediate?: boolean) => {
+  const pushSegment = useCallback((segment: DisplaySegment, immediate?: boolean): number => {
     const map = cardsRef.current;
-    if (map.has(segment.segmentIndex)) return; // Already tracked
+    if (map.has(segment.segmentIndex)) return -1; // Already tracked
 
     const { spans, headerCharCount } = segmentToStyledSpans(segment);
     const totalChars = countSpanChars(spans);
@@ -173,7 +174,7 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
         finalized: true,
       });
       syncSnapshot();
-      return;
+      return -1;
     }
 
     const card: CardRevealState = {
@@ -189,6 +190,7 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
     map.set(segment.segmentIndex, card);
     syncSnapshot();
     ensureRunning();
+    return Math.max(totalChars - headerChars, 0);
   }, [ttsEnabled, ensureRunning, syncSnapshot]);
 
   const onRevealChunk = useCallback((segmentIndex: number, charBudget: number, durationSec: number) => {

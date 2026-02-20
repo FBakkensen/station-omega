@@ -25,16 +25,16 @@ export const generate = internalAction({
   returns: v.null(),
   handler: async (ctx, args) => {
     const { progressId, difficulty, characterClass } = args;
-    console.log("[generateStation] Starting generation, progressId:", progressId, "difficulty:", difficulty, "class:", characterClass);
+    console.info("[generateStation] Starting generation", { progressId, difficulty, characterClass });
 
     try {
       // Dynamic import of the generation pipeline (ESM from src/)
-      console.log("[generateStation] Importing modules...");
+      console.debug("[generateStation] Importing modules...");
       const { createOpenRouter } = await import("@openrouter/ai-sdk-provider");
       const { generateStation } = await import("../../src/generation/index.js");
       const { assembleStation } = await import("../../src/assembly.js");
       const { serializeStation } = await import("../lib/serialization.js");
-      console.log("[generateStation] Modules imported successfully");
+      console.debug("[generateStation] Modules imported");
 
       const openrouter = createOpenRouter({
         apiKey: process.env.OPENROUTER_API_KEY ?? "",
@@ -71,21 +71,23 @@ export const generate = internalAction({
         });
       };
 
-      console.log("[generateStation] Running generation pipeline...");
+      console.info("[generateStation] Running generation pipeline...");
+      console.time("[generateStation] Generation pipeline");
       // Run the generation pipeline
       const { skeleton, creative } = await generateStation(
         { difficulty, characterClass, model },
         onProgress,
       );
-      console.log("[generateStation] Generation pipeline complete, assembling station...");
+      console.timeEnd("[generateStation] Generation pipeline");
+      console.debug("[generateStation] Assembling station...");
 
       // Assemble into GeneratedStation
       const station = assembleStation(skeleton, creative);
-      console.log("[generateStation] Station assembled:", station.stationName);
+      console.info("[generateStation] Station assembled", { stationName: station.stationName });
 
       // Serialize for Convex storage (Maps→Records, Sets→Arrays)
       const serialized = serializeStation(station);
-      console.log("[generateStation] Station serialized, saving to Convex...");
+      console.debug("[generateStation] Station serialized, saving to Convex...");
 
       // Save to Convex
       const stationId: Id<"stations"> = await ctx.runMutation(internal.stations.save, {
@@ -94,7 +96,7 @@ export const generate = internalAction({
         difficulty,
         data: serialized,
       });
-      console.log("[generateStation] Station saved, stationId:", stationId);
+      console.info("[generateStation] Station saved", { stationId });
 
       // Mark progress as complete
       await ctx.runMutation(internal.generationProgress.update, {
@@ -104,7 +106,7 @@ export const generate = internalAction({
         progress: 100,
         stationId,
       });
-      console.log("[generateStation] Progress marked complete");
+      console.info("[generateStation] Generation complete", { stationName: station.stationName });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       const stack = error instanceof Error ? error.stack : "";

@@ -16,7 +16,7 @@ export const start = mutation({
     v.object({ ok: v.literal(false), error: v.string() }),
   ),
   handler: async (ctx, args) => {
-    console.log("[turns.start] gameId:", args.gameId, "input:", args.playerInput);
+    console.info("[turns.start] Turn submitted", { gameId: args.gameId, input: args.playerInput });
     const game = await ctx.db.get(args.gameId);
     if (!game) { console.error("[turns.start] Game not found"); return { ok: false as const, error: "Game not found" }; }
     if (game.isOver) { console.warn("[turns.start] Game is over"); return { ok: false as const, error: "Game is over" }; }
@@ -28,10 +28,10 @@ export const start = mutation({
       .first();
 
     if (existingLock) {
-      console.log("[turns.start] Existing lock found, lockedAt:", existingLock.lockedAt, "age:", Date.now() - existingLock.lockedAt);
+      console.warn("[turns.start] Existing lock found", { lockedAt: existingLock.lockedAt, ageMs: Date.now() - existingLock.lockedAt });
       // Auto-expire stale locks (60s)
       if (Date.now() - existingLock.lockedAt > 60_000) {
-        console.log("[turns.start] Lock expired, deleting");
+        console.warn("[turns.start] Lock expired, deleting");
         await ctx.db.delete(existingLock._id);
       } else {
         console.warn("[turns.start] Turn in progress, rejecting");
@@ -46,7 +46,7 @@ export const start = mutation({
     });
 
     const turnNumber = game.turnCount + 1;
-    console.log("[turns.start] Lock acquired, turnNumber:", turnNumber, "scheduling processAITurn");
+    console.info("[turns.start] Lock acquired", { turnNumber });
 
     // Schedule the AI processing action
     await ctx.scheduler.runAfter(0, internal.actions.streamTurn.processAITurn, {
@@ -55,7 +55,7 @@ export const start = mutation({
       turnNumber,
     });
 
-    console.log("[turns.start] Action scheduled, returning ok");
+    console.debug("[turns.start] processAITurn scheduled");
     return { ok: true as const, turnNumber };
   },
 });

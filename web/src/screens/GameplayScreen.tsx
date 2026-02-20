@@ -9,7 +9,6 @@ import { CommandInput } from '../components/input/CommandInput';
 import { useStreamingTurn } from '../hooks/useStreamingTurn';
 import { useTypewriter } from '../hooks/useTypewriter';
 import { useTTS } from '../hooks/useTTS';
-import { countSpanChars } from '../engine/segmentStyles';
 import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
 import { usePreferences } from '../hooks/usePreferences';
@@ -219,32 +218,10 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     }
   }, [game, station, segments.length, isStreaming, submitTurn]);
 
-  // Push new segments to typewriter + TTS as they arrive.
-  // Historical segments (before latestTurnStartIndex) are pushed as immediate (no typewriter).
-  // Uses ttsHighWaterRef + latestTurnStartIndex to only push current turn to TTS.
-  useEffect(() => {
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      const isHistorical = i < latestTurnStartIndex;
-      twPushSegment(seg, isHistorical);
-
-      // Only push new segments from the latest turn to TTS
-      if (
-        ttsEnabledRef.current &&
-        seg.segmentIndex > ttsHighWaterRef.current &&
-        !isHistorical
-      ) {
-        ttsHighWaterRef.current = seg.segmentIndex;
-        const card = twCards.get(seg.segmentIndex);
-        const bodyChars = card
-          ? Math.max(countSpanChars(card.spans) - card.headerChars, 0)
-          : 0;
-        ttsRef.current.pushSegment(seg, bodyChars);
-      }
-    }
-  }, [segments, latestTurnStartIndex, twPushSegment, twCards]);
-
-  // Stream lifecycle: finalize previous cards on turn start, flush TTS on turn end
+  // Stream lifecycle: finalize previous cards on turn start, flush TTS on turn end.
+  // IMPORTANT: This effect MUST be declared before the segment push effect so that
+  // React fires it first when both deps change in the same render. This ensures
+  // twFinalizeAll() + beginStream() run before new segments are pushed.
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (isStreaming && !prevStreamingRef.current) {
@@ -262,6 +239,28 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, twFinalizeAll]);
+
+  // Push new segments to typewriter + TTS as they arrive.
+  // Historical segments (before latestTurnStartIndex) are pushed as immediate (no typewriter).
+  // Uses ttsHighWaterRef + latestTurnStartIndex to only push current turn to TTS.
+  useEffect(() => {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const isHistorical = i < latestTurnStartIndex;
+      const bodyChars = twPushSegment(seg, isHistorical);
+
+      // Only push new segments from the latest turn to TTS
+      if (
+        ttsEnabledRef.current &&
+        seg.segmentIndex > ttsHighWaterRef.current &&
+        !isHistorical &&
+        bodyChars > 0
+      ) {
+        ttsHighWaterRef.current = seg.segmentIndex;
+        ttsRef.current.pushSegment(seg, bodyChars);
+      }
+    }
+  }, [segments, latestTurnStartIndex, twPushSegment]);
 
   // Detect game over — wait for typewriter to finish before transitioning
   const gameIsOver = game?.isOver;

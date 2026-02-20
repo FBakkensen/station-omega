@@ -1,0 +1,111 @@
+import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
+import { v } from "convex/values";
+
+/** List all saved stations (metadata only, sorted newest first). */
+export const list = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("stations"),
+      _creationTime: v.number(),
+      stationName: v.string(),
+      briefing: v.string(),
+      difficulty: v.union(v.literal("normal"), v.literal("hard"), v.literal("nightmare")),
+    }),
+  ),
+  handler: async (ctx) => {
+    const stations = await ctx.db.query("stations").order("desc").collect();
+    return stations.map((s) => ({
+      _id: s._id,
+      _creationTime: s._creationTime,
+      stationName: s.stationName,
+      briefing: s.briefing,
+      difficulty: s.difficulty,
+    }));
+  },
+});
+
+/** Get a station by ID (full data). */
+export const get = query({
+  args: { id: v.id("stations") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+
+/** Get a station by ID (internal, for HTTP actions). */
+export const getInternal = internalQuery({
+  args: { id: v.id("stations") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+
+/** Save a generated station (called from generation action). */
+export const save = internalMutation({
+  args: {
+    stationName: v.string(),
+    briefing: v.string(),
+    difficulty: v.union(v.literal("normal"), v.literal("hard"), v.literal("nightmare")),
+    data: v.any(),
+  },
+  returns: v.id("stations"),
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("stations", {
+      stationName: args.stationName,
+      briefing: args.briefing,
+      difficulty: args.difficulty,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      data: args.data,
+    });
+  },
+});
+
+/** Delete a station and all associated games. */
+export const remove = mutation({
+  args: { id: v.id("stations") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    // Delete associated games first
+    const games = await ctx.db
+      .query("games")
+      .withIndex("by_station", (q) => q.eq("stationId", args.id))
+      .collect();
+
+    for (const game of games) {
+      // Delete game's messages
+      const messages = await ctx.db
+        .query("messages")
+        .withIndex("by_game", (q) => q.eq("gameId", game._id))
+        .collect();
+      for (const msg of messages) {
+        await ctx.db.delete(msg._id);
+      }
+
+      // Delete game's segments
+      const segments = await ctx.db
+        .query("turnSegments")
+        .withIndex("by_game_turn", (q) => q.eq("gameId", game._id))
+        .collect();
+      for (const seg of segments) {
+        await ctx.db.delete(seg._id);
+      }
+
+      // Delete game's choice sets
+      const choices = await ctx.db
+        .query("choiceSets")
+        .withIndex("by_game", (q) => q.eq("gameId", game._id))
+        .collect();
+      for (const choice of choices) {
+        await ctx.db.delete(choice._id);
+      }
+
+      await ctx.db.delete(game._id);
+    }
+
+    await ctx.db.delete(args.id);
+    return null;
+  },
+});

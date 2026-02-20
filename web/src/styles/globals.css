@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/* ─── Custom Theme ────────────────────────────────────────────────────────── */
+
+@theme {
+  --color-omega-bg: #0a0e14;
+  --color-omega-panel: #111820;
+  --color-omega-border: #1e3a5f;
+  --color-omega-title: #00e5ff;
+  --color-omega-text: #c0c8d4;
+  --color-omega-dim: #5a6a7a;
+  --color-omega-input-bg: #0d1117;
+  --color-omega-input-focus: #151d28;
+  --color-omega-input-text: #e0e8f0;
+  --color-omega-cursor: #00e5ff;
+  --color-omega-separator: #1e3a5f;
+  --color-omega-card: #243348;
+
+  --color-hp-good: #4dc9f6;
+  --color-hp-mid: #f6a623;
+  --color-hp-low: #e84393;
+
+  --color-grade-s: #ffcc00;
+  --color-grade-a: #00ff88;
+  --color-grade-b: #00e5ff;
+  --color-grade-c: #c0c8d4;
+  --color-grade-d: #ff8844;
+  --color-grade-f: #ff4444;
+
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+}
+
+/* ─── Base Styles ─────────────────────────────────────────────────────────── */
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-omega-bg);
+  color: var(--color-omega-text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-omega-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-omega-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-omega-dim);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-omega-border) var(--color-omega-bg);
+}
+
+/* ─── Selection ───────────────────────────────────────────────────────────── */
+
+::selection {
+  background: rgba(0, 229, 255, 0.2);
+  color: #e0e8f0;
+}
+
+/* ─── Glitch Overlay (replaces DistortionEffect) ─────────────────────────── */
+
+@keyframes glitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 1px); }
+  40% { transform: translate(1px, -1px); }
+  60% { transform: translate(-1px, 2px); }
+  80% { transform: translate(2px, -1px); }
+  100% { transform: translate(0); }
+}
+
+.glitch-overlay {
+  animation: glitch 0.3s steps(2) infinite;
+}
+
+/* ─── Scanline Effect ─────────────────────────────────────────────────────── */
+
+.scanlines::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}

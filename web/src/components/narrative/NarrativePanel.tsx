@@ -10,6 +10,7 @@ interface NarrativePanelProps {
   choices: Choice[] | null;
   onChoice: (choiceId: string) => void;
   isStreaming: boolean;
+  allFinalized: boolean;
 }
 
 export function NarrativePanel({
@@ -18,6 +19,7 @@ export function NarrativePanel({
   choices,
   onChoice,
   isStreaming,
+  allFinalized,
 }: NarrativePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -107,7 +109,7 @@ export function NarrativePanel({
           </div>
         )}
 
-        {choices && choices.length > 0 && !isStreaming && (
+        {choices && choices.length > 0 && !isStreaming && allFinalized && (
           <ChoiceCard choices={choices} onChoice={onChoice} />
         )}
       </div>

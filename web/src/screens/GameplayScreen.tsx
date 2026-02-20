@@ -365,6 +365,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
           choices={choices}
           onChoice={handleChoice}
           isStreaming={isStreaming}
+          allFinalized={twAllFinalized}
         />
 
         {streamError && (

@@ -9,3 +9,5 @@ NUL
 test/results/
 test/fixtures/
 generation-logs/
+voice-tests/
+convex/_generated/

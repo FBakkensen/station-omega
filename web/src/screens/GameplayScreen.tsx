@@ -12,6 +12,7 @@ import { useTTS } from '../hooks/useTTS';
 import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
 import { usePreferences } from '../hooks/usePreferences';
+import { useDevSettings } from '../hooks/useDevSettings';
 
 // ─── Convex document shapes (game.state and station.data are v.any()) ────
 
@@ -184,10 +185,12 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     return convexUrl.replace('.cloud', '.site') + '/api/tts';
   }, []);
   const ttsAvailable = ttsProxyUrl !== null;
+  const devSettings = useDevSettings();
   const { soundEnabled: initialSound, setSoundEnabled: persistSound } = usePreferences();
-  const [ttsEnabled, setTtsEnabled] = useState(initialSound);
+  const [userSoundEnabled, setUserSoundEnabled] = useState(initialSound);
+  const ttsEnabled = ttsAvailable && !devSettings.forceMute && userSoundEnabled;
 
-  const typewriter = useTypewriter(ttsEnabled);
+  const typewriter = useTypewriter(ttsEnabled, devSettings.typewriterCharsPerSec);
 
   // Destructure stable properties from typewriter to use in effect deps
   const {
@@ -203,10 +206,18 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   // Stable refs for use inside effects without adding to deps
   const ttsRef = useRef(tts);
   const ttsEnabledRef = useRef(ttsEnabled);
+  const prevForceMuteRef = useRef(devSettings.forceMute);
   useEffect(() => {
     ttsRef.current = tts;
     ttsEnabledRef.current = ttsEnabled;
   });
+  useEffect(() => {
+    if (devSettings.forceMute && !prevForceMuteRef.current) {
+      ttsRef.current.stop();
+      twFinalizeAll();
+    }
+    prevForceMuteRef.current = devSettings.forceMute;
+  }, [devSettings.forceMute, twFinalizeAll]);
 
   // Auto-submit the first turn when game loads (initial "look around")
   const firstTurnSentRef = useRef(false);
@@ -339,25 +350,36 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
           >
             [F2] Mission
           </button>
+          {devSettings.enabled && (
+            <>
+              <span>•</span>
+              <span className="text-omega-title">DEV FAST · MUTE</span>
+            </>
+          )}
           {ttsAvailable && (
             <>
               <span>•</span>
-              <button
-                onClick={() => {
-                  setTtsEnabled(prev => {
-                    if (prev) {
-                      // Turning OFF → stop TTS, reveal all text immediately
-                      tts.stop();
-                      twFinalizeAll();
-                    }
-                    persistSound(!prev);
-                    return !prev;
-                  });
-                }}
-                className={`transition-colors ${ttsEnabled ? 'text-omega-title' : 'hover:text-omega-text'}`}
-              >
-                {ttsEnabled ? 'Voice: ON' : 'Voice: OFF'}
-              </button>
+              {devSettings.forceMute ? (
+                <span className="text-omega-dim">Voice: FORCED OFF</span>
+              ) : (
+                <button
+                  onClick={() => {
+                    setUserSoundEnabled(prev => {
+                      const next = !prev;
+                      if (!next) {
+                        // Turning OFF → stop TTS, reveal all text immediately
+                        tts.stop();
+                        twFinalizeAll();
+                      }
+                      persistSound(next);
+                      return next;
+                    });
+                  }}
+                  className={`transition-colors ${ttsEnabled ? 'text-omega-title' : 'hover:text-omega-text'}`}
+                >
+                  {ttsEnabled ? 'Voice: ON' : 'Voice: OFF'}
+                </button>
+              )}
             </>
           )}
         </div>

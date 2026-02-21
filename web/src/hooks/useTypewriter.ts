@@ -73,7 +73,10 @@ function snapshotCards(source: Map<number, CardRevealState>): Map<number, Typewr
  * Without TTS, auto-advances at DEFAULT_CHARS_PER_SEC.
  * With TTS, onRevealChunk() gates the character budget to match speech timing.
  */
-export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
+export function useTypewriter(
+  ttsEnabled = false,
+  charsPerSec = DEFAULT_CHARS_PER_SEC,
+): UseTypewriterResult {
   const cardsRef = useRef<Map<number, CardRevealState>>(new Map());
   const lastFrameRef = useRef<number>(0);
   const animFrameRef = useRef<number>(0);
@@ -170,7 +173,7 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
         headerChars,
         revealedChars: totalChars,
         revealAllowedChars: totalChars,
-        revealRate: DEFAULT_CHARS_PER_SEC,
+        revealRate: charsPerSec,
         finalized: true,
       });
       syncSnapshot();
@@ -183,7 +186,7 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
       headerChars,
       revealedChars: headerChars, // Header always revealed
       revealAllowedChars: ttsEnabled ? headerChars : totalChars, // TTS gates body; no TTS = all allowed
-      revealRate: DEFAULT_CHARS_PER_SEC,
+      revealRate: charsPerSec,
       finalized: false,
     };
 
@@ -191,7 +194,7 @@ export function useTypewriter(ttsEnabled = false): UseTypewriterResult {
     syncSnapshot();
     ensureRunning();
     return Math.max(totalChars - headerChars, 0);
-  }, [ttsEnabled, ensureRunning, syncSnapshot]);
+  }, [ttsEnabled, charsPerSec, ensureRunning, syncSnapshot]);
 
   const onRevealChunk = useCallback((segmentIndex: number, charBudget: number, durationSec: number) => {
     const card = cardsRef.current.get(segmentIndex);

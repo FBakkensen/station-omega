@@ -16,6 +16,8 @@ interface MapModalProps {
   onClose: () => void;
 }
 
+type RoomVisibility = 'current' | 'visited' | 'adjacent-unvisited';
+
 /** Simple deterministic hash for seeded layout. */
 function hashSeed(rooms: Record<string, MapRoom>): number {
   let hash = 5381;
@@ -47,6 +49,12 @@ const ARCHETYPE_ICONS: Record<string, string> = {
 
 function getIcon(archetype: string): string {
   return ARCHETYPE_ICONS[archetype] ?? '▪';
+}
+
+function formatArchetype(archetype: string): string {
+  return archetype
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**
@@ -113,24 +121,113 @@ function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
 export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapModalProps) {
   const seed = useMemo(() => hashSeed(rooms), [rooms]);
   const layout = useMemo(() => computeLayout(rooms, seed), [rooms, seed]);
-  const visitedSet = useMemo(() => new Set(visitedRoomIds), [visitedRoomIds]);
 
-  const { positions, bounds } = layout;
-  const width = bounds.maxX - bounds.minX;
-  const height = bounds.maxY - bounds.minY;
+  const {
+    visibleRoomIds,
+    roomVisibility,
+    connections,
+    visibleArchetypes,
+    hasCurrent,
+    hasVisited,
+    hasAdjacentUnvisited,
+  } = useMemo(() => {
+    const hasRoom = (roomId: string) => Object.prototype.hasOwnProperty.call(rooms, roomId);
+    const visitedSet = new Set(visitedRoomIds.filter((roomId) => hasRoom(roomId)));
+    if (hasRoom(currentRoomId)) {
+      visitedSet.add(currentRoomId);
+    }
 
-  // Build connection lines (deduplicated)
-  const connections: Array<{ from: string; to: string }> = [];
-  const seen = new Set<string>();
-  for (const [id, room] of Object.entries(rooms)) {
-    for (const conn of room.connections) {
-      const key = [id, conn].sort().join('-');
-      if (!seen.has(key)) {
-        seen.add(key);
-        connections.push({ from: id, to: conn });
+    const adjacentUnvisited = new Set<string>();
+    for (const roomId of visitedSet) {
+      const room = rooms[roomId];
+      for (const neighborId of room.connections) {
+        if (hasRoom(neighborId) && !visitedSet.has(neighborId)) {
+          adjacentUnvisited.add(neighborId);
+        }
       }
     }
-  }
+
+    const visibleSet = new Set<string>([...visitedSet, ...adjacentUnvisited]);
+
+    const visibility = new Map<string, RoomVisibility>();
+    for (const roomId of visibleSet) {
+      if (roomId === currentRoomId) {
+        visibility.set(roomId, 'current');
+      } else if (visitedSet.has(roomId)) {
+        visibility.set(roomId, 'visited');
+      } else {
+        visibility.set(roomId, 'adjacent-unvisited');
+      }
+    }
+
+    const archetypes = new Set<string>();
+    for (const roomId of visibleSet) {
+      const room = rooms[roomId];
+      const state = visibility.get(roomId);
+      if (state === 'current' || state === 'visited') {
+        archetypes.add(room.archetype);
+      }
+    }
+
+    const dedupedConnections: Array<{ from: string; to: string }> = [];
+    const seen = new Set<string>();
+    for (const roomId of visibleSet) {
+      const room = rooms[roomId];
+      for (const neighborId of room.connections) {
+        if (!visibleSet.has(neighborId) || !hasRoom(neighborId)) continue;
+        const key = [roomId, neighborId].sort().join('-');
+        if (!seen.has(key)) {
+          seen.add(key);
+          dedupedConnections.push({ from: roomId, to: neighborId });
+        }
+      }
+    }
+
+    return {
+      visibleRoomIds: [...visibleSet],
+      roomVisibility: visibility,
+      connections: dedupedConnections,
+      visibleArchetypes: [...archetypes].sort(),
+      hasCurrent: visibleSet.has(currentRoomId),
+      hasVisited: [...visibleSet].some((roomId) => visibility.get(roomId) === 'visited'),
+      hasAdjacentUnvisited: [...visibleSet].some(
+        (roomId) => visibility.get(roomId) === 'adjacent-unvisited',
+      ),
+    };
+  }, [rooms, currentRoomId, visitedRoomIds]);
+
+  const { positions } = layout;
+  const bounds = useMemo(() => {
+    const PADDING_X = 80;
+    const PADDING_Y = 60;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const roomId of visibleRoomIds) {
+      const pos = positions.get(roomId);
+      if (!pos) continue;
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y);
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+      return { minX: 0, maxX: 320, minY: 0, maxY: 220 };
+    }
+
+    return {
+      minX: minX - PADDING_X,
+      maxX: maxX + PADDING_X,
+      minY: minY - PADDING_Y,
+      maxY: maxY + PADDING_Y,
+    };
+  }, [positions, visibleRoomIds]);
+
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
 
   return (
     <div
@@ -162,28 +259,44 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
             const p1 = positions.get(from);
             const p2 = positions.get(to);
             if (!p1 || !p2) return null;
+            const fromVisibility = roomVisibility.get(from);
+            const toVisibility = roomVisibility.get(to);
+            const isStrongConnection =
+              (fromVisibility === 'current' || fromVisibility === 'visited') &&
+              (toVisibility === 'current' || toVisibility === 'visited');
             return (
               <line
                 key={`${from}-${to}`}
                 x1={p1.x} y1={p1.y}
                 x2={p2.x} y2={p2.y}
-                stroke={COLORS.border}
+                stroke={isStrongConnection ? COLORS.border : '#33435f'}
                 strokeWidth="1.5"
-                strokeDasharray={visitedSet.has(from) && visitedSet.has(to) ? undefined : '4 4'}
+                strokeDasharray={isStrongConnection ? undefined : '4 4'}
               />
             );
           })}
 
           {/* Room nodes */}
-          {Object.entries(rooms).map(([id, room]) => {
+          {visibleRoomIds.map((id) => {
+            const room = rooms[id];
             const pos = positions.get(id);
             if (!pos) return null;
 
-            const isCurrent = id === currentRoomId;
-            const isVisited = visitedSet.has(id);
-            const fill = isCurrent ? COLORS.title : (isVisited ? '#1e3a5f' : '#111820');
-            const stroke = isCurrent ? COLORS.title : (isVisited ? COLORS.border : '#1a2030');
-            const textColor = isCurrent ? '#000' : (isVisited ? COLORS.text : COLORS.textDim);
+            const visibility = roomVisibility.get(id) ?? 'adjacent-unvisited';
+            const isCurrent = visibility === 'current';
+            const isVisited = visibility === 'visited';
+            const isAdjacentUnvisited = visibility === 'adjacent-unvisited';
+
+            const fill = isCurrent
+              ? COLORS.title
+              : (isVisited ? '#1e3a5f' : '#0f1420');
+            const stroke = isCurrent
+              ? COLORS.title
+              : (isVisited ? COLORS.border : '#2b3447');
+            const textColor = isCurrent
+              ? '#000'
+              : (isVisited ? COLORS.text : '#8fa0bf');
+            const roomName = room.name.length > 12 ? `${room.name.slice(0, 11)}…` : room.name;
 
             return (
               <g key={id}>
@@ -203,8 +316,9 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                   fill={textColor}
                   fontSize="10"
                   fontFamily="monospace"
+                  opacity={isAdjacentUnvisited ? 0.8 : 1}
                 >
-                  {getIcon(room.archetype)} {room.name.length > 12 ? room.name.slice(0, 11) + '…' : room.name}
+                  {isAdjacentUnvisited ? roomName : `${getIcon(room.archetype)} ${roomName}`}
                 </text>
                 {isCurrent && (
                   <text
@@ -222,11 +336,33 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
           })}
         </svg>
 
-        <div className="mt-3 flex gap-4 text-xs text-omega-dim">
-          <span><span style={{ color: COLORS.title }}>■</span> Current</span>
-          <span><span style={{ color: COLORS.border }}>■</span> Visited</span>
-          <span><span style={{ color: '#1a2030' }}>■</span> Unexplored</span>
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-omega-dim">
+          {hasCurrent && <span><span style={{ color: COLORS.title }}>■</span> Current</span>}
+          {hasVisited && <span><span style={{ color: COLORS.border }}>■</span> Visited</span>}
+          {hasAdjacentUnvisited && <span><span style={{ color: '#2b3447' }}>■</span> Adjacent (Unvisited)</span>}
         </div>
+
+        {visibleArchetypes.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-omega-dim">
+            <span className="text-omega-text">Room types:</span>
+            {visibleArchetypes.map((archetype) => (
+              <span key={archetype}>
+                {getIcon(archetype)} {formatArchetype(archetype)}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {hasAdjacentUnvisited && (
+          <p className="mt-2 text-xs text-omega-dim">
+            Dimmed rooms show only confirmed one-hop exits from explored rooms.
+          </p>
+        )}
+        {visibleRoomIds.length === 0 && (
+          <p className="mt-2 text-xs text-omega-dim">
+            No map data is available for this run yet.
+          </p>
+        )}
       </div>
     </div>
   );

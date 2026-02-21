@@ -1,6 +1,9 @@
 node_modules/
 .claude/settings.local.json
 .claude/projects/
+.claude/skills/playwright-cli/
+.playwright/
+.playwright-cli/
 .env.local
 debug.log
 run-history.json

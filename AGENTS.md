@@ -76,7 +76,11 @@ There is no dedicated unit test framework in this repository yet.
 - Run `bun run typecheck`, `bun run lint`, and `bun run deadcode` for every change.
 - Prefer `bun run check` when touching both root/shared and web code.
 - For generation and prompt/game-master changes, run relevant scripts (`bun run test:fixture`, `bun run test:creative`, `bun run test:gm`) before returning.
-- For gameplay changes, do a manual smoke path in the web client: station setup, movement, combat/action tools, inventory, turn streaming, and persistence/reload behavior.
+- For gameplay changes, run the manual smoke path in the web client through the Codex `playwright-cli` skill (`~/.codex/skills/playwright-cli`) using repo-local Playwright CLI commands (`bun run pw -- <command>`).
+- Use `http://localhost:5173/?devfast=1` for manual and Playwright gameplay smoke tests to force mute and massively speed up typewriter reveal during development.
+- Run Playwright CLI commands sequentially (not in parallel) to avoid Bun extraction/cache race errors such as `FileNotFound: copying file ...`.
+- The manual smoke path should cover station setup, movement, combat/action tools, inventory, turn streaming, and persistence/reload behavior.
+- Capture Playwright snapshots for key checkpoints and include a concise pass/fail summary in your final report.
 
 ## Commit & Pull Request Guidelines
 Recent commit style is concise and imperative (`Replace ...`, `Add ...`, `Refactor ...`).

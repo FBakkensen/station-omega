@@ -14,6 +14,8 @@
     "deadcode": "knip",
     "build:web": "bun run --cwd web build",
     "check": "bun run typecheck && bun run lint && bun run deadcode && bun run typecheck:web && bun run lint:web",
+    "pw": "playwright-cli",
+    "pw:install": "playwright-cli install",
     "test:fixture": "bun test/generate-fixture.ts",
     "test:creative": "bun test/test-creative.ts",
     "test:gm": "bun test/test-gamemaster.ts",
@@ -29,6 +31,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@playwright/cli": "^0.1.1",
     "@types/node": "^25.2.1",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.2",

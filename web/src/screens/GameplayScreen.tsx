@@ -208,7 +208,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
     ttsEnabledRef.current = ttsEnabled;
   });
 
-  // Auto-submit the first turn when game loads (like the terminal game's initial "look around")
+  // Auto-submit the first turn when game loads (initial "look around")
   const firstTurnSentRef = useRef(false);
   useEffect(() => {
     if (!game || !station || firstTurnSentRef.current) return;

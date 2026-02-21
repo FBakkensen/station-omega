@@ -45,7 +45,7 @@ function formatCrewRoster(station: GeneratedStation): string {
 function buildOutputFormatRules(): string {
     return `# Output Format
 
-Your response is a structured JSON object (enforced by the API schema). Within each segment's \`text\` field, you MUST use markdown formatting — the terminal renders markdown and plain text looks broken. Follow these rules exactly:
+Your response is a structured JSON object (enforced by the API schema). Within each segment's \`text\` field, you MUST use markdown formatting — the client renders markdown and plain text looks broken. Follow these rules exactly:
 
 - **Bold** interactive elements on first mention: item names, NPC names, room names, system names. Example: "The **primary coolant loop** is venting into the corridor." / "A **medkit** rests against the wall."
 - *Italicize* sensory details, internal sensations, and readings. Example: "*Ambient temperature: 4.2C and dropping.*"

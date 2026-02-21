@@ -2,35 +2,41 @@
 
 ## Overview
 
-Station Omega is an AI-powered text adventure game built with the Vercel AI SDK (`ai`) and OpenRouter (`@openrouter/ai-sdk-provider`). The player navigates a procedurally generated derelict space station, fighting enemies, collecting items, interacting with NPCs, and completing objectives to escape. Game logic lives in `index.ts` and `src/tools.ts`, with the terminal UI in `tui.ts`.
+Station Omega is an AI-powered engineering survival game.
 
-## Running the Game
+- `web/` contains the React + Vite frontend.
+- `convex/` contains backend queries/mutations/actions.
+- `src/` contains shared game mechanics, schemas, prompts, and generation layers.
+
+## Running the App
 
 ```bash
-bun run start        # runs: bun index.ts
+bun run dev         # Convex + web dev servers
+bun run dev:web     # web only
+bun run dev:convex  # Convex only
 ```
 
 ```bash
-bun run typecheck    # runs: tsc --noEmit
-bun run lint         # runs: eslint .
+bun run typecheck   # root tsc --noEmit
+bun run lint        # root eslint
+bun run deadcode    # knip
 ```
 
 Always run both `bun run typecheck` and `bun run lint` before returning results to the user. All errors must be resolved before considering a task complete.
 
 ## Architecture
 
-- **`index.ts`** — Main game loop: uses `streamText()` with client-side `ModelMessage[]` history, `fullStream` iteration, and inline guardrail validation. Manages TTS, UI, event tracking, and player input.
-- **`src/tools.ts`** — All 21 game tools defined via `tool()` from `ai` with Zod schemas. Tools access shared `GameContext` via closure capture in `createGameToolSets()`.
-- **`src/models.ts`** — Centralized model configuration via `createOpenRouter()`. Change model by editing a string.
-- **`src/creative.ts`** — Creative content generation using `streamText()` + `Output.object()` for one-shot station theming.
-- **`src/prompt.ts`** — Builds the system prompt. Dynamic state is passed per-turn via system-role messages.
-- **`tui.ts`** — Terminal UI built with `@opentui/core`.
+- **`src/tools.ts`** - Gameplay tools defined with `tool()` and Zod schemas. Tools mutate shared state via closure-captured `GameContext`.
+- **`src/prompt.ts`** - Game master system prompt. Dynamic context is passed per turn.
+- **`src/schema.ts`** - Structured output schemas (`GameSegment`, `GameResponse`) and display metadata types.
+- **`src/generation/*`** - Layered station generation pipeline.
+- **`convex/actions/*`** - Turn streaming, station generation, TTS proxy, and persistence orchestration.
+- **`web/src/hooks/useStreamingTurn.ts`** - Client turn orchestration and streamed segment updates.
 
 ## Key Conventions
 
-- **Tool-driven gameplay**: The AI never fabricates game state. All game actions are resolved through `tool()` handlers that read/write the shared `GameContext` via closure capture. New gameplay mechanics should follow this pattern.
-- **Closure-captured context**: All tools access `GameContext` via closure in `createGameToolSets()`. The `gameCtx` object is created once and mutated in place.
-- **Client-side conversation history**: A `ModelMessage[]` array accumulates full conversation. Sent each turn via `streamText({ messages })`.
-- **TypeScript via Bun**: The project uses Bun for direct TypeScript execution without a compile step. `tsconfig.json` is configured with `strict: true` and `noEmit: true`.
-- **Linting**: ESLint is configured with `typescript-eslint` `strictTypeChecked` rules via flat config (`eslint.config.js`).
+- **Tool-driven gameplay**: The AI never fabricates state transitions; mechanics are resolved through tools.
+- **Shared domain model**: Keep game state and generation types in `src/types.ts` and reuse them across backend/test code.
+- **Client/backend split**: Rendering logic belongs in `web/`; backend actions and persistence belong in `convex/`.
+- **TypeScript strictness**: Keep `strict` typing and clean lint output.
 - **ESM modules**: `"type": "module"` is set in `package.json`.

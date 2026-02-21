@@ -1,13 +1,19 @@
 {
   "name": "station-omega",
   "version": "1.0.0",
-  "description": "AI Dungeon Crawler powered by OpenAI Agents SDK",
+  "description": "Station Omega web app with shared game engine and Convex backend",
   "type": "module",
   "scripts": {
-    "start": "bun index.ts",
+    "dev": "bunx concurrently -k -n CONVEX,WEB -c cyan,magenta \"bun run dev:convex\" \"bun run dev:web\"",
+    "dev:web": "bun run --cwd web dev",
+    "dev:convex": "bunx convex dev",
     "typecheck": "tsc --noEmit",
+    "typecheck:web": "bun run --cwd web typecheck",
     "lint": "eslint .",
+    "lint:web": "bun run --cwd web lint",
     "deadcode": "knip",
+    "build:web": "bun run --cwd web build",
+    "check": "bun run typecheck && bun run lint && bun run deadcode && bun run typecheck:web && bun run lint:web",
     "test:fixture": "bun test/generate-fixture.ts",
     "test:creative": "bun test/test-creative.ts",
     "test:gm": "bun test/test-gamemaster.ts",
@@ -18,15 +24,13 @@
   "license": "ISC",
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^2.2.3",
-    "@opentui/core": "^0.1.77",
-    "@picovoice/pvspeaker-node": "^1.0.3",
     "ai": "^6.0.86",
     "convex": "^1.32.0",
-    "marked": "^17.0.1",
     "zod": "^4"
   },
   "devDependencies": {
     "@types/node": "^25.2.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.2",
     "knip": "^5.63.1",
     "typescript": "^5.9.3",

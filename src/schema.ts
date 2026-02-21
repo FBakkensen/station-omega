@@ -14,7 +14,7 @@ export const GameResponseSchema = z.object({
 export type GameSegment = z.infer<typeof GameSegmentSchema>;
 export type GameResponse = z.infer<typeof GameResponseSchema>;
 
-/** A GameSegment enriched with display metadata for the TUI card system. */
+/** A GameSegment enriched with display metadata for client rendering. */
 export interface DisplaySegment extends GameSegment {
     /** Resolved display name for the segment header (narrator callsign, NPC name, crew name, etc.). */
     speakerName: string | null;

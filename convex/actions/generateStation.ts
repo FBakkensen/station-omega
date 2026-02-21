@@ -26,6 +26,7 @@ export const generate = internalAction({
   handler: async (ctx, args) => {
     const { progressId, difficulty, characterClass } = args;
     console.info("[generateStation] Starting generation", { progressId, difficulty, characterClass });
+    const progressUpdatePromises: Promise<unknown>[] = [];
 
     try {
       // Dynamic import of the generation pipeline (ESM from src/)
@@ -63,12 +64,13 @@ export const generate = internalAction({
           lastStatus = mapped.status as typeof lastStatus;
           lastProgress = mapped.progress;
         }
-        void ctx.runMutation(internal.generationProgress.update, {
+        const updatePromise = ctx.runMutation(internal.generationProgress.update, {
           id: progressId,
           status: lastStatus,
           message: msg,
           progress: lastProgress,
         });
+        progressUpdatePromises.push(updatePromise);
       };
 
       console.info("[generateStation] Running generation pipeline...");
@@ -118,6 +120,10 @@ export const generate = internalAction({
         progress: 0,
         error: message,
       });
+    } finally {
+      if (progressUpdatePromises.length > 0) {
+        await Promise.allSettled(progressUpdatePromises);
+      }
     }
 
     return null;

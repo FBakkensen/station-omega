@@ -2,9 +2,7 @@ import { Lexer, type Token, type Tokens } from 'marked';
 import type { StyledSpan } from './types';
 
 /**
- * Port of src/markdown-reveal.ts flattenMarkdown → StyledSpan[] for React.
- *
- * Parses markdown text once into styled spans with format flags (bold, italic,
+ * Parse markdown text once into styled spans with format flags (bold, italic,
  * code, strikethrough) and a base color. React components render these as
  * styled <span> elements.
  */

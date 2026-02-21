@@ -1,6 +1,3 @@
-import type { TextChunk } from '@opentui/core';
-import type { EnvironmentReadout } from './environment.js';
-
 // ─── Story & World Configuration ────────────────────────────────────────────
 
 export type StoryArc =
@@ -456,41 +453,4 @@ export interface GameState {
     fieldSurgeryUsedInRoom: Set<string>;
     npcAllies: Set<string>;
     missionElapsedMinutes: number;
-}
-
-export interface GameStatus {
-    hp: number;
-    maxHp: number;
-    oxygen: number;
-    maxOxygen: number;
-    suitIntegrity: number;
-    roomName: string;
-    roomIndex: number;
-    totalRooms: number;
-    inventory: string[];
-    inventoryKeyFlags: boolean[];
-    characterClass: CharacterClassId;
-    turnCount: number;
-    maxInventory: number;
-    activeEvents: Array<{ type: string; minutesRemaining: number; effect: string }>;
-    objectiveTitle: string;
-    objectiveStep: number;
-    objectiveTotal: number;
-    objectiveCurrentDesc: string;
-    objectivesComplete: boolean;
-    objectiveSteps: Array<{ description: string; completed: boolean }>;
-    mapText: TextChunk[];
-    systemFailures: Array<{ systemId: SystemId; status: SystemStatus; challengeState: ChallengeState; severity: 1 | 2 | 3; minutesUntilCascade: number }>;
-    environment: EnvironmentReadout | null;
-    missionElapsedMinutes: number;
-}
-
-// ─── Slash Commands (for TUI) ───────────────────────────────────────────────
-
-export interface SlashCommandDef {
-    name: string;
-    description: string;
-    needsTarget: boolean;
-    getTargets: () => { label: string; value: string }[];
-    toPrompt: (target?: string) => string;
 }

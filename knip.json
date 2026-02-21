@@ -1,13 +1,19 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "entry": [
-    "tui.ts",
-    "voice-test.ts"
+    "convex/**/*.ts",
+    "test/**/*.ts"
   ],
   "project": [
+    "convex/**/*.ts",
     "src/**/*.ts",
     "test/**/*.ts"
   ],
+  "rules": {
+    "exports": "off",
+    "types": "off",
+    "binaries": "off"
+  },
   "ignore": [
     "node_modules/**",
     "saved-stations/**",

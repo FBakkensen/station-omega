@@ -2,7 +2,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['node_modules/', '**/*.js'],
+    ignores: ['node_modules/', 'convex/_generated/**', '**/*.js'],
   },
   ...tseslint.configs.strictTypeChecked,
   {

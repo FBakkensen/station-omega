@@ -1,8 +1,6 @@
 /**
  * Serialization helpers for converting between in-memory GeneratedStation
  * (with Maps/Sets) and Convex-storable plain objects (with Records/Arrays).
- *
- * Ported from src/station-storage.ts but without any fs dependencies.
  */
 
 import type {

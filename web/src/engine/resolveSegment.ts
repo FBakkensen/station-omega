@@ -12,7 +12,6 @@ interface StationData {
 
 /**
  * Resolve a raw GameSegment into a DisplaySegment by looking up NPC and crew names.
- * Port of resolveSegment() from index.ts.
  */
 export function resolveSegment(
   seg: GameSegment,

@@ -1,6 +1,5 @@
 /**
- * Station Omega color palette — ported from tui.ts COLORS + segment-style.ts.
- * All hex values match the terminal version for visual consistency.
+ * Station Omega color palette used across the web client.
  */
 
 export const COLORS = {

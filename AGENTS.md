@@ -1,36 +1,29 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Station Omega is a Bun-powered TypeScript game.
+Station Omega is a web app with a Bun-powered TypeScript backend/shared engine and a React frontend.
 
-- `index.ts`: Main game loop, agent wiring, streaming orchestration, and UI lifecycle.
-- `tui.ts`: Terminal UI built with `@opentui/core` (cards, panels, input, status views).
-- `src/`: Domain modules:
-  - `src/tools.ts`: all gameplay actions as `tool()` handlers.
+- `web/`: React + Vite client.
+  - `web/src/screens/`: app flow screens (title, setup, gameplay, summaries).
+  - `web/src/components/`: UI building blocks (narrative, sidebar, input, modals).
+  - `web/src/hooks/`: stateful gameplay hooks (streaming turns, setup, keyboard, TTS).
+  - `web/src/engine/`: rendering and segment helpers used by the client.
+- `convex/`: backend actions, queries, mutations, and schema.
+- `src/`: shared game domain and generation logic.
+  - `src/tools.ts`: gameplay actions as `tool()` handlers.
   - `src/prompt.ts`: system prompt construction.
-  - `src/schema.ts`: output schemas and segment rendering guards.
+  - `src/schema.ts`: output schemas and display-segment metadata.
   - `src/types.ts`: game domain types.
-  - `src/generation/index.ts`: station generation orchestrator.
-  - `src/generation/layers/`: topology/objective/creative generation layers.
-  - `src/generation/layers/systems-items-procedural.ts`: deterministic Layer 2 systems/items generation.
-  - `src/assembly.ts`: combines generated skeleton + creative payload into `GeneratedStation`.
-  - `src/character.ts`, `src/events.ts`, `src/scoring.ts`, `src/graph.ts`: core game mechanics.
-  - `src/json-stream-parser.ts`, `src/segment-style.ts`, `src/markdown-reveal.ts`, `src/tts.ts`: stream parsing, rendering, and speech.
-- `package.json`, `tsconfig.json`, `eslint.config.js`: project configuration.
-- `run-history.json` and `.env.local`: local runtime/config data; treat as mutable local state, not checked-in source.
+  - `src/generation/`: station generation pipeline.
+  - `src/assembly.ts`, `src/character.ts`, `src/events.ts`, `src/graph.ts`: core mechanics.
+- `test/`: fixture generation and behavior checks for generation/GM quality.
+- `package.json`, `tsconfig.json`, `eslint.config.js`, `knip.json`: root tooling configuration.
 
 ## Architecture
-- Gameplay is AI-narrated but tool-driven: the LLM calls tools for stateful actions, while narration is produced from tool/state results.
-- `index.ts` maintains client-side `ModelMessage[]` conversation history, sent each turn via `streamText({ messages })`.
-- System prompt is static; dynamic context is passed per turn via system-role messages.
-- `src/tools.ts` uses closure-captured `GameContext` in the `createGameToolSets()` factory.
-
-### Streaming & Rendering Flow
-1. `streamText()` streams JSON deltas from the model via `fullStream`.
-2. `StreamingSegmentParser` extracts complete `GameSegment` objects.
-3. Segments are normalized/resolved (`resolveSegment`) and converted to display-safe markdown/chunks.
-4. TUI renders each segment as a typed card.
-5. Typewriter reveal and TTS progress from resolved chunks for synchronized output.
+- Gameplay is AI-narrated and tool-driven: tools produce state transitions, while narration is generated from tool/state results.
+- Shared gameplay and generation logic lives in `src/` and is consumed by Convex actions and test tooling.
+- Convex persists game/station state and brokers streaming actions for the web client.
+- Frontend rendering lives in `web/` and consumes Convex-backed game state + streamed segments.
 
 ### Station Generation Pipeline
 1. `src/generation/layers/topology.ts`: AI-generated topology, scenario, and connectivity constraints.
@@ -40,32 +33,35 @@ Station Omega is a Bun-powered TypeScript game.
 5. `src/assembly.ts`: combines generation outputs into `GeneratedStation` maps.
 
 ### Key Design Constraints
-- Use AI-as-Game-Master model: tools produce raw state changes, not prose.
+- Keep AI as game master: tools return mechanical state, not prose.
 - Tool execution and event state drive combat, inventory, movement, locks, and room transitions.
-- Keep enemy/room/item updates in shared state and persist relevant state in `GameContext`.
-- Important SDK/guideline checks: `Agent<GameContext, typeof Schema>` for structured output, sync `tool().execute` when possible, and prefer `Tool<GameContext>` types.
+- Keep enemy/room/item updates in shared state and persist relevant state through Convex-backed game context.
+- Prefer explicit shared types and schema-first interfaces between backend and frontend.
 
 ## Build, Test, and Development Commands
-- `bun install` installs dependencies.
-- `bun run start` starts the game (`bun index.ts`).
-- `bun run typecheck` runs `tsc --noEmit`.
-- `bun run lint` runs strict type-aware ESLint.
-- `bun run deadcode` runs `knip` to detect unused exports/files.
+- `bun install` installs root dependencies.
+- `bun run dev` starts Convex + web dev servers together.
+- `bun run dev:web` starts only the web app.
+- `bun run dev:convex` starts only Convex dev.
+- `bun run typecheck` runs root `tsc --noEmit` checks.
+- `bun run lint` runs root strict type-aware ESLint.
+- `bun run deadcode` runs `knip` for unused exports/files.
+- `bun run check` runs root and web quality checks.
 
 Always run `bun run typecheck`, `bun run lint`, and `bun run deadcode` before returning results to the user.
 
 ## Coding Style & Naming Conventions
 - TypeScript strict style with explicit, readable data shapes.
 - Indentation: 2 spaces.
-- File naming: kebab-case (`segment-style.ts`, `json-stream-parser.ts`).
+- File naming: kebab-case (`json-stream-parser.ts`).
 - Naming: `camelCase` for variables/functions, `PascalCase` for classes/interfaces/types.
-- Keep mechanics code focused and narrative logic in prompt/agent behavior.
+- Keep mechanics code focused and narrative behavior in prompt/agent logic.
 
 ## Testing Guidelines
-There is no dedicated test framework in this repository yet.
+There is no dedicated unit test framework in this repository yet.
 
 - Run `bun run typecheck`, `bun run lint`, and `bun run deadcode` for every change.
-- For gameplay changes, do a quick manual smoke path: movement, combat/action tools, inventory, and persistence behavior.
+- For gameplay changes, do a quick manual smoke path in the web client: movement, combat/action tools, inventory, and persistence behavior.
 
 ## Commit & Pull Request Guidelines
 Recent commit style is concise and imperative (`Replace ...`, `Add ...`, `Refactor ...`).
@@ -74,7 +70,7 @@ PRs should include:
 - short behavior summary,
 - commands run,
 - gameplay impact and assumptions,
-- relevant agent/prompt changes when AI behavior is modified.
+- relevant prompt/agent changes when AI behavior is modified.
 
 ## Security & Configuration Notes
 - Never commit `.env.local` or API keys.

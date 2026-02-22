@@ -15,6 +15,7 @@
     "deadcode": "knip",
     "build:web": "bun run --cwd web build",
     "pw": "playwright-cli",
+    "pw:snapshot": "bash ./scripts/pw-snapshot.sh",
     "pw:install": "playwright-cli install",
     "test:fixture": "bun test/generate-fixture.ts",
     "test:creative": "bun test/test-creative.ts",

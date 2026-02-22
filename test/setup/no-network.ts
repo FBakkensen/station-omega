@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { syncBuiltinESMExports } from 'node:module';
 import { afterAll, beforeAll } from 'vitest';
 
 const networkError = (api: string): Error =>
@@ -43,6 +44,9 @@ beforeAll(() => {
     throw networkError('https.get');
   }) as typeof https.get;
 
+  // Keep `import { request/get } from 'node:http|https'` in sync with patched exports.
+  syncBuiltinESMExports();
+
   globalThis.fetch = (() => Promise.reject(networkError('fetch'))) as FetchFn;
 });
 
@@ -59,5 +63,6 @@ afterAll(() => {
   if (originalHttpsGet) {
     (https.get as unknown as typeof https.get) = originalHttpsGet;
   }
+  syncBuiltinESMExports();
   globalThis.fetch = originalFetch;
 });

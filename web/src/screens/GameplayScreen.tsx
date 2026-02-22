@@ -96,6 +96,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   const firstTurnSentRef = useRef(false);
   useEffect(() => {
     if (!game || !station || firstTurnSentRef.current) return;
+    if (game.turnCount !== 0) return;
     if (segments.length === 0 && !isStreaming) {
       firstTurnSentRef.current = true;
       void submitTurn('I look around and take in my surroundings.');

@@ -5,7 +5,6 @@ import {
   deserializeStation,
   serializeGameState,
   serializeStation,
-  type SerializedStation,
 } from './serialization.js';
 
 describe('serialization helpers', () => {
@@ -71,14 +70,14 @@ describe('serialization helpers', () => {
 
   it('[E] throws when serialized NPC behaviors are missing', () => {
     const station = createTestStation();
-    const malformed = serializeStation(station) as SerializedStation & {
-      npcs: Record<string, { behaviors: unknown }>;
+    const malformed = serializeStation(station);
+    const malformedNPCs = malformed.npcs as unknown as Record<string, Record<string, unknown>>;
+    malformedNPCs['npc_0'] = {
+      ...malformedNPCs['npc_0'],
+      behaviors: undefined,
     };
-    malformed.npcs['npc_0'] = { ...malformed.npcs['npc_0'], behaviors: undefined };
 
-    expect(() => deserializeStation(malformed as unknown as SerializedStation)).toThrow(
-      'Invalid NPC behaviors for npc_0',
-    );
+    expect(() => deserializeStation(malformed)).toThrow('Invalid NPC behaviors for npc_0');
   });
 
   it('[S] is idempotent across serialize -> deserialize -> serialize', () => {

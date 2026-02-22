@@ -7,11 +7,10 @@
  */
 
 import { z } from 'zod';
-import type { LanguageModel } from 'ai';
-import type { streamText } from 'ai';
 import type { LayerContext } from '../layer-runner.js';
 import { runLayer, LayerGenerationError } from '../layer-runner.js';
 import { ConcurrencyLimiter } from '../concurrency.js';
+import type { AIProviderOptions, AITextClient } from '../../io/ai-text-client.js';
 import type { ValidatedTopology } from './topology.js';
 import type { ValidatedObjectivesNPCs } from './objectives-npcs.js';
 import type {
@@ -27,8 +26,6 @@ import { createSingleRoomLayer } from './creative-rooms.js';
 import { itemsCreativeLayer } from './creative-items.js';
 import { npcsCreativeLayer } from './creative-npcs.js';
 import { arrivalCreativeLayer } from './creative-arrival.js';
-
-type ProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -118,16 +115,25 @@ export function findCrewMatch(author: string, crewNames: Set<string>): string | 
  */
 export async function runCreativeSublayers(
     context: LayerContext,
-    model: LanguageModel,
+    aiClient: AITextClient,
+    modelId: string,
     onProgress?: (msg: string) => void,
-    providerOptions?: ProviderOptions,
+    providerOptions?: AIProviderOptions,
     debugLog?: (label: string, content: string) => void,
 ): Promise<CreativeContent> {
     // ─── Phase 1: Identity Seed (sequential) ─────────────────────────────────
     onProgress?.('Crafting station identity...');
     debugLog?.('GENERATION', 'Starting Creative Phase 1: Identity Seed');
 
-    const identity = await runLayer(identitySeedLayer, context, model, onProgress, providerOptions, debugLog);
+    const identity = await runLayer(
+        identitySeedLayer,
+        context,
+        aiClient,
+        modelId,
+        onProgress,
+        providerOptions,
+        debugLog,
+    );
     context['identitySeed'] = identity;
     debugLog?.('GENERATION', `Identity seed complete: "${identity.stationName}", crew: ${identity.crewRoster.map(c => c.name).join(', ')}`);
 
@@ -154,7 +160,9 @@ export async function runCreativeSublayers(
         const roomLayer = createSingleRoomLayer(room.id, i);
         return {
             label: `room:${room.id}`,
-            promise: limiter.run(() => runLayer(roomLayer, context, model, undefined, providerOptions, debugLog))
+            promise: limiter.run(() =>
+                runLayer(roomLayer, context, aiClient, modelId, undefined, providerOptions, debugLog),
+            )
                 .then(value => ({ label: `room:${room.id}`, value })),
         };
     });
@@ -162,19 +170,25 @@ export async function runCreativeSublayers(
     // Items, arrival, NPCs
     sublayers.push({
         label: 'items',
-        promise: limiter.run(() => runLayer(itemsCreativeLayer, context, model, onProgress, providerOptions, debugLog))
+        promise: limiter.run(() =>
+            runLayer(itemsCreativeLayer, context, aiClient, modelId, onProgress, providerOptions, debugLog),
+        )
             .then(value => ({ label: 'items', value })),
     });
     sublayers.push({
         label: 'arrival',
-        promise: limiter.run(() => runLayer(arrivalCreativeLayer, context, model, onProgress, providerOptions, debugLog))
+        promise: limiter.run(() =>
+            runLayer(arrivalCreativeLayer, context, aiClient, modelId, onProgress, providerOptions, debugLog),
+        )
             .then(value => ({ label: 'arrival', value })),
     });
 
     if (hasNPCs) {
         sublayers.push({
             label: 'NPCs',
-            promise: limiter.run(() => runLayer(npcsCreativeLayer, context, model, onProgress, providerOptions, debugLog))
+            promise: limiter.run(() =>
+                runLayer(npcsCreativeLayer, context, aiClient, modelId, onProgress, providerOptions, debugLog),
+            )
                 .then(value => ({ label: 'NPCs', value })),
         });
     }

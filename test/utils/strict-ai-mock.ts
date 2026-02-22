@@ -1,20 +1,14 @@
-type SchemaLike<T = unknown> = {
-  parse: (input: unknown) => T;
-};
-
-type StrictOutputCarrier = {
-  __strictSchema: SchemaLike;
-};
-
-type StreamEvent =
-  | { type: 'text-delta'; text: string }
-  | { type: 'error'; error: unknown }
-  | { type: string; [key: string]: unknown };
+import type {
+  AIStreamPart,
+  AITextClient,
+  AITextObjectStream,
+  StreamStructuredObjectRequest,
+} from '../../src/io/ai-text-client.js';
 
 type QueuedResult = {
   kind: 'result';
   payload: unknown;
-  fullStreamEvents: StreamEvent[];
+  fullStreamEvents: AIStreamPart[];
 };
 
 type QueuedThrow = {
@@ -24,28 +18,11 @@ type QueuedThrow = {
 
 type QueuedItem = QueuedResult | QueuedThrow;
 
-function asSchemaFromOutput(output: unknown): SchemaLike {
-  if (!output || typeof output !== 'object' || !('__strictSchema' in output)) {
-    throw new Error(
-      'Strict AI mock expected output from Output.object({ schema }) to include __strictSchema.',
-    );
-  }
-
-  const maybeSchema = (output as { __strictSchema?: unknown }).__strictSchema;
-  if (!maybeSchema || typeof maybeSchema !== 'object' || !('parse' in maybeSchema)) {
-    throw new Error('Strict AI mock output carrier did not include a valid schema.parse method.');
-  }
-  if (typeof (maybeSchema as { parse?: unknown }).parse !== 'function') {
-    throw new Error('Strict AI mock output carrier did not include a valid schema.parse method.');
-  }
-
-  return maybeSchema as SchemaLike;
-}
-
 export class StrictAIMockQueue {
   private readonly queue: QueuedItem[] = [];
+  private readonly requests: Array<StreamStructuredObjectRequest<unknown>> = [];
 
-  enqueueResult(payload: unknown, fullStreamEvents: StreamEvent[] = []): void {
+  enqueueResult(payload: unknown, fullStreamEvents: AIStreamPart[] = []): void {
     this.queue.push({ kind: 'result', payload, fullStreamEvents });
   }
 
@@ -55,45 +32,54 @@ export class StrictAIMockQueue {
 
   reset(): void {
     this.queue.length = 0;
+    this.requests.length = 0;
   }
 
   pendingCount(): number {
     return this.queue.length;
   }
 
+  requestCount(): number {
+    return this.requests.length;
+  }
+
+  requestAt(index: number): StreamStructuredObjectRequest<unknown> | undefined {
+    return this.requests[index];
+  }
+
   assertDrained(): void {
     if (this.queue.length > 0) {
-      throw new Error(`Strict AI mock queue not fully consumed. Pending items: ${String(this.queue.length)}`);
+      throw new Error(
+        `Strict AI mock queue not fully consumed. Pending items: ${String(this.queue.length)}`,
+      );
     }
   }
 
-  outputObjectFactory(args: { schema: SchemaLike }): StrictOutputCarrier {
-    return { __strictSchema: args.schema };
-  }
-
-  streamTextFactory(options: { output: unknown }): {
-    fullStream: AsyncIterable<StreamEvent>;
-    output: Promise<unknown>;
-  } {
-    const item = this.queue.shift();
-    if (!item) {
-      throw new Error('Strict AI mock queue underflow: no queued response for streamText call.');
-    }
-
-    if (item.kind === 'throw') {
-      throw item.error;
-    }
-
-    const schema = asSchemaFromOutput(options.output);
-    const parsed = schema.parse(item.payload);
-
+  asClient(): AITextClient {
     return {
-      fullStream: this.toAsyncIterable(item.fullStreamEvents),
-      output: Promise.resolve(parsed),
+      streamStructuredObject: <TSchema>(
+        request: StreamStructuredObjectRequest<TSchema>,
+      ): AITextObjectStream<TSchema> => {
+        this.requests.push(request as StreamStructuredObjectRequest<unknown>);
+        const item = this.queue.shift();
+        if (!item) {
+          throw new Error('Strict AI mock queue underflow: no queued response for AI call.');
+        }
+
+        if (item.kind === 'throw') {
+          throw item.error;
+        }
+
+        const parsed = request.schema.parse(item.payload);
+        return {
+          fullStream: this.toAsyncIterable(item.fullStreamEvents),
+          output: Promise.resolve(parsed),
+        };
+      },
     };
   }
 
-  private toAsyncIterable(events: StreamEvent[]): AsyncIterable<StreamEvent> {
+  private toAsyncIterable(events: AIStreamPart[]): AsyncIterable<AIStreamPart> {
     return {
       async *[Symbol.asyncIterator]() {
         for (const event of events) {

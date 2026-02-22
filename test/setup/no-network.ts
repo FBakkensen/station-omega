@@ -28,6 +28,7 @@ let originalHttpsGet: typeof https.get | null = null;
 let originalFetch: FetchFn = globalThis.fetch;
 let originalNetConnect: NetConnectFn | null = null;
 let originalNetCreateConnection: NetCreateConnectionFn | null = null;
+let originalSocketConnectDescriptor: PropertyDescriptor | undefined;
 let originalTlsConnect: TlsConnectFn | null = null;
 let installed = false;
 
@@ -41,6 +42,7 @@ const installNoNetworkGuards = (): void => {
   originalFetch = globalThis.fetch;
   originalNetConnect = net.connect;
   originalNetCreateConnection = net.createConnection;
+  originalSocketConnectDescriptor = Object.getOwnPropertyDescriptor(net.Socket.prototype, 'connect');
   originalTlsConnect = tls.connect;
 
   (http.request as unknown as RequestFn) = ((..._args: Parameters<RequestFn>) => {
@@ -68,6 +70,14 @@ const installNoNetworkGuards = (): void => {
   (net.createConnection as unknown as NetCreateConnectionFn) = ((..._args: unknown[]) => {
     throw networkError('net.createConnection');
   }) as unknown as NetCreateConnectionFn;
+
+  Object.defineProperty(net.Socket.prototype, 'connect', {
+    configurable: true,
+    writable: true,
+    value: (..._args: unknown[]) => {
+      throw networkError('net.Socket.prototype.connect');
+    },
+  });
 
   (tls.connect as unknown as TlsConnectFn) = ((..._args: unknown[]) => {
     throw networkError('tls.connect');
@@ -101,6 +111,9 @@ const restoreNoNetworkGuards = (): void => {
   }
   if (originalNetCreateConnection) {
     (net.createConnection as unknown as NetCreateConnectionFn) = originalNetCreateConnection;
+  }
+  if (originalSocketConnectDescriptor) {
+    Object.defineProperty(net.Socket.prototype, 'connect', originalSocketConnectDescriptor);
   }
   if (originalTlsConnect) {
     (tls.connect as unknown as TlsConnectFn) = originalTlsConnect;

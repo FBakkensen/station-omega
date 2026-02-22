@@ -10,7 +10,7 @@ import type { ModelMessage } from 'ai';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { creativeModel } from '../src/models.js';
+import { CREATIVE_MODEL_ID, defaultAITextClient } from '../src/models.js';
 import { assembleStation } from '../src/assembly.js';
 import { initializePlayerState, getBuild } from '../src/character.js';
 import { createGameToolSets } from '../src/tools.js';
@@ -163,7 +163,12 @@ async function loadOrGenerateStation(): Promise<GeneratedStation> {
 
     console.log('No fixture found — generating station...');
     const { skeleton, creative } = await generateStation(
-        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel },
+        {
+            difficulty: 'normal',
+            characterClass: 'engineer',
+            aiClient: defaultAITextClient,
+            modelId: CREATIVE_MODEL_ID,
+        },
         (msg) => { console.log(`  ${msg}`); },
     );
     return assembleStation(skeleton, creative);

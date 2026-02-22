@@ -8,7 +8,7 @@
 import { streamText, Output } from 'ai';
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { creativeModel } from '../src/models.js';
+import { CREATIVE_MODEL_ID, defaultAITextClient } from '../src/models.js';
 import { CreativeLayerSchema } from '../src/generation/layers/creative.js';
 import type { StationSkeleton } from '../src/types.js';
 import {
@@ -227,7 +227,12 @@ async function main() {
     // Generate skeleton via AI-driven pipeline
     console.log('Generating station skeleton...');
     const { skeleton } = await generateStation(
-        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel },
+        {
+            difficulty: 'normal',
+            characterClass: 'engineer',
+            aiClient: defaultAITextClient,
+            modelId: CREATIVE_MODEL_ID,
+        },
         (msg) => { console.log(`  ${msg}`); },
     );
     const skeletonSummary = buildSkeletonSummary(skeleton);

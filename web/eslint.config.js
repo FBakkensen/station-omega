@@ -19,5 +19,17 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      'no-restricted-globals': ['error', {
+        name: 'fetch',
+        message: 'Use a service client boundary instead of direct fetch calls.',
+      }],
+    },
+  },
+  {
+    files: ['src/services/tts-client.ts', 'src/test/setup.ts', 'src/test/no-network.test.ts'],
+    rules: {
+      'no-restricted-globals': 'off',
+    },
   },
 ])

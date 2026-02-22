@@ -69,6 +69,14 @@ describe('no-network test setup', () => {
     );
   });
 
+  it('[E] blocks direct net.Socket.prototype.connect usage', () => {
+    const socket = new net.Socket();
+    expect(() => socket.connect({ host: 'example.com', port: 80 })).toThrow(
+      'Blocked via net.Socket.prototype.connect',
+    );
+    socket.destroy();
+  });
+
   it('[Z] blocks tls.connect when zero outbound network is allowed', () => {
     expect(() => tls.connect({ host: 'example.com', port: 443 })).toThrow(
       'Blocked via tls.connect',

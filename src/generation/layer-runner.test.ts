@@ -1,20 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { LayerConfig, LayerContext } from './layer-runner.js';
 import { LayerGenerationError, runLayer } from './layer-runner.js';
 import { StrictAIMockQueue } from '../../test/utils/strict-ai-mock.js';
-
-const { mockStreamText, mockOutputObject } = vi.hoisted(() => ({
-  mockStreamText: vi.fn<(options: unknown) => unknown>(),
-  mockOutputObject: vi.fn<(options: unknown) => unknown>(),
-}));
-
-vi.mock('ai', () => ({
-  streamText: mockStreamText,
-  Output: {
-    object: mockOutputObject,
-  },
-}));
 
 interface TestSchema {
   value: string;
@@ -29,7 +17,7 @@ const context: LayerContext = {
   characterClass: 'engineer',
 };
 
-const model = {} as never;
+const modelId = 'test/model';
 
 function createConfig(
   overrides: Partial<LayerConfig<TestSchema, TestSchema>> = {},
@@ -52,15 +40,6 @@ describe('runLayer', () => {
 
   beforeEach(() => {
     strictAI = new StrictAIMockQueue();
-    mockStreamText.mockReset();
-    mockOutputObject.mockReset();
-
-    mockOutputObject.mockImplementation((args) =>
-      strictAI.outputObjectFactory(args as { schema: { parse: (input: unknown) => unknown } }),
-    );
-    mockStreamText.mockImplementation((options) =>
-      strictAI.streamTextFactory(options as { output: unknown }),
-    );
   });
 
   afterEach(() => {
@@ -75,15 +54,17 @@ describe('runLayer', () => {
       validate: () => ({ success: false }),
     });
 
-    await expect(runLayer(config, context, model)).rejects.toThrow('Unknown validation error');
+    await expect(runLayer(config, context, strictAI.asClient(), modelId)).rejects.toThrow(
+      'Unknown validation error',
+    );
   });
 
   it('[O] succeeds on the first attempt for valid output', async () => {
     strictAI.enqueueResult({ value: 'ok' });
 
-    const result = await runLayer(createConfig(), context, model);
+    const result = await runLayer(createConfig(), context, strictAI.asClient(), modelId);
     expect(result).toEqual({ value: 'ok' });
-    expect(mockStreamText).toHaveBeenCalledTimes(1);
+    expect(strictAI.requestCount()).toBe(1);
   });
 
   it('[M] retries after validation failure and then succeeds', async () => {
@@ -110,7 +91,7 @@ describe('runLayer', () => {
       maxRetries: 2,
     });
 
-    const result = await runLayer(config, context, model);
+    const result = await runLayer(config, context, strictAI.asClient(), modelId);
     expect(result.value).toBe('good');
     expect(seenErrors[0]).toBeUndefined();
     expect(seenErrors[1]).toEqual(['value must improve']);
@@ -125,35 +106,30 @@ describe('runLayer', () => {
       validate: () => ({ success: false, errors: ['not acceptable'] }),
     });
 
-    const run = runLayer(config, context, model);
+    const run = runLayer(config, context, strictAI.asClient(), modelId);
     await expect(run).rejects.toBeInstanceOf(LayerGenerationError);
     await expect(run).rejects.toThrow('failed after 2 attempts');
   });
 
-  it('[I] passes prompt/schema contracts into streamText calls', async () => {
+  it('[I] passes prompt and schema contracts into the AI client', async () => {
     strictAI.enqueueResult({ value: 'ok' });
 
-    await runLayer(createConfig(), context, model);
+    await runLayer(createConfig(), context, strictAI.asClient(), modelId);
 
-    const firstCall = mockStreamText.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-    expect(firstCall?.['system']).toBe('system prompt');
-    expect(firstCall?.['prompt']).toBe('initial prompt');
-    expect(mockOutputObject).toHaveBeenCalledWith(
-      expect.objectContaining({
-        schema: schema,
-      }),
-    );
-    const outputCarrier = firstCall?.['output'];
-    expect(outputCarrier && typeof outputCarrier === 'object' && '__strictSchema' in outputCarrier).toBe(
-      true,
-    );
+    const firstRequest = strictAI.requestAt(0);
+    expect(firstRequest?.system).toBe('system prompt');
+    expect(firstRequest?.prompt).toBe('initial prompt');
+    expect(firstRequest?.schema).toBe(schema);
+    expect(firstRequest?.modelId).toBe(modelId);
   });
 
   it('[E] wraps stream crashes into LayerGenerationError diagnostics', async () => {
     strictAI.enqueueThrow(new Error('provider blew up'));
 
     const config = createConfig({ maxRetries: 0 });
-    await expect(runLayer(config, context, model)).rejects.toThrow('provider blew up');
+    await expect(runLayer(config, context, strictAI.asClient(), modelId)).rejects.toThrow(
+      'provider blew up',
+    );
   });
 
   it('[S] emits progress/debug hooks during a standard retry flow', async () => {
@@ -178,7 +154,8 @@ describe('runLayer', () => {
     await runLayer(
       config,
       context,
-      model,
+      strictAI.asClient(),
+      modelId,
       (msg) => progress.push(msg),
       undefined,
       (label, content) => debug.push(`${label}:${content}`),
@@ -198,7 +175,9 @@ describe('runLayer', () => {
       validate: () => ({ success: false, errors: ['always invalid'] }),
     });
 
-    await expect(runLayer(config, context, model)).rejects.toThrow(LayerGenerationError);
-    expect(mockStreamText).toHaveBeenCalledTimes(3);
+    await expect(runLayer(config, context, strictAI.asClient(), modelId)).rejects.toThrow(
+      LayerGenerationError,
+    );
+    expect(strictAI.requestCount()).toBe(3);
   });
 });

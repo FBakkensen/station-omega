@@ -1,0 +1,175 @@
+import { describe, expect, it } from 'vitest';
+import type { LayerContext } from '../layer-runner.js';
+import type { ValidatedSystemsItems } from './systems-items.js';
+import type { ValidatedTopology } from './topology.js';
+import { objectivesNPCsLayer } from './objectives-npcs.js';
+import {
+  withInvalidObjectiveRoom,
+  withInvalidRequiredItem,
+} from '../../../test/fixtures/mutations.js';
+
+const topology: ValidatedTopology = {
+  topology: 'branching_tree',
+  scenario: {
+    theme: 'Containment Collapse',
+    centralTension: 'Life support depends on restoring relay control.',
+  },
+  rooms: [
+    { id: 'room_0', archetype: 'entry', connections: ['room_1'], lockedBy: null },
+    { id: 'room_1', archetype: 'utility', connections: ['room_0', 'room_2'], lockedBy: null },
+    { id: 'room_2', archetype: 'command', connections: ['room_1', 'room_3'], lockedBy: null },
+    { id: 'room_3', archetype: 'escape', connections: ['room_2'], lockedBy: null },
+  ],
+  entryRoomId: 'room_0',
+  escapeRoomId: 'room_3',
+};
+
+const systemsItems: ValidatedSystemsItems = {
+  roomFailures: [
+    {
+      roomId: 'room_2',
+      failures: [
+        {
+          systemId: 'power_relay',
+          failureMode: 'overload',
+          severity: 2,
+          requiredMaterials: ['insulated_wire'],
+          requiredSkill: 'tech',
+          diagnosisHint: 'Relay panel is arcing.',
+          mitigationPaths: ['replace relay', 'reroute power'],
+          cascadeTarget: null,
+          minutesUntilCascade: 18,
+        },
+      ],
+    },
+  ],
+  items: [
+    { id: 'item_wire', roomId: 'room_1', baseItemKey: 'insulated_wire', isKeyItem: false },
+    { id: 'item_keycard', roomId: 'room_1', baseItemKey: 'keycard', isKeyItem: true },
+  ],
+};
+
+const context: LayerContext = {
+  difficulty: 'normal',
+  characterClass: 'engineer',
+  topology,
+  systemsItems,
+};
+
+type ObjectivesOutput = Parameters<typeof objectivesNPCsLayer.validate>[0];
+
+function buildValidOutput(): ObjectivesOutput {
+  return {
+    objectives: {
+      title: 'Restore Escape Route',
+      steps: [
+        {
+          id: 'step_0',
+          description: 'Survey the utility corridor for recovery supplies.',
+          roomId: 'room_1',
+          requiredItemId: null,
+          requiredSystemRepair: null,
+        },
+        {
+          id: 'step_1',
+          description:
+            'Use insulated wire to repair the overloaded relay and restore command routing.',
+          roomId: 'room_2',
+          requiredItemId: 'item_wire',
+          requiredSystemRepair: 'power_relay',
+        },
+        {
+          id: 'step_2',
+          description: 'Proceed to the escape bay once systems stabilize.',
+          roomId: 'room_3',
+          requiredItemId: 'item_keycard',
+          requiredSystemRepair: null,
+        },
+      ],
+    },
+    npcs: [
+      {
+        id: 'npc_0',
+        roomId: 'room_2',
+        disposition: 'neutral',
+        behaviors: ['can_negotiate', 'is_intelligent'],
+        role: 'relay technician',
+      },
+    ],
+  };
+}
+
+function asSchemaValidObjectivesOutput(raw: ObjectivesOutput): ObjectivesOutput {
+  return objectivesNPCsLayer.schema.parse(raw);
+}
+
+describe('objectivesNPCsLayer validation', () => {
+  it('[Z] rejects objective chains with no steps', () => {
+    const output = asSchemaValidObjectivesOutput({
+      objectives: { title: 'Empty', steps: [] },
+      npcs: [],
+    });
+    const result = objectivesNPCsLayer.validate(output, context);
+    expect(result.success).toBe(false);
+    expect(result.errors?.join(' ')).toContain('at least 3 steps');
+  });
+
+  it('[O] accepts a valid 3-step objective chain', () => {
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(buildValidOutput()), context);
+    expect(result.success).toBe(true);
+    expect(result.value?.objectives.steps).toHaveLength(3);
+  });
+
+  it('[M] allows complex output with NPC placements and material-linked repairs', () => {
+    const output = buildValidOutput();
+    output.npcs.push({
+      id: 'npc_1',
+      roomId: 'room_1',
+      disposition: 'friendly',
+      behaviors: ['can_trade'],
+      role: 'salvage specialist',
+    });
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
+    expect(result.success).toBe(true);
+    expect(result.value?.npcs).toHaveLength(2);
+  });
+
+  it('[B] enforces the maximum NPC count boundary', () => {
+    const output = buildValidOutput();
+    output.npcs.push(
+      { id: 'npc_1', roomId: 'room_1', disposition: 'friendly', behaviors: ['can_trade'], role: 'trader' },
+      { id: 'npc_2', roomId: 'room_2', disposition: 'fearful', behaviors: ['can_ally'], role: 'medic' },
+      { id: 'npc_3', roomId: 'room_1', disposition: 'neutral', behaviors: ['can_negotiate'], role: 'officer' },
+    );
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
+    expect(result.success).toBe(false);
+    expect(result.errors?.join(' ')).toContain('At most 3 NPCs allowed');
+  });
+
+  it('[I] includes station context and retry guidance in prompt construction', () => {
+    const prompt = objectivesNPCsLayer.buildPrompt(context, ['Room mismatch in step_1']);
+    expect(prompt.system).toContain('Objective Design');
+    expect(prompt.user).toContain('Fix ALL of them');
+    expect(prompt.user).toContain('Room mismatch in step_1');
+    expect(prompt.user).toContain('Entry: room_0');
+  });
+
+  it('[E] reports invalid room and required item references', () => {
+    const invalidRoom = withInvalidObjectiveRoom(buildValidOutput(), 1, 'room_99');
+    const invalidItem = withInvalidRequiredItem(invalidRoom, 1, 'item_missing');
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(invalidItem), context);
+    expect(result.success).toBe(false);
+    const errors = result.errors?.join(' ') ?? '';
+    expect(errors).toContain('does not exist');
+    expect(errors).toContain('item_missing');
+  });
+
+  it('[S] ensures the final step targets the escape room', () => {
+    const output = buildValidOutput();
+    const finalStep = output.objectives.steps[2];
+    finalStep.roomId = 'room_2';
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
+    expect(result.success).toBe(false);
+    expect(result.errors?.join(' ')).toContain('Last objective step must target the escape room');
+  });
+});

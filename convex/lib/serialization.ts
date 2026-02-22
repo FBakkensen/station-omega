@@ -84,6 +84,9 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
 
   const npcs = new Map<string, NPC>();
   for (const [id, raw] of Object.entries(data.npcs)) {
+    if (!Array.isArray(raw.behaviors)) {
+      throw new Error(`Invalid NPC behaviors for ${id}: expected array`);
+    }
     npcs.set(id, {
       ...raw,
       behaviors: new Set(raw.behaviors),

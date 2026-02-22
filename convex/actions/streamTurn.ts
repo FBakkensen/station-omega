@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { buildTurnMessages, mapChoicesForPersistence } from "./streamTurn.helpers";
 
 /**
  * Process an AI turn — runs the full game loop server-side.
@@ -128,13 +129,7 @@ export const processAITurn = internalAction({
         role: m.role as "system" | "user" | "assistant",
         content: m.content,
       }));
-      const messages = [
-        ...conversationHistory,
-        ...(turnContext
-          ? [{ role: "system" as const, content: turnContext }]
-          : []),
-        { role: "user" as const, content: playerInput },
-      ];
+      const messages = buildTurnMessages(conversationHistory, turnContext, playerInput);
 
       // ── Create OpenRouter model ──────────────────────────────────────
       const openrouter = createOpenRouter({
@@ -235,13 +230,10 @@ export const processAITurn = internalAction({
       // Save messages
       await ctx.runMutation(internal.messages.appendBatch, {
         gameId,
-        messages: [
-          ...(turnContext
-            ? [{ role: "system" as const, content: turnContext }]
-            : []),
-          { role: "user" as const, content: playerInput },
-          { role: "assistant" as const, content: rawJson },
-        ],
+        messages: buildTurnMessages([], turnContext, playerInput).concat({
+          role: "assistant",
+          content: rawJson,
+        }),
       });
 
       // Save choices if any
@@ -250,11 +242,7 @@ export const processAITurn = internalAction({
         await ctx.runMutation(internal.choiceSets.save, {
           gameId,
           turnNumber,
-          choices: lastChoices.choices.map((c, i) => ({
-            id: String(i),
-            label: c.label,
-            description: c.description,
-          })),
+          choices: mapChoicesForPersistence(lastChoices),
         });
       }
 

@@ -55,13 +55,16 @@ Station Omega is a web app with a Bun-powered TypeScript backend/shared engine a
 - `bun run lint:web` runs the web workspace ESLint checks.
 - `bun run deadcode` runs `knip` for unused exports/files.
 - `bun run build:web` builds the web app (`tsc -b && vite build`).
-- `bun run check` runs root + web quality checks (`typecheck`, `lint`, `deadcode`, `typecheck:web`, `lint:web`).
+- `bun run check:static` runs root + web static quality checks (`typecheck`, `lint`, `deadcode`, `typecheck:web`, `lint:web`).
+- `bun run check:tests` runs deterministic test gates (`test:zombies`, `test:det`, `test:web`).
+- `bun run qa` runs `check:static` + `check:tests`.
+- `bun run check` is the canonical all-in-one QA target (alias of `bun run qa`) and must pass clean before returning results.
 - `bun run test:fixture` generates fixture outputs for station generation.
 - `bun run test:creative` runs creative-layer quality checks.
 - `bun run test:gm` runs game master behavior checks.
 - `bun run test:analyze` analyzes test run outputs.
 
-Always run `bun run typecheck`, `bun run lint`, and `bun run deadcode` before returning results to the user.
+Always run `bun run check` and ensure it passes with no errors before returning results to the user.
 
 ## Coding Style & Naming Conventions
 - TypeScript strict style with explicit, readable data shapes.
@@ -73,8 +76,7 @@ Always run `bun run typecheck`, `bun run lint`, and `bun run deadcode` before re
 ## Testing Guidelines
 There is no dedicated unit test framework in this repository yet.
 
-- Run `bun run typecheck`, `bun run lint`, and `bun run deadcode` for every change.
-- Prefer `bun run check` when touching both root/shared and web code.
+- Run `bun run check` for every change and do not return results unless it passes clean.
 - For generation and prompt/game-master changes, run relevant scripts (`bun run test:fixture`, `bun run test:creative`, `bun run test:gm`) before returning.
 - For gameplay changes, run the manual smoke path in the web client through the Codex `playwright-cli` skill (`~/.codex/skills/playwright-cli`) using repo-local Playwright CLI commands (`bun run pw -- <command>`).
 - Use `http://localhost:5173/?devfast=1` for manual and Playwright gameplay smoke tests to force mute and massively speed up typewriter reveal during development.

@@ -13,3 +13,5 @@ test/results/
 test/fixtures/
 generation-logs/
 voice-tests/
+coverage/
+web/coverage/

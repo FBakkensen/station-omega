@@ -76,7 +76,7 @@ export function computeScore(metrics: RunMetrics, totalRooms: number): RunScore 
   return { speed, engineeringEfficiency, exploration, resourcefulness, completion, total, grade };
 }
 
-function computeGrade(total: number): ScoreGrade {
+export function computeGrade(total: number): ScoreGrade {
   if (total >= 450) return 'S';
   if (total >= 375) return 'A';
   if (total >= 300) return 'B';

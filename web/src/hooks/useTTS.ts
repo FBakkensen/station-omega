@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import type { DisplaySegment } from '../engine/types';
 import { extractCleanText } from '../engine/markdownToSpans';
+import { requestTTSAudio } from '../services/tts-client';
 
 // ─── Voice Pool (Inworld voice IDs) ─────────────────────────────────────
 
@@ -194,21 +195,18 @@ export function useTTS(
     abortRef.current = controller;
 
     try {
-      const response = await fetch(ttsProxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const wavBuffer = await requestTTSAudio(
+        ttsProxyUrl,
+        {
           text: chunk.text,
           voiceId: chunk.voiceId,
           temperature: chunk.temperature,
           speakingRate: chunk.speakingRate,
-        }),
-        signal: controller.signal,
-      });
+        },
+        controller.signal,
+      );
+      if (!wavBuffer) return null;
 
-      if (!response.ok) return null;
-
-      const wavBuffer = await response.arrayBuffer();
       // Parse WAV duration from header (byte rate at offset 28)
       const view = new DataView(wavBuffer);
       const byteRate = view.getUint32(28, true);

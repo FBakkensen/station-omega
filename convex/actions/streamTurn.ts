@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { buildTurnMessages, mapChoicesForPersistence } from "./streamTurn.helpers";
 
 /**
  * Process an AI turn — runs the full game loop server-side.
@@ -15,7 +16,7 @@ import { v } from "convex/values";
  * 1. Load game + station + messages from Convex
  * 2. Reconstruct in-memory GameContext (deserialize Maps/Sets)
  * 3. Build system prompt + per-turn context
- * 4. Call streamText() with model, tools, messages
+ * 4. Call AI text client with model, tools, messages
  * 5. As segments complete → write to turnSegments table (reactive)
  * 6. After completion → persist state + messages to Convex
  */
@@ -49,8 +50,8 @@ export const processAITurn = internalAction({
       });
 
       // ── Dynamic imports (ESM from src/) ──────────────────────────────
-      const { createOpenRouter } = await import("@openrouter/ai-sdk-provider");
-      const { streamText, Output, stepCountIs } = await import("ai");
+      const { OpenRouterAITextClient } = await import("../../src/io/openrouter-ai-client.js");
+      const { GAME_MASTER_MODEL_ID } = await import("../../src/models.js");
       const { createGameToolSets } = await import("../../src/tools.js");
       const { buildOrchestratorPrompt } = await import("../../src/prompt.js");
       const { buildTurnContext } = await import("../../src/turn-context.js");
@@ -128,23 +129,14 @@ export const processAITurn = internalAction({
         role: m.role as "system" | "user" | "assistant",
         content: m.content,
       }));
-      const messages = [
-        ...conversationHistory,
-        ...(turnContext
-          ? [{ role: "system" as const, content: turnContext }]
-          : []),
-        { role: "user" as const, content: playerInput },
-      ];
+      const messages = buildTurnMessages(conversationHistory, turnContext, playerInput);
 
-      // ── Create OpenRouter model ──────────────────────────────────────
-      const openrouter = createOpenRouter({
+      // ── Create AI text client ────────────────────────────────────────
+      const aiClient = new OpenRouterAITextClient({
         apiKey: process.env.OPENROUTER_API_KEY ?? "",
-        headers: {
-          "HTTP-Referer": "https://github.com/station-omega",
-          "X-Title": "Station Omega",
-        },
+        referer: "https://github.com/station-omega",
+        title: "Station Omega",
       });
-      const model = openrouter("google/gemini-3-flash-preview");
 
       // ── Stream AI response ───────────────────────────────────────────
       const segmentParser = new StreamingSegmentParser();
@@ -156,25 +148,20 @@ export const processAITurn = internalAction({
       const MAX_TOOL_STEPS = 11;
 
       console.time("[processAITurn] AI streaming");
-      const result = streamText({
-        model,
+      const result = aiClient.streamStructuredObject({
+        modelId: GAME_MASTER_MODEL_ID,
         system: systemPrompt,
         messages,
         tools: toolSets.all,
-        output: Output.object({ schema: GameResponseSchema }),
+        schema: GameResponseSchema,
         temperature: 0.8,
         maxOutputTokens: 8192,
-        stopWhen: stepCountIs(MAX_TOOL_STEPS + 1),
-        prepareStep: ({ stepNumber }) => {
-          if (stepNumber >= MAX_TOOL_STEPS) {
-            return { toolChoice: "none" as const, activeTools: [] };
-          }
-          return undefined;
-        },
+        stopAfterSteps: MAX_TOOL_STEPS + 1,
+        disableToolsAfterStep: MAX_TOOL_STEPS,
       });
 
       for await (const part of result.fullStream) {
-        if (part.type === "text-delta") {
+        if (part.type === "text-delta" && typeof part.text === "string") {
           rawJson += part.text;
 
           // Extract complete segments and save reactively
@@ -235,13 +222,10 @@ export const processAITurn = internalAction({
       // Save messages
       await ctx.runMutation(internal.messages.appendBatch, {
         gameId,
-        messages: [
-          ...(turnContext
-            ? [{ role: "system" as const, content: turnContext }]
-            : []),
-          { role: "user" as const, content: playerInput },
-          { role: "assistant" as const, content: rawJson },
-        ],
+        messages: buildTurnMessages([], turnContext, playerInput).concat({
+          role: "assistant",
+          content: rawJson,
+        }),
       });
 
       // Save choices if any
@@ -250,11 +234,7 @@ export const processAITurn = internalAction({
         await ctx.runMutation(internal.choiceSets.save, {
           gameId,
           turnNumber,
-          choices: lastChoices.choices.map((c, i) => ({
-            id: String(i),
-            label: c.label,
-            description: c.description,
-          })),
+          choices: mapChoicesForPersistence(lastChoices),
         });
       }
 

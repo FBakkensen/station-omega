@@ -6,13 +6,9 @@
  * with error messages injected into the prompt on each retry.
  */
 
-import { streamText, Output } from 'ai';
-import type { LanguageModel } from 'ai';
 import type { ZodType } from 'zod';
 import type { ValidationResult } from './validate.js';
-
-type StreamTextOptions = Parameters<typeof streamText>[0];
-type ProviderOptions = StreamTextOptions['providerOptions'];
+import type { AIProviderOptions, AITextClient } from '../io/ai-text-client.js';
 
 export interface LayerContext {
     difficulty: 'normal' | 'hard' | 'nightmare';
@@ -139,13 +135,14 @@ function is502Error(err: unknown): boolean {
  * or after exhausting all API retries.
  */
 async function streamWithProviderRetry<T>(opts: {
-    model: LanguageModel;
+    aiClient: AITextClient;
+    modelId: string;
     system: string;
     prompt: string;
     schema: ZodType<T>;
     maxOutputTokens: number;
     timeoutMs: number;
-    providerOptions?: ProviderOptions;
+    providerOptions?: AIProviderOptions;
     label: string;
     onProgress?: (msg: string) => void;
     debugLog?: (label: string, content: string) => void;
@@ -155,11 +152,11 @@ async function streamWithProviderRetry<T>(opts: {
         const timer = setTimeout(() => { abort.abort(); }, opts.timeoutMs);
 
         try {
-            const result = streamText({
-                model: opts.model,
+            const result = opts.aiClient.streamStructuredObject({
+                modelId: opts.modelId,
                 system: opts.system,
                 prompt: opts.prompt,
-                output: Output.object({ schema: opts.schema }),
+                schema: opts.schema,
                 temperature: 1.0,
                 maxOutputTokens: opts.maxOutputTokens,
                 abortSignal: abort.signal,
@@ -210,9 +207,10 @@ async function streamWithProviderRetry<T>(opts: {
 export async function runLayer<TSchema, TValidated>(
     config: LayerConfig<TSchema, TValidated>,
     context: LayerContext,
-    model: LanguageModel,
+    aiClient: AITextClient,
+    modelId: string,
     onProgress?: (msg: string) => void,
-    providerOptions?: ProviderOptions,
+    providerOptions?: AIProviderOptions,
     debugLog?: (label: string, content: string) => void,
 ): Promise<TValidated> {
     const allErrors: string[][] = [];
@@ -232,7 +230,8 @@ export async function runLayer<TSchema, TValidated>(
 
         try {
             const parsed = await streamWithProviderRetry({
-                model,
+                aiClient,
+                modelId,
                 system,
                 prompt: user,
                 schema: config.schema,

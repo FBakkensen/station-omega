@@ -31,20 +31,18 @@ export const generate = internalAction({
     try {
       // Dynamic import of the generation pipeline (ESM from src/)
       console.debug("[generateStation] Importing modules...");
-      const { createOpenRouter } = await import("@openrouter/ai-sdk-provider");
       const { generateStation } = await import("../../src/generation/index.js");
+      const { OpenRouterAITextClient } = await import("../../src/io/openrouter-ai-client.js");
+      const { CREATIVE_MODEL_ID } = await import("../../src/models.js");
       const { assembleStation } = await import("../../src/assembly.js");
       const { serializeStation } = await import("../lib/serialization.js");
       console.debug("[generateStation] Modules imported");
 
-      const openrouter = createOpenRouter({
+      const aiClient = new OpenRouterAITextClient({
         apiKey: process.env.OPENROUTER_API_KEY ?? "",
-        headers: {
-          "HTTP-Referer": "https://github.com/station-omega",
-          "X-Title": "Station Omega",
-        },
+        referer: "https://github.com/station-omega",
+        title: "Station Omega",
       });
-      const model = openrouter("anthropic/claude-opus-4.6");
 
       // Progress callback → Convex mutation
       const statusMap: Record<string, { status: string; progress: number }> = {
@@ -77,7 +75,7 @@ export const generate = internalAction({
       console.time("[generateStation] Generation pipeline");
       // Run the generation pipeline
       const { skeleton, creative } = await generateStation(
-        { difficulty, characterClass, model },
+        { difficulty, characterClass, aiClient, modelId: CREATIVE_MODEL_ID },
         onProgress,
       );
       console.timeEnd("[generateStation] Generation pipeline");

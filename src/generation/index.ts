@@ -7,8 +7,6 @@
  * StationSkeleton + CreativeContent pair ready for assembly.
  */
 
-import { streamText } from 'ai';
-import type { LanguageModel } from 'ai';
 import type {
     StationSkeleton,
     CreativeContent,
@@ -24,19 +22,19 @@ import { ENGINEERING_ITEMS } from '../data.js';
 import { computeDepths } from '../graph.js';
 import { runLayer } from './layer-runner.js';
 import type { LayerContext } from './layer-runner.js';
+import type { AIProviderOptions, AITextClient } from '../io/ai-text-client.js';
 import { createGenerationLogger } from '../generation-log.js';
 import { topologyLayer } from './layers/topology.js';
 import { generateSystemsItemsProcedural } from './layers/systems-items-procedural.js';
 import { objectivesNPCsLayer } from './layers/objectives-npcs.js';
 import { runCreativeSublayers } from './layers/creative.js';
 
-type ProviderOptions = Parameters<typeof streamText>[0]['providerOptions'];
-
 interface GenerationConfig {
     difficulty: Difficulty;
     characterClass: CharacterClassId;
-    model: LanguageModel;
-    providerOptions?: ProviderOptions;
+    aiClient: AITextClient;
+    modelId: string;
+    providerOptions?: AIProviderOptions;
 }
 
 function difficultyForSeverity(severity: 1 | 2 | 3): ActionDifficulty {
@@ -68,7 +66,15 @@ export async function generateStation(
 
     const po = config.providerOptions;
 
-    const topology = await runLayer(topologyLayer, context, config.model, onProgress, po, combinedLog);
+    const topology = await runLayer(
+        topologyLayer,
+        context,
+        config.aiClient,
+        config.modelId,
+        onProgress,
+        po,
+        combinedLog,
+    );
     context['topology'] = topology;
     combinedLog('GENERATION', `Layer 1 complete: ${String(topology.rooms.length)} rooms, ${topology.topology} topology`);
 
@@ -84,14 +90,29 @@ export async function generateStation(
     onProgress?.('Designing mission objectives...');
     combinedLog('GENERATION', 'Starting Layer 3: Objectives & NPCs');
 
-    const objectivesNPCs = await runLayer(objectivesNPCsLayer, context, config.model, onProgress, po, combinedLog);
+    const objectivesNPCs = await runLayer(
+        objectivesNPCsLayer,
+        context,
+        config.aiClient,
+        config.modelId,
+        onProgress,
+        po,
+        combinedLog,
+    );
     context['objectivesNPCs'] = objectivesNPCs;
     combinedLog('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps, ${String(objectivesNPCs.npcs.length)} NPCs`);
 
     // ─── Layer 4: Creative Content (parallel sub-layers) ────────────────────
     combinedLog('GENERATION', 'Starting Layer 4: Creative (parallel sub-layers)');
 
-    const creative = await runCreativeSublayers(context, config.model, onProgress, po, combinedLog);
+    const creative = await runCreativeSublayers(
+        context,
+        config.aiClient,
+        config.modelId,
+        onProgress,
+        po,
+        combinedLog,
+    );
     combinedLog('GENERATION', `Layer 4 complete: ${creative.stationName}`);
 
     // Rename log file with station name

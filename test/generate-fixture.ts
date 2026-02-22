@@ -9,7 +9,7 @@
 
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { creativeModel } from '../src/models.js';
+import { CREATIVE_MODEL_ID, defaultAITextClient } from '../src/models.js';
 import { assembleStation } from '../src/assembly.js';
 import { ensureFixturesDir, writeResult } from './model-config.js';
 import type { GeneratedStation } from '../src/types.js';
@@ -45,7 +45,12 @@ async function main() {
     console.log('Generating test fixture (AI-driven, engineer, normal)...');
 
     const { skeleton, creative } = await generateStation(
-        { difficulty: 'normal', characterClass: 'engineer', model: creativeModel },
+        {
+            difficulty: 'normal',
+            characterClass: 'engineer',
+            aiClient: defaultAITextClient,
+            modelId: CREATIVE_MODEL_ID,
+        },
         (msg) => { console.log(`  ${msg}`); },
     );
 

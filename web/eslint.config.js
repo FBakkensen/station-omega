@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'coverage']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -18,6 +18,18 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+    rules: {
+      'no-restricted-globals': ['error', {
+        name: 'fetch',
+        message: 'Use a service client boundary instead of direct fetch calls.',
+      }],
+    },
+  },
+  {
+    files: ['src/services/tts-client.ts', 'src/test/setup.ts', 'src/test/no-network.test.ts'],
+    rules: {
+      'no-restricted-globals': 'off',
     },
   },
 ])

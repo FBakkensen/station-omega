@@ -84,6 +84,30 @@ There is no dedicated unit test framework in this repository yet.
 - The manual smoke path should cover station setup, movement, combat/action tools, inventory, turn streaming, and persistence/reload behavior.
 - Capture Playwright snapshots for key checkpoints and include a concise pass/fail summary in your final report.
 
+### ZOMBIES Deterministic Test Principles
+- Every deterministic `it(...)` / `test(...)` title must start with exactly one ZOMBIES prefix: `[Z]`, `[O]`, `[M]`, `[B]`, `[I]`, `[E]`, or `[S]`, followed by a space and descriptive text.
+- Stacked prefixes in one title (for example `[Z][O][M][B][I][E][S] ...`) are not allowed.
+- Every `describe(...)` block must contain all seven principles at least once. Additional tagged tests are allowed, but untagged tests are not.
+- `bun run test:zombies` is a blocking gate in `bun run check` and must pass locally before returning results.
+
+Principle definitions:
+- `Z` (Zero): zero/empty/null/absent input or state.
+- `O` (One): singular or minimal valid case.
+- `M` (Many): multi-entity, sequence, or larger-scale behavior.
+- `B` (Boundary): edge limits, thresholds, and bound transitions.
+- `I` (Interface/Invariant): shape, contract, and invariant behavior.
+- `E` (Error/Exception): invalid input, failures, thrown/rejected paths.
+- `S` (Simple): nominal, standard happy-path behavior.
+
+Title examples:
+- `[Z] returns no segments for empty deltas`
+- `[O] extracts one complete segment from a single chunk`
+- `[M] handles many chunk boundaries while preserving order`
+- `[B] keeps boundary behavior stable at threshold values`
+- `[I] preserves the GameStatusData contract fields`
+- `[E] rejects malformed payloads with explicit diagnostics`
+- `[S] follows standard diagnose flow for in-room failures`
+
 ## Commit & Pull Request Guidelines
 Recent commit style is concise and imperative (`Replace ...`, `Add ...`, `Refactor ...`).
 

@@ -27,7 +27,7 @@ describe('no-network test setup', () => {
     expect(() => http.request('http://example.com')).toThrow('Blocked via http.request');
   });
 
-  it('[B] blocks named node:http request', () => {
+  it('[B] blocks named node:http request on a boundary alias path', () => {
     expect(() => httpRequestNamed('http://example.com')).toThrow('Blocked via http.request');
   });
 
@@ -39,37 +39,37 @@ describe('no-network test setup', () => {
     expect(() => httpsRequestNamed('https://example.com')).toThrow('Blocked via https.request');
   });
 
-  it('[S] blocks http.get', () => {
+  it('[S] blocks http.get in standard no-network mode', () => {
     expect(() => http.get('http://example.com')).toThrow('Blocked via http.get');
   });
 
-  it('blocks named node:http get', () => {
+  it('[M] blocks multiple node:http get aliases', () => {
     expect(() => httpGetNamed('http://example.com')).toThrow('Blocked via http.get');
   });
 
-  it('blocks https.get', () => {
+  it('[B] blocks https.get on a boundary transport path', () => {
     expect(() => https.get('https://example.com')).toThrow('Blocked via https.get');
   });
 
-  it('blocks named node:https get', () => {
+  it('[I] blocks named node:https get interface aliases', () => {
     expect(() => httpsGetNamed('https://example.com')).toThrow('Blocked via https.get');
   });
 
-  it('blocks fetch', async () => {
+  it('[E] blocks fetch with an explicit error path', async () => {
     await expect(fetch('https://example.com')).rejects.toThrow('Blocked via fetch');
   });
 
-  it('blocks net.connect', () => {
+  it('[S] blocks standard net.connect usage', () => {
     expect(() => net.connect({ host: 'example.com', port: 80 })).toThrow('Blocked via net.connect');
   });
 
-  it('blocks net.createConnection', () => {
+  it('[O] blocks one net.createConnection alias', () => {
     expect(() => net.createConnection({ host: 'example.com', port: 80 })).toThrow(
       'Blocked via net.createConnection',
     );
   });
 
-  it('blocks tls.connect', () => {
+  it('[Z] blocks tls.connect when zero outbound network is allowed', () => {
     expect(() => tls.connect({ host: 'example.com', port: 443 })).toThrow(
       'Blocked via tls.connect',
     );

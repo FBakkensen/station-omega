@@ -200,6 +200,53 @@ describe('useStreamingTurn', () => {
     });
   });
 
+  it('[B] exits streaming when processing resolves from undefined to false after turn segments arrive', async () => {
+    startTurnHandler = (args: StartTurnArgs) => {
+      startTurnCalls.push(args);
+      return Promise.resolve({ ok: true, turnNumber: 7 });
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useStreamingTurn({
+        gameId: 'game_4b',
+        stationData: null,
+        missionElapsedMinutes: 0,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.submitTurn('stabilize power');
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+
+    fixtures.rawSegments = [
+      {
+        turnNumber: 7,
+        segmentIndex: 0,
+        segment: {
+          type: 'narration',
+          text: 'Power rerouted',
+          npcId: null,
+          crewName: null,
+        },
+      },
+    ];
+    fixtures.isProcessing = undefined;
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    fixtures.isProcessing = false;
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(false);
+    });
+  });
+
   it('[I] preserves segment and choice interface mapping contracts', () => {
     fixtures.rawSegments = [
       {

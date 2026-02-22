@@ -114,6 +114,16 @@ export function useStreamingTurn({
     return (rawChoices.choices as Array<{ id: string; label: string; description: string }>);
   }, [rawChoices]);
 
+  const hasSegmentsForActiveTurn = useMemo(() => {
+    if (state.activeTurnNumber === null || !rawSegments || rawSegments.length === 0) {
+      return false;
+    }
+
+    return rawSegments.some(
+      (doc: { turnNumber: number }) => doc.turnNumber === state.activeTurnNumber,
+    );
+  }, [state.activeTurnNumber, rawSegments]);
+
   const isStreaming = isProcessing === true || state.activeTurnNumber !== null;
 
   const submitTurn = useCallback(async (playerInput: string) => {
@@ -159,11 +169,14 @@ export function useStreamingTurn({
       return;
     }
 
-    if (isProcessing === false && hasObservedProcessingForActiveTurnRef.current) {
+    if (
+      isProcessing === false
+      && (hasObservedProcessingForActiveTurnRef.current || hasSegmentsForActiveTurn)
+    ) {
       hasObservedProcessingForActiveTurnRef.current = false;
       dispatch({ type: 'END_TURN' });
     }
-  }, [state.activeTurnNumber, isProcessing]);
+  }, [state.activeTurnNumber, isProcessing, hasSegmentsForActiveTurn]);
 
   const clearError = useCallback(() => {
     dispatch({ type: 'CLEAR_ERROR' });

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const REQUIRED_TAGS = ['[Z]', '[O]', '[M]', '[B]', '[I]', '[E]', '[S]'] as const;
-const TEST_ROOTS = ['src', 'convex/lib', 'web/src'];
+const TEST_ROOTS = ['src', 'convex', 'test', 'web/src'];
 
 function collectTestFiles(root: string): string[] {
   if (!existsSync(root)) return [];

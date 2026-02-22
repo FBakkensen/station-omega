@@ -56,6 +56,7 @@ export function useStreamingTurn({
   console.log('[useStreamingTurn] hook called, gameId:', gameId);
   const [state, dispatch] = useReducer(turnReducer, initialState);
   const hasObservedProcessingForActiveTurnRef = useRef(false);
+  const previousIsProcessingRef = useRef<boolean | undefined>(undefined);
   const startTurnMutation = useMutation(api.turns.start);
 
   // Subscribe to segments for this game (all turns)
@@ -159,6 +160,9 @@ export function useStreamingTurn({
 
   // Auto-detect when processing finishes
   useEffect(() => {
+    const previousIsProcessing = previousIsProcessingRef.current;
+    previousIsProcessingRef.current = isProcessing;
+
     if (state.activeTurnNumber === null) {
       hasObservedProcessingForActiveTurnRef.current = false;
       return;
@@ -171,7 +175,14 @@ export function useStreamingTurn({
 
     if (
       isProcessing === false
-      && (hasObservedProcessingForActiveTurnRef.current || hasSegmentsForActiveTurn)
+      && (
+        hasObservedProcessingForActiveTurnRef.current
+        || hasSegmentsForActiveTurn
+        // Convex queries can transiently report undefined while loading and then
+        // settle directly to false for very fast turns. Handle that completion
+        // path even when no segments were persisted for the active turn.
+        || previousIsProcessing === undefined
+      )
     ) {
       hasObservedProcessingForActiveTurnRef.current = false;
       dispatch({ type: 'END_TURN' });

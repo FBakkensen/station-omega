@@ -247,6 +247,42 @@ describe('useStreamingTurn', () => {
     });
   });
 
+  it('[B] exits streaming when processing resolves from undefined to false with no active-turn segments', async () => {
+    startTurnHandler = (args: StartTurnArgs) => {
+      startTurnCalls.push(args);
+      return Promise.resolve({ ok: true, turnNumber: 1 });
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useStreamingTurn({
+        gameId: 'game_4c',
+        stationData: null,
+        missionElapsedMinutes: 0,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.submitTurn('steady thrusters');
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+
+    fixtures.rawSegments = undefined;
+    fixtures.isProcessing = undefined;
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    fixtures.isProcessing = false;
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.isStreaming).toBe(false);
+    });
+  });
+
   it('[I] preserves segment and choice interface mapping contracts', () => {
     fixtures.rawSegments = [
       {

@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useMemo, useEffect } from 'react';
+import { useReducer, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
@@ -55,6 +55,7 @@ export function useStreamingTurn({
 }: UseStreamingTurnOptions) {
   console.log('[useStreamingTurn] hook called, gameId:', gameId);
   const [state, dispatch] = useReducer(turnReducer, initialState);
+  const hasObservedProcessingForActiveTurnRef = useRef(false);
   const startTurnMutation = useMutation(api.turns.start);
 
   // Subscribe to segments for this game (all turns)
@@ -131,6 +132,7 @@ export function useStreamingTurn({
 
       console.log('[useStreamingTurn] turns.start result:', result);
       if (result.ok) {
+        hasObservedProcessingForActiveTurnRef.current = false;
         dispatch({ type: 'START_TURN', turnNumber: result.turnNumber });
       } else {
         console.error('[useStreamingTurn] turn start failed:', result.error);
@@ -147,7 +149,18 @@ export function useStreamingTurn({
 
   // Auto-detect when processing finishes
   useEffect(() => {
-    if (state.activeTurnNumber !== null && isProcessing === false) {
+    if (state.activeTurnNumber === null) {
+      hasObservedProcessingForActiveTurnRef.current = false;
+      return;
+    }
+
+    if (isProcessing === true) {
+      hasObservedProcessingForActiveTurnRef.current = true;
+      return;
+    }
+
+    if (isProcessing === false && hasObservedProcessingForActiveTurnRef.current) {
+      hasObservedProcessingForActiveTurnRef.current = false;
       dispatch({ type: 'END_TURN' });
     }
   }, [state.activeTurnNumber, isProcessing]);

@@ -76,6 +76,12 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
 
   // High-water mark: highest segmentIndex already pushed to TTS
   const ttsHighWaterRef = useRef(-1);
+  // Initial hydration gate: existing persisted segments should render as already-finalized.
+  const hasHydratedInitialSnapshotRef = useRef(false);
+  // Tracks whether a live stream started after mount (user submitted in this session).
+  const hasObservedPostMountLiveStreamRef = useRef(false);
+  // Distinguishes initial mount from later transitions.
+  const hasSeenInitialStreamingStateRef = useRef(false);
   // Stable refs for use inside effects without adding to deps
   const ttsRef = useRef(tts);
   const ttsEnabledRef = useRef(ttsEnabled);
@@ -96,6 +102,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   const firstTurnSentRef = useRef(false);
   useEffect(() => {
     if (!game || !station || firstTurnSentRef.current) return;
+    if (game.turnCount !== 0) return;
     if (segments.length === 0 && !isStreaming) {
       firstTurnSentRef.current = true;
       void submitTurn('I look around and take in my surroundings.');
@@ -108,6 +115,12 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   // twFinalizeAll() + beginStream() run before new segments are pushed.
   const prevStreamingRef = useRef(false);
   useEffect(() => {
+    if (hasSeenInitialStreamingStateRef.current && isStreaming && !prevStreamingRef.current) {
+      hasObservedPostMountLiveStreamRef.current = true;
+    } else if (!hasSeenInitialStreamingStateRef.current) {
+      hasSeenInitialStreamingStateRef.current = true;
+    }
+
     if (isStreaming && !prevStreamingRef.current) {
       // Turn just started — finalize any lingering cards from previous turn
       twFinalizeAll();
@@ -128,11 +141,23 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   // Historical segments (before latestTurnStartIndex) are pushed as immediate (no typewriter).
   // Uses ttsHighWaterRef + latestTurnStartIndex to only push current turn to TTS.
   useEffect(() => {
+    const shouldHydrateInitialSnapshot =
+      !hasHydratedInitialSnapshotRef.current
+      && !hasObservedPostMountLiveStreamRef.current;
+
+    let hydratedAnySegment = false;
+    let maxHydratedSegmentIndex = ttsHighWaterRef.current;
+
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
       const isHistorical = i < latestTurnStartIndex;
-      const immediate = isHistorical || seg.type === 'player_action';
+      const immediate = shouldHydrateInitialSnapshot || isHistorical || seg.type === 'player_action';
       const bodyChars = twPushSegment(seg, immediate);
+
+      if (shouldHydrateInitialSnapshot) {
+        hydratedAnySegment = true;
+        maxHydratedSegmentIndex = Math.max(maxHydratedSegmentIndex, seg.segmentIndex);
+      }
 
       // Only push new segments from the latest turn to TTS
       if (
@@ -144,6 +169,11 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
         ttsHighWaterRef.current = seg.segmentIndex;
         ttsRef.current.pushSegment(seg, bodyChars);
       }
+    }
+
+    if (shouldHydrateInitialSnapshot && hydratedAnySegment) {
+      hasHydratedInitialSnapshotRef.current = true;
+      ttsHighWaterRef.current = Math.max(ttsHighWaterRef.current, maxHydratedSegmentIndex);
     }
   }, [segments, latestTurnStartIndex, twPushSegment]);
 

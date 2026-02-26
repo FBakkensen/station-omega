@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { useMutation } from 'convex/react';
+import { useCallback, useEffect } from 'react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useScreenManager } from './hooks/useScreenManager';
@@ -18,6 +18,24 @@ export function App() {
   const setup = useGameSetup();
   const startGeneration = useMutation(api.stationGeneration.start);
   const createGame = useMutation(api.games.create);
+  const { goToTitle } = nav;
+
+  const gameplayScreen = nav.screen.id === 'gameplay' ? nav.screen : null;
+  const gameplayDoc = useQuery(
+    api.games.get,
+    gameplayScreen
+      ? { id: gameplayScreen.gameId as Id<"games"> }
+      : 'skip',
+  ) as { isOver: boolean; won: boolean } | null | undefined;
+
+  useEffect(() => {
+    if (!gameplayScreen) return;
+    if (gameplayDoc === undefined) return;
+
+    if (!gameplayDoc) {
+      goToTitle();
+    }
+  }, [gameplayScreen, gameplayDoc, goToTitle]);
 
   const handleGenerate = useCallback(async () => {
     console.log('[App] handleGenerate called, selectedClass:', setup.selectedClass, 'difficulty:', setup.selectedDifficulty);

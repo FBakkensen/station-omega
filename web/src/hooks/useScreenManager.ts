@@ -1,4 +1,4 @@
-import { useReducer, useCallback } from 'react';
+import { useReducer, useCallback, useEffect } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 
 /** All screens in the game flow. */
@@ -11,6 +11,81 @@ export type Screen =
   | { id: 'game_over'; gameId: string }
   | { id: 'run_summary'; gameId: string }
   | { id: 'run_history' };
+
+type GameplayScreen = Extract<Screen, { id: 'gameplay' }>;
+
+const STORAGE_KEY = 'station-omega-screen';
+const STORAGE_VERSION = 1;
+const DEFAULT_SCREEN: Screen = { id: 'title' };
+const CONVEX_ID_RE = /^[a-z0-9]{32}$/;
+
+interface PersistedScreen {
+  version: number;
+  screen: GameplayScreen;
+}
+
+function isPersistedGameplayScreen(value: unknown): value is PersistedScreen {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+
+  if (candidate.version !== STORAGE_VERSION) return false;
+  if (typeof candidate.screen !== 'object' || candidate.screen === null) return false;
+
+  const screen = candidate.screen as Record<string, unknown>;
+  if (screen.id !== 'gameplay') return false;
+  if (typeof screen.gameId !== 'string' || typeof screen.stationId !== 'string') return false;
+
+  return CONVEX_ID_RE.test(screen.gameId) && CONVEX_ID_RE.test(screen.stationId);
+}
+
+function loadPersistedScreen(): Screen | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPersistedGameplayScreen(parsed)) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+
+    return parsed.screen;
+  } catch {
+    try {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+    return null;
+  }
+}
+
+function savePersistedScreen(screen: GameplayScreen): void {
+  if (typeof window === 'undefined') return;
+
+  const payload: PersistedScreen = {
+    version: STORAGE_VERSION,
+    screen,
+  };
+
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearPersistedScreen(): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 type Action =
   | { type: 'GO_CHARACTER_SELECT' }
@@ -59,7 +134,19 @@ export interface ScreenManager {
 }
 
 export function useScreenManager(): ScreenManager {
-  const [screen, dispatch] = useReducer(reducer, { id: 'title' });
+  const [screen, dispatch] = useReducer(
+    reducer,
+    DEFAULT_SCREEN,
+    () => loadPersistedScreen() ?? DEFAULT_SCREEN,
+  );
+
+  useEffect(() => {
+    if (screen.id === 'gameplay') {
+      savePersistedScreen(screen);
+      return;
+    }
+    clearPersistedScreen();
+  }, [screen]);
 
   return {
     screen,

@@ -126,7 +126,7 @@ describe('App resume redirect behavior', () => {
     expect(goToGameOverMock).not.toHaveBeenCalled();
   });
 
-  it('[O] redirects one ended winning gameplay run to run summary', async () => {
+  it('[O] does not immediately redirect one ended winning gameplay run from app shell', async () => {
     nav.screen = {
       id: 'gameplay',
       gameId: 'j9733s5p0przppv68h942xqd6n81nxmb',
@@ -137,13 +137,14 @@ describe('App resume redirect behavior', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(goToRunSummaryMock).toHaveBeenCalledWith('j9733s5p0przppv68h942xqd6n81nxmb');
+      expect(useQueryMock).toHaveBeenCalledTimes(1);
     });
     expect(goToTitleMock).not.toHaveBeenCalled();
+    expect(goToRunSummaryMock).not.toHaveBeenCalled();
     expect(goToGameOverMock).not.toHaveBeenCalled();
   });
 
-  it('[M] handles many gameplay query states and only redirects when terminal state is reached', async () => {
+  it('[M] handles many gameplay query states without app-shell terminal redirects', async () => {
     nav.screen = {
       id: 'gameplay',
       gameId: 'j9733s5p0przppv68h942xqd6n81nxmb',
@@ -160,10 +161,11 @@ describe('App resume redirect behavior', () => {
     view.rerender(<App />);
 
     await waitFor(() => {
-      expect(goToGameOverMock).toHaveBeenCalledWith('j9733s5p0przppv68h942xqd6n81nxmb');
+      expect(useQueryMock).toHaveBeenCalledTimes(3);
     });
     expect(goToTitleMock).not.toHaveBeenCalled();
     expect(goToRunSummaryMock).not.toHaveBeenCalled();
+    expect(goToGameOverMock).not.toHaveBeenCalled();
   });
 
   it('[B] does not redirect while gameplay query is still loading at the undefined boundary', async () => {

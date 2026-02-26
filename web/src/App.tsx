@@ -18,7 +18,7 @@ export function App() {
   const setup = useGameSetup();
   const startGeneration = useMutation(api.stationGeneration.start);
   const createGame = useMutation(api.games.create);
-  const { goToTitle, goToRunSummary, goToGameOver } = nav;
+  const { goToTitle } = nav;
 
   const gameplayScreen = nav.screen.id === 'gameplay' ? nav.screen : null;
   const gameplayDoc = useQuery(
@@ -34,17 +34,8 @@ export function App() {
 
     if (!gameplayDoc) {
       goToTitle();
-      return;
     }
-
-    if (!gameplayDoc.isOver) return;
-
-    if (gameplayDoc.won) {
-      goToRunSummary(gameplayScreen.gameId);
-      return;
-    }
-    goToGameOver(gameplayScreen.gameId);
-  }, [gameplayScreen, gameplayDoc, goToTitle, goToRunSummary, goToGameOver]);
+  }, [gameplayScreen, gameplayDoc, goToTitle]);
 
   const handleGenerate = useCallback(async () => {
     console.log('[App] handleGenerate called, selectedClass:', setup.selectedClass, 'difficulty:', setup.selectedDifficulty);

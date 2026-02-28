@@ -274,11 +274,12 @@ export class EventTracker {
             for (const failure of room.systemFailures) {
                 // Skip resolved or already-failed failures
                 if (failure.challengeState === 'resolved' || failure.challengeState === 'failed') continue;
-                // Skip failures with no cascade timer
-                if (failure.minutesUntilCascade <= 0) continue;
+                // Failures that never cascade (typically severity-1) have no active timer.
+                const hasActiveOrExpiredCascadeTimer = failure.minutesUntilCascade > 0 || failure.severity >= 2;
+                if (!hasActiveOrExpiredCascadeTimer) continue;
 
                 // Apply proportional hazard if player is in the room
-                if (roomId === state.currentRoom && failure.hazardPerMinute > 0) {
+                if (roomId === state.currentRoom && failure.hazardPerMinute > 0 && failure.minutesUntilCascade > 0) {
                     const hazardDmg = Math.round(failure.hazardPerMinute * elapsedMinutes);
                     if (hazardDmg > 0) {
                         state.hp = Math.max(0, state.hp - hazardDmg);

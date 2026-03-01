@@ -28,7 +28,7 @@ bun run test:gm
 bun run test:analyze
 ```
 
-Always run both `bun run typecheck` and `bun run lint` before considering a task complete.
+Always run `bun run check` as the final step before considering any task complete. This runs typecheck, lint, dead code detection, and web checks.
 
 ## Architecture
 

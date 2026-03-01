@@ -86,4 +86,28 @@ describe('serialization helpers', () => {
     const twice = serializeStation(deserializeStation(once));
     expect(twice).toEqual(once);
   });
+
+  it('[O] single populated eventCooldowns round-trips correctly', () => {
+    const state = createTestState();
+    state.eventCooldowns = { power_failure: 3, radiation_spike: 7 };
+    const restored = deserializeGameState(serializeGameState(state));
+    expect(restored.eventCooldowns).toEqual({ power_failure: 3, radiation_spike: 7 });
+  });
+
+  it('[I] eventCooldowns is present as a Record in serialized output contract', () => {
+    const state = createTestState();
+    state.eventCooldowns = { power_failure: 5 };
+    const serialized = serializeGameState(state);
+    expect(typeof serialized.eventCooldowns).toBe('object');
+    expect(serialized.eventCooldowns).not.toBeNull();
+    expect(serialized.eventCooldowns?.['power_failure']).toBe(5);
+  });
+
+  it('[E] missing eventCooldowns in serialized data defaults to empty object on deserialize', () => {
+    const state = createTestState();
+    const serialized = serializeGameState(state);
+    const withoutCooldowns = { ...serialized, eventCooldowns: undefined };
+    const restored = deserializeGameState(withoutCooldowns as typeof serialized);
+    expect(restored.eventCooldowns).toEqual({});
+  });
 });

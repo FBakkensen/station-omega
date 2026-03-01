@@ -262,6 +262,43 @@ function validateTopology(output: TopologyOutput, context: LayerContext): Valida
         }
     }
 
+    // 13. Lock count validation
+    if (lockedRooms.length > 2) {
+        errors.push(`Too many locked rooms: ${String(lockedRooms.length)}. Maximum allowed is 2.`);
+    }
+
+    // 14. Archetype repetition check (no archetype more than 3 times)
+    const archetypeCounts = new Map<string, number>();
+    for (const room of output.rooms) {
+        archetypeCounts.set(room.archetype, (archetypeCounts.get(room.archetype) ?? 0) + 1);
+    }
+    for (const [archetype, count] of archetypeCounts) {
+        if (count > 3) {
+            errors.push(`Archetype '${archetype}' appears ${String(count)} times — maximum is 3`);
+        }
+    }
+
+    // 15. Entry-to-escape BFS distance >= 3
+    if (idSet.has(output.entryRoomId) && idSet.has(output.escapeRoomId)) {
+        const dist = new Map<string, number>();
+        const bfsQueue: string[] = [output.entryRoomId];
+        dist.set(output.entryRoomId, 0);
+        while (bfsQueue.length > 0) {
+            const cur = bfsQueue.shift();
+            if (!cur) break;
+            for (const neighbor of (connMap.get(cur) ?? new Set<string>())) {
+                if (!dist.has(neighbor)) {
+                    dist.set(neighbor, (dist.get(cur) ?? 0) + 1);
+                    bfsQueue.push(neighbor);
+                }
+            }
+        }
+        const escapeDist = dist.get(output.escapeRoomId) ?? 0;
+        if (escapeDist < 3) {
+            errors.push(`Entry-to-escape distance is ${String(escapeDist)} rooms — minimum is 3 for meaningful exploration`);
+        }
+    }
+
     if (errors.length > 0) {
         return validationFailure(errors);
     }

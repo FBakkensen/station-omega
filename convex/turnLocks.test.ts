@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import { acquire, isLocked, release } from "./turnLocks";
-import { extractHandler, type QueryBuilder, createQueryBuilder } from "./test-utils";
+import { extractHandler, type QueryBuilder, createQueryBuilder } from "./test_utils";
 
 type LockDoc = {
   _id: string;

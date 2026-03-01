@@ -20,6 +20,7 @@ import type * as messages from "../messages.js";
 import type * as runHistory from "../runHistory.js";
 import type * as stationGeneration from "../stationGeneration.js";
 import type * as stations from "../stations.js";
+import type * as test_utils from "../test_utils.js";
 import type * as turnLocks from "../turnLocks.js";
 import type * as turnSegments from "../turnSegments.js";
 import type * as turns from "../turns.js";
@@ -43,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   runHistory: typeof runHistory;
   stationGeneration: typeof stationGeneration;
   stations: typeof stations;
+  test_utils: typeof test_utils;
   turnLocks: typeof turnLocks;
   turnSegments: typeof turnSegments;
   turns: typeof turns;

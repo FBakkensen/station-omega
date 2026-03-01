@@ -145,4 +145,34 @@ describe('buildTurnContext', () => {
     expect(built).toContain('MISSION ELAPSED TIME: T+02:05');
     expect(built).toContain('ENVIRONMENT:');
   });
+
+  it('[Z] absent mechanicalEvents parameter produces no mechanical events section in context', () => {
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_1';
+    const built = expectContext(buildTurnContext(context.state, context.station, undefined));
+    expect(built).not.toContain('## Mechanical Events This Turn');
+  });
+
+  it('[O] single mechanical event string produces mechanical events section in context', () => {
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_1';
+    const built = expectContext(buildTurnContext(context.state, context.station, ['Power surge detected in sector 7.']));
+    expect(built).toContain('## Mechanical Events This Turn');
+    expect(built).toContain('Power surge detected in sector 7.');
+  });
+
+  it('[M] multiple mechanical events are all included in the context output', () => {
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_1';
+    const events = [
+      'Coolant pressure dropped by 15%.',
+      'Oxygen scrubber load increased.',
+      'Cascade timer advanced by 5 minutes.',
+    ];
+    const built = expectContext(buildTurnContext(context.state, context.station, events));
+    expect(built).toContain('## Mechanical Events This Turn');
+    for (const event of events) {
+      expect(built).toContain(event);
+    }
+  });
 });

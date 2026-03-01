@@ -3,7 +3,7 @@ import type { Id } from './_generated/dataModel';
 import { create, get, remove, update } from './generationProgress';
 import type { Difficulty, CharacterClassId } from '../src/types.js';
 import type { ProgressStatus } from './generationProgress';
-import { extractHandler } from './test-utils';
+import { extractHandler } from './test_utils';
 
 type GenerationProgressDoc = {
   _id: Id<'generationProgress'>;

@@ -3,7 +3,9 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { buildTurnMessages, mapChoicesForPersistence } from "./streamTurn.helpers";
+import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
+import { EventTracker } from "../../src/events.js";
+import type { EventType } from "../../src/types.js";
 
 /**
  * Process an AI turn — runs the full game loop server-side.
@@ -98,6 +100,22 @@ export const processAITurn = internalAction({
         state.roomVisitCount.set(state.currentRoom, 1);
       }
 
+      // ── EventTracker: restore cooldowns and process pre-turn events ──
+      const tracker = new EventTracker();
+      for (const [k, cooldownVal] of Object.entries(state.eventCooldowns)) {
+        tracker.lastTriggered.set(k as EventType, cooldownVal);
+      }
+
+      const PRE_TURN_MINUTES = 5;
+      const preEventCtx = tracker.tickActiveEvents(state, PRE_TURN_MINUTES);
+      const preCascadeCtx = tracker.processCascadeEffects(state, stationObj, PRE_TURN_MINUTES);
+      const newEvent = tracker.checkRandomEvent(state);
+      if (newEvent) {
+        state.activeEvents.push(newEvent);
+        preEventCtx.push("NEW EVENT: " + newEvent.type + " — " + newEvent.description);
+      }
+      const mechanicalEvents = [...preEventCtx, ...preCascadeCtx];
+
       // Build GameContext (captured by tool closures)
       const choiceBuffer: Array<{
         title: string;
@@ -120,7 +138,7 @@ export const processAITurn = internalAction({
       // Build tools, prompt, context
       const toolSets = createGameToolSets(state.characterClass, gameCtx);
       const systemPrompt = buildOrchestratorPrompt(stationObj, build);
-      const turnContext = buildTurnContext(state, stationObj);
+      const turnContext = buildTurnContext(state, stationObj, mechanicalEvents.length > 0 ? mechanicalEvents : undefined);
 
       // Build message array
       const conversationHistory = (
@@ -166,8 +184,22 @@ export const processAITurn = internalAction({
 
           // Extract complete segments and save reactively
           const newSegments = segmentParser.push(part.text);
+
           for (const seg of newSegments) {
             if (typeof seg.text !== "string" || !seg.text) continue;
+
+            // Phase 5a: drop segments with unknown types
+            if (!isValidSegmentType(seg.type)) {
+              console.warn("[processAITurn] Dropping segment with unknown type:", seg.type);
+              continue;
+            }
+
+            // Phase 5b: downgrade dialogue to narration on non-social turns
+            if (shouldDowngradeDialogue(seg.type, playerInput)) {
+              (seg as Record<string, unknown>).type = "narration";
+              (seg as Record<string, unknown>).npcId = null;
+              console.debug("[processAITurn] Downgraded dialogue to narration for non-social turn");
+            }
 
             await ctx.runMutation(internal.turnSegments.save, {
               gameId,
@@ -191,7 +223,16 @@ export const processAITurn = internalAction({
         rawJsonLength: rawJson.length,
       });
 
+      // ── Post-turn: apply event damage for action-elapsed time ──
+      if (gameCtx.turnElapsedMinutes > 0) {
+        const postEventCtx = tracker.tickActiveEvents(state, gameCtx.turnElapsedMinutes);
+        const postCascadeCtx = tracker.processCascadeEffects(state, stationObj, gameCtx.turnElapsedMinutes);
+        void postEventCtx;
+        void postCascadeCtx;
+      }
+
       // ── Persist state after successful stream ────────────────────────
+      state.eventCooldowns = Object.fromEntries(tracker.lastTriggered);
       state.turnCount = turnNumber;
       state.missionElapsedMinutes += gameCtx.turnElapsedMinutes;
 

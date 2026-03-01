@@ -156,6 +156,7 @@ export interface SerializedGameState {
   fieldSurgeryUsedInRoom: string[];
   npcAllies: string[];
   missionElapsedMinutes: number;
+  eventCooldowns?: Record<string, number>;
 }
 
 export function serializeGameState(state: GameState): SerializedGameState {
@@ -195,6 +196,7 @@ export function serializeGameState(state: GameState): SerializedGameState {
     fieldSurgeryUsedInRoom: Array.from(state.fieldSurgeryUsedInRoom),
     npcAllies: Array.from(state.npcAllies),
     missionElapsedMinutes: state.missionElapsedMinutes,
+    eventCooldowns: state.eventCooldowns,
   };
 }
 
@@ -235,5 +237,6 @@ export function deserializeGameState(data: SerializedGameState): GameState {
     fieldSurgeryUsedInRoom: new Set(data.fieldSurgeryUsedInRoom),
     npcAllies: new Set(data.npcAllies),
     missionElapsedMinutes: data.missionElapsedMinutes,
+    eventCooldowns: data.eventCooldowns ?? {},
   };
 }

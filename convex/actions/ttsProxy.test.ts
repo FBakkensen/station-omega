@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractHandler } from '../test-utils.js';
+import { extractHandler } from '../test_utils.js';
 
 const proxyMocks = vi.hoisted(() => ({
   constructorApiKeys: [] as string[],

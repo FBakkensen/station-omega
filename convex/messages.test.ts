@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Id } from './_generated/dataModel';
 import { append, appendBatch, list, listInternal } from './messages';
-import { extractHandler, type QueryBuilder, createQueryBuilder } from './test-utils';
+import { extractHandler, type QueryBuilder, createQueryBuilder } from './test_utils';
 
 type Role = 'system' | 'user' | 'assistant';
 

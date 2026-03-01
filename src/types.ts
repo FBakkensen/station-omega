@@ -453,4 +453,5 @@ export interface GameState {
     fieldSurgeryUsedInRoom: Set<string>;
     npcAllies: Set<string>;
     missionElapsedMinutes: number;
+    eventCooldowns: Record<string, number>;
 }

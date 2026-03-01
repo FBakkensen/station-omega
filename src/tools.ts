@@ -10,6 +10,7 @@ import type {
     ActionOutcome,
     Disposition,
     NPC,
+    Room,
 } from './types.js';
 import { getProficiencyModifier } from './character.js';
 import { CRAFT_RECIPES, computeActionMinutes } from './data.js';
@@ -45,6 +46,162 @@ function getItemName(itemId: string, station: GeneratedStation): string {
 
 function inventoryList(state: GameState, station: GeneratedStation): { id: string; name: string }[] {
     return state.inventory.map(id => ({ id, name: getItemName(id, station) }));
+}
+
+// ─── Phase 2: Difficulty Clamping ──────────────────────────────────────────
+
+function clampDifficulty(
+    ai: ActionDifficulty,
+    domain: ActionDomain,
+    build: CharacterBuild,
+    room: Room | undefined,
+): { clamped: ActionDifficulty; adjusted: boolean } {
+    const LEVELS: ActionDifficulty[] = ['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible'];
+
+    // Floor: active system failures in current room raise minimum difficulty
+    const activeFailures = room ? room.systemFailures.filter(
+        f => f.challengeState !== 'resolved' && f.challengeState !== 'failed',
+    ).length : 0;
+    const minIndex = activeFailures >= 2 ? 2 : activeFailures >= 1 ? 1 : 0;
+
+    // Cap: if action domain matches character proficiency, cap at 'hard'
+    const maxIndex = build.proficiencies.includes(domain) ? 3 : LEVELS.length - 1;
+
+    const currentIndex = LEVELS.indexOf(ai);
+    const clampedIndex = Math.max(minIndex, Math.min(maxIndex, currentIndex));
+    return {
+        clamped: LEVELS[clampedIndex],
+        adjusted: clampedIndex !== currentIndex,
+    };
+}
+
+// ─── Moral Choice Internal Helper ──────────────────────────────────────────
+
+function recordMoralChoiceInternal(
+    state: GameState,
+    tendency: 'mercy' | 'sacrifice' | 'pragmatic',
+    magnitude: number,
+    description: string,
+): void {
+    const clampedMag = Math.max(1, Math.min(3, magnitude));
+    state.moralProfile.choices.push({
+        turn: state.turnCount,
+        description,
+        tendency,
+        magnitude: clampedMag,
+    });
+    state.moralProfile.tendencies[tendency] += clampedMag;
+}
+
+// ─── Phase 3: Auto-Complete Objectives ─────────────────────────────────────
+
+function autoCheckObjectiveCompletion(
+    state: GameState,
+    station: GeneratedStation,
+): string | null {
+    const obj = station.objectives;
+    if (obj.completed) return null;
+    if (obj.currentStepIndex >= obj.steps.length) return null;
+    const step = obj.steps[obj.currentStepIndex];
+    if (step.completed) return null;
+
+    const inRoom = state.currentRoom === step.roomId;
+    const hasItem = step.requiredItemId === null || state.inventory.includes(step.requiredItemId) || state.hasObjectiveItem;
+
+    // Check system repair requirement via room failure state
+    let systemRepaired = step.requiredSystemRepair === null;
+    if (!systemRepaired) {
+        const stepRoom = station.rooms.get(step.roomId);
+        systemRepaired = stepRoom?.systemFailures.some(f =>
+            f.systemId === step.requiredSystemRepair && f.challengeState === 'resolved',
+        ) ?? false;
+    }
+
+    if (inRoom && hasItem && systemRepaired) {
+        step.completed = true;
+        obj.currentStepIndex++;
+
+        if (obj.currentStepIndex >= obj.steps.length) {
+            obj.completed = true;
+            state.won = true;
+            return 'OBJECTIVE COMPLETE: All steps done! Mission complete.';
+        }
+        const nextStep = obj.steps[obj.currentStepIndex];
+        return `OBJECTIVE STEP COMPLETE: "${step.description}" completed. Next: "${nextStep.description}"`;
+    }
+    return null;
+}
+
+// ─── Phase 4: Moral Choice Detection ───────────────────────────────────────
+
+function detectMoralChoice(
+    toolName: string,
+    args: Record<string, unknown>,
+    resultObj: Record<string, unknown>,
+    state: GameState,
+    station: GeneratedStation,
+): void {
+    const lastIdx = state.moralProfile.choices.length - 1;
+    const alreadyThisTurn = (tendency: string) => {
+        if (lastIdx < 0) return false;
+        const last = state.moralProfile.choices[lastIdx];
+        return last.turn === state.turnCount && last.tendency === tendency;
+    };
+
+    const success = resultObj.success === true || (typeof resultObj.outcome === 'string' && !['failure', 'critical_failure'].includes(resultObj.outcome));
+
+    if (toolName === 'interact_npc') {
+        const approach = args.approach as string;
+        if (success && (approach === 'offer_mercy' || approach === 'negotiate') && !alreadyThisTurn('mercy')) {
+            recordMoralChoiceInternal(state, 'mercy', approach === 'offer_mercy' ? 2 : 1, `${approach} with NPC`);
+        }
+        if (success && approach === 'recruit' && !alreadyThisTurn('mercy')) {
+            recordMoralChoiceInternal(state, 'mercy', 1, 'recruited NPC ally');
+        }
+    }
+
+    if (toolName === 'use_item') {
+        const itemQuery = (args.item ?? '') as string;
+        let foundItem = station.items.get(itemQuery);
+        if (!foundItem) {
+            for (const [, i] of station.items) {
+                if (i.name.toLowerCase() === itemQuery.toLowerCase()) {
+                    foundItem = i;
+                    break;
+                }
+            }
+        }
+        const isHeal = foundItem?.effect.type === 'heal';
+        const hasNpcAlly = state.npcAllies.size > 0;
+        if (isHeal && hasNpcAlly && !alreadyThisTurn('sacrifice')) {
+            recordMoralChoiceInternal(state, 'sacrifice', 2, 'healed NPC ally');
+        }
+    }
+
+    if (toolName === 'move_to') {
+        const currentRoom = station.rooms.get(state.currentRoom);
+        if (currentRoom) {
+            const hasCriticalUnsavedSystem = currentRoom.systemFailures.some(
+                f => f.minutesUntilCascade > 0 && f.minutesUntilCascade < 15 &&
+                     f.challengeState !== 'resolved' && f.challengeState !== 'failed',
+            );
+            if (hasCriticalUnsavedSystem && !alreadyThisTurn('pragmatic')) {
+                recordMoralChoiceInternal(state, 'pragmatic', 1, 'abandoned critical system failure');
+            }
+        }
+    }
+
+    if (toolName === 'repair_system') {
+        if (success) {
+            const systemId = (args.system ?? '') as string;
+            const stepIdx = station.objectives.currentStepIndex;
+            const isObjectiveSystem = stepIdx < station.objectives.steps.length &&
+                station.objectives.steps[stepIdx].requiredSystemRepair === systemId;
+            if (!isObjectiveSystem && !alreadyThisTurn('sacrifice')) {
+                recordMoralChoiceInternal(state, 'sacrifice', 1, 'repaired non-objective system');
+            }
+        }
+    }
 }
 
 // ─── Callbacks ──────────────────────────────────────────────────────────────
@@ -231,6 +388,9 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 });
             }
 
+            // Detect moral choice before room change (checks abandoned systems in current room)
+            detectMoralChoice('move_to', args as Record<string, unknown>, {}, state, station);
+
             state.currentRoom = targetId;
             state.roomsVisited.add(targetId);
             state.moveCount++;
@@ -242,6 +402,8 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             // Reveal items on room entry
             const availableItems = room ? room.loot.filter(id => !state.itemsTaken.has(id)) : [];
             for (const id of availableItems) state.revealedItems.add(id);
+
+            const completion = autoCheckObjectiveCompletion(state, station);
 
             return JSON.stringify({
                 success: true,
@@ -260,6 +422,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     (f.systemId === 'atmosphere_processor' || f.systemId === 'life_support' || f.systemId === 'pressure_seal')
                     && f.challengeState !== 'resolved'
                 ) ?? false),
+                objective_update: completion ?? undefined,
             });
         },
     });
@@ -307,22 +470,26 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 if (item?.effect.type === 'objective') {
                     state.hasObjectiveItem = true;
                     state.metrics.itemsCollected.push(matchId);
+                    const completion = autoCheckObjectiveCompletion(state, station);
                     return JSON.stringify({
                         success: true,
                         item_id: matchId,
                         item_name: item.name,
                         is_objective_item: true,
+                        objective_update: completion ?? undefined,
                     });
                 }
 
                 state.inventory.push(matchId);
                 state.metrics.itemsCollected.push(matchId);
+                const completion = autoCheckObjectiveCompletion(state, station);
                 return JSON.stringify({
                     success: true,
                     item_id: matchId,
                     item_name: item?.name ?? matchId,
                     inventory: inventoryList(state, station),
                     slots_remaining: state.maxInventory - state.inventory.length,
+                    objective_update: completion ?? undefined,
                 });
             }
 
@@ -391,7 +558,9 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     const healed = Math.min(healAmount, state.maxHp - state.hp);
                     state.hp += healed;
                     state.metrics.totalDamageHealed += healed;
-                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'heal', healed, player_hp: state.hp, player_maxHp: state.maxHp });
+                    const healResultObj = { success: true, item_name: item.name, effect_type: 'heal', healed, player_hp: state.hp, player_maxHp: state.maxHp };
+                    detectMoralChoice('use_item', { item: foundId } as Record<string, unknown>, healResultObj, state, station);
+                    return JSON.stringify(healResultObj);
                 }
                 case 'tool':
                     return JSON.stringify({ success: true, item_name: item.name, effect_type: 'tool', reusable: true, description: item.effect.description });
@@ -423,8 +592,10 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const { domain, difficulty } = args;
 
             const room = station.rooms.get(state.currentRoom);
+            const clamped = clampDifficulty(difficulty, domain, build, room);
+            const effectiveDifficulty = clamped.clamped;
             if (room) {
-                const minutes = computeActionMinutes('attempt_action', state, state.activeEvents, room, difficulty);
+                const minutes = computeActionMinutes('attempt_action', state, state.activeEvents, room, effectiveDifficulty);
                 advanceTime(minutes);
             }
 
@@ -432,7 +603,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 trivial: 95, easy: 80, moderate: 60, hard: 40, extreme: 20, impossible: 5,
             };
 
-            let target = TARGETS[difficulty];
+            let target = TARGETS[effectiveDifficulty];
             const modifiers: Record<string, number> = {};
 
             // Proficiency
@@ -512,6 +683,8 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 roll,
                 target,
                 modifiers,
+                difficulty_used: effectiveDifficulty,
+                difficulty_clamped: clamped.adjusted ? { from: difficulty, to: effectiveDifficulty } : undefined,
                 damage_dealt_to_player: damageDealt > 0 ? damageDealt : undefined,
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
@@ -618,7 +791,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     });
                 }
 
-                return JSON.stringify({
+                const npcResultObj = {
                     success: true,
                     approach,
                     npc_id: npc.id,
@@ -628,10 +801,12 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     roll,
                     chance,
                     is_ally: npc.isAlly,
-                });
+                };
+                detectMoralChoice('interact_npc', args as Record<string, unknown>, npcResultObj, state, station);
+                return JSON.stringify(npcResultObj);
             }
 
-            return JSON.stringify({
+            const npcFailResultObj = {
                 success: false,
                 approach,
                 npc_id: npc.id,
@@ -639,7 +814,9 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 disposition: npc.disposition,
                 roll,
                 chance,
-            });
+            };
+            detectMoralChoice('interact_npc', args as Record<string, unknown>, npcFailResultObj, state, station);
+            return JSON.stringify(npcFailResultObj);
         },
     });
 
@@ -652,15 +829,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         }),
         execute: (args: { description: string; tendency: 'mercy' | 'sacrifice' | 'pragmatic'; magnitude: number }) => {
             const { state } = gameCtx;
-            const magnitude = Math.max(1, Math.min(3, args.magnitude));
-
-            state.moralProfile.choices.push({
-                turn: state.turnCount,
-                description: args.description,
-                tendency: args.tendency,
-                magnitude,
-            });
-            state.moralProfile.tendencies[args.tendency] += magnitude;
+            recordMoralChoiceInternal(state, args.tendency, args.magnitude, args.description);
 
             return JSON.stringify({ recorded: true, tendency: args.tendency, total: state.moralProfile.tendencies[args.tendency] });
         },
@@ -701,6 +870,10 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 return JSON.stringify({ error: 'No more objectives.' });
             }
             const currentStep = objectives.steps[objectives.currentStepIndex];
+
+            if (currentStep.completed) {
+                return JSON.stringify({ success: true, already_completed: true, description: currentStep.description });
+            }
 
             if (currentStep.roomId !== state.currentRoom) {
                 return JSON.stringify({ success: false, reason: 'wrong_room' });
@@ -896,11 +1069,15 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 failure.status = 'repaired';
                 state.repairedSystems.add(`${failure.systemId}:${state.currentRoom}`);
                 state.metrics.systemsRepaired++;
-                return JSON.stringify({
+                const completion = autoCheckObjectiveCompletion(state, station);
+                const repairResultObj = {
                     action_minutes: minutes,
                     success: true, outcome, system_id: failure.systemId, roll, target,
                     inventory: inventoryList(state, station),
-                });
+                    objective_update: completion ?? undefined,
+                };
+                detectMoralChoice('repair_system', args as Record<string, unknown>, repairResultObj, state, station);
+                return JSON.stringify(repairResultObj);
             }
             if (outcome === 'partial_success') {
                 if (failure.challengeState !== 'stabilized') {

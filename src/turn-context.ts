@@ -3,7 +3,7 @@ import { getEventContext } from './events.js';
 import { computeEnvironment } from './environment.js';
 
 /** Build dynamic per-turn context as a system message. Returns null if no context needed. */
-export function buildTurnContext(state: GameState, station: GeneratedStation): string | null {
+export function buildTurnContext(state: GameState, station: GeneratedStation, mechanicalEvents?: string[]): string | null {
     const parts: string[] = [];
 
     // Mission elapsed time
@@ -62,6 +62,11 @@ export function buildTurnContext(state: GameState, station: GeneratedStation): s
             `Pressure ${env.pressureKpa.toFixed(1)}kPa | Temp ${String(Math.round(env.temperatureC))}°C | ` +
             `Rad ${env.radiationMsv.toFixed(1)}mSv | Structural ${String(Math.round(env.structuralPct))}%`
         );
+    }
+
+    // Mechanical events from EventTracker
+    if (mechanicalEvents && mechanicalEvents.length > 0) {
+        parts.push(`## Mechanical Events This Turn\n${mechanicalEvents.join('\n')}`);
     }
 
     return parts.join('\n\n');

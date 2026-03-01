@@ -123,6 +123,7 @@ export function App() {
       fieldSurgeryUsedInRoom: [],
       npcAllies: [],
       missionElapsedMinutes: 0,
+      eventCooldowns: {},
     };
 
     const gameId = await createGame({

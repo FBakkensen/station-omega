@@ -97,3 +97,90 @@ describe('topologyLayer validation', () => {
     expect(result.value?.escapeRoomId).toBe('room_7');
   });
 });
+
+describe('topology new validators', () => {
+  it('[Z] zero locked rooms passes lock count validation', () => {
+    const output = buildValidTopologyOutput();
+    for (const room of output.rooms) { room.lockedBy = null; }
+    const result = topologyLayer.validate(asSchemaValidTopologyOutput(output), baseContext);
+    expect(result.success).toBe(true);
+  });
+
+  it('[O] one archetype appearing exactly three times passes archetype validation', () => {
+    const output = buildValidTopologyOutput();
+    // utility appears once (room_1). Make room_2 and room_3 also utility → 3 total (allowed)
+    output.rooms[2].archetype = 'utility' as const;
+    output.rooms[3].archetype = 'utility' as const;
+    const result = topologyLayer.validate(asSchemaValidTopologyOutput(output), baseContext);
+    expect(result.success).toBe(true);
+  });
+
+  it('[M] multiple new validator errors fire simultaneously for locks and archetypes', () => {
+    const output = buildValidTopologyOutput();
+    // Add 2 more locked rooms (total 3: room_4 + room_2 + room_3)
+    output.rooms[2].lockedBy = 'keycard_1';
+    output.rooms[3].lockedBy = 'keycard_2';
+    // Make cargo appear 4 times: room_3(already cargo), add room_1, room_5, room_6 → 4 total
+    output.rooms[1].archetype = 'cargo' as const;
+    output.rooms[5].archetype = 'cargo' as const;
+    output.rooms[6].archetype = 'cargo' as const;
+    const result = topologyLayer.validate(asSchemaValidTopologyOutput(output), baseContext);
+    expect(result.success).toBe(false);
+    const errStr = (result.errors ?? []).join(' ');
+    expect(errStr).toContain('Too many locked rooms');
+    expect(errStr).toMatch(/Archetype 'cargo' appears \d+ times/);
+  });
+
+  it('[B] entry-to-escape distance 2 fails and distance exactly 3 passes', () => {
+    // Distance 2: set escape to room_2 (room_0→room_1→room_2 = 2 hops)
+    const shortOutput = buildValidTopologyOutput();
+    const origEscape = shortOutput.rooms.find(r => r.id === 'room_7');
+    if (origEscape) origEscape.archetype = 'cargo' as const;
+    const newEscape2 = shortOutput.rooms.find(r => r.id === 'room_2');
+    if (newEscape2) newEscape2.archetype = 'escape' as const;
+    shortOutput.escapeRoomId = 'room_2';
+    const shortResult = topologyLayer.validate(asSchemaValidTopologyOutput(shortOutput), baseContext);
+    expect(shortResult.success).toBe(false);
+    expect((shortResult.errors ?? []).join(' ')).toContain('Entry-to-escape distance');
+
+    // Distance exactly 3: set escape to room_3 (room_0→room_1→room_2→room_3 = 3 hops)
+    const dist3Output = buildValidTopologyOutput();
+    const origEscape3 = dist3Output.rooms.find(r => r.id === 'room_7');
+    if (origEscape3) origEscape3.archetype = 'cargo' as const;
+    const newEscape3 = dist3Output.rooms.find(r => r.id === 'room_3');
+    if (newEscape3) newEscape3.archetype = 'escape' as const;
+    dist3Output.escapeRoomId = 'room_3';
+    const dist3Result = topologyLayer.validate(asSchemaValidTopologyOutput(dist3Output), baseContext);
+    expect(dist3Result.success).toBe(true);
+  });
+
+  it('[I] archetype violation error message contains the archetype name and count', () => {
+    const output = buildValidTopologyOutput();
+    // Make utility appear 4 times: room_1 + room_2, room_3, room_5 → 4 total
+    output.rooms[2].archetype = 'utility' as const;
+    output.rooms[3].archetype = 'utility' as const;
+    output.rooms[5].archetype = 'utility' as const;
+    const result = topologyLayer.validate(asSchemaValidTopologyOutput(output), baseContext);
+    expect(result.success).toBe(false);
+    const errStr = (result.errors ?? []).join(' ');
+    expect(errStr).toContain('utility');
+    expect(errStr).toMatch(/4/);
+  });
+
+  it('[E] three locked rooms produce a lock count error', () => {
+    const output = buildValidTopologyOutput();
+    // room_4 already locked; add 2 more
+    output.rooms[2].lockedBy = 'keycard_1';
+    output.rooms[3].lockedBy = 'keycard_2';
+    const result = topologyLayer.validate(asSchemaValidTopologyOutput(output), baseContext);
+    expect(result.success).toBe(false);
+    expect((result.errors ?? []).join(' ')).toContain('Too many locked rooms');
+  });
+
+  it('[S] standard valid topology passes all new validators with default fixture', () => {
+    // Default: 8 rooms, 1 locked door, no archetype repeated > 3, distance=7
+    const result = topologyLayer.validate(asSchemaValidTopologyOutput(buildValidTopologyOutput()), baseContext);
+    expect(result.success).toBe(true);
+    expect(result.errors).toBeUndefined();
+  });
+});

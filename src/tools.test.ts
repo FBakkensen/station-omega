@@ -415,3 +415,348 @@ describe('createGameToolSets', () => {
     }
   });
 });
+
+describe('difficulty clamping via attempt_action', () => {
+  it('[Z] zero active failures — resolved failure does not raise difficulty floor', async () => {
+    const { context } = createTestGameContext();
+    const failure = context.station.rooms.get('room_0')?.systemFailures[0];
+    if (!failure) throw new Error('Expected failure fixture');
+    failure.challengeState = 'resolved';
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test zero-failure floor', domain: 'tech', difficulty: 'trivial',
+        relevant_items: [], environmental_factors: [],
+      });
+      expect(result.difficulty_used).toBe('trivial');
+      expect(result.difficulty_clamped).toBeUndefined();
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[O] one active failure floors trivial difficulty to easy', async () => {
+    const { context } = createTestGameContext();
+    // room_0 has exactly one active failure by default (challengeState='detected')
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test single-failure floor', domain: 'tech', difficulty: 'trivial',
+        relevant_items: [], environmental_factors: [],
+      });
+      expect(result.difficulty_used).toBe('easy');
+      const clamped = result.difficulty_clamped as Record<string, unknown>;
+      expect(clamped.from).toBe('trivial');
+      expect(clamped.to).toBe('easy');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[M] multiple active failures floor trivial difficulty to moderate', async () => {
+    const { context } = createTestGameContext();
+    const room = context.station.rooms.get('room_0');
+    if (!room) throw new Error('Expected room_0 fixture');
+    room.systemFailures.push({
+      systemId: 'coolant_loop', status: 'failing', failureMode: 'leak', severity: 1,
+      challengeState: 'detected', requiredMaterials: [], requiredSkill: 'tech',
+      difficulty: 'easy', minutesUntilCascade: 20, cascadeTarget: null,
+      hazardPerMinute: 0.1, diagnosisHint: 'Coolant drip.', technicalDetail: 'Flow sensor cavitation.',
+      mitigationPaths: ['replace valve'],
+    });
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test multi-failure floor', domain: 'tech', difficulty: 'trivial',
+        relevant_items: [], environmental_factors: [],
+      });
+      expect(result.difficulty_used).toBe('moderate');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[B] proficiency caps extreme difficulty at hard boundary', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test proficiency cap', domain: 'tech', difficulty: 'extreme',
+        relevant_items: [], environmental_factors: [],
+      });
+      expect(result.difficulty_used).toBe('hard');
+      const clamped = result.difficulty_clamped as Record<string, unknown>;
+      expect(clamped.from).toBe('extreme');
+      expect(clamped.to).toBe('hard');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[I] difficulty_clamped has from and to fields when difficulty is adjusted', async () => {
+    const { context } = createTestGameContext();
+    // 1 active failure floors trivial → easy (adjusted=true)
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test clamped field contract', domain: 'tech', difficulty: 'trivial',
+        relevant_items: [], environmental_factors: [],
+      });
+      const clamped = result.difficulty_clamped as Record<string, string> | undefined;
+      expect(typeof clamped).toBe('object');
+      expect(typeof clamped?.from).toBe('string');
+      expect(typeof clamped?.to).toBe('string');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[E] failed challenge state excludes failure from difficulty floor', async () => {
+    const { context } = createTestGameContext();
+    const failure = context.station.rooms.get('room_0')?.systemFailures[0];
+    if (!failure) throw new Error('Expected failure fixture');
+    failure.challengeState = 'failed';
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test failed exclusion', domain: 'medical', difficulty: 'trivial',
+        relevant_items: [], environmental_factors: [],
+      });
+      expect(result.difficulty_used).toBe('trivial');
+      expect(result.difficulty_clamped).toBeUndefined();
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[S] standard moderate difficulty passes through unchanged', async () => {
+    const { context } = createTestGameContext();
+    // 1 active failure → floor=easy(1), tech proficiency → cap=hard(3), moderate(2) unchanged
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'test standard moderate', domain: 'tech', difficulty: 'moderate',
+        relevant_items: [], environmental_factors: [],
+      });
+      expect(result.difficulty_used).toBe('moderate');
+      expect(result.difficulty_clamped).toBeUndefined();
+    } finally { randomSpy.mockRestore(); }
+  });
+});
+
+describe('auto-complete objectives via tools', () => {
+  it('[Z] no auto-complete when all objectives are already completed', async () => {
+    const { context } = createTestGameContext();
+    context.station.objectives.completed = true;
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      expect(result.objective_update).toBeUndefined();
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[O] single successful repair auto-completes the current objective step', async () => {
+    const { context } = createTestGameContext();
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      expect(result.success).toBe(true);
+      expect(typeof result.objective_update).toBe('string');
+      expect(result.objective_update as string).toContain('STEP COMPLETE');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[M] multi-step sequence: repair then move completes all objectives', async () => {
+    const { context } = createTestGameContext();
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    // Complete step_0 via repair
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      // Add keycard and move to room_1 for step_1
+      context.state.inventory.push('item_keycard');
+      const moveResult = await runTool(tools.all as Record<string, unknown>, 'move_to', {
+        room: 'Escape Gantry',
+      });
+      expect(typeof moveResult.objective_update).toBe('string');
+      expect(moveResult.objective_update as string).toContain('OBJECTIVE COMPLETE');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[B] completing the final objective step sets won to true', async () => {
+    const { context } = createTestGameContext();
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      context.state.inventory.push('item_keycard');
+      await runTool(tools.all as Record<string, unknown>, 'move_to', { room: 'Escape Gantry' });
+      expect(context.state.won).toBe(true);
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[I] objective_update field is present in repair_system result contract', async () => {
+    const { context } = createTestGameContext();
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      // Field exists and is a string when step completes
+      expect(result).toHaveProperty('objective_update');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[E] missing required item blocks objective step auto-completion on repair', async () => {
+    const { context } = createTestGameContext();
+    // Add item requirement to step_0 that player doesn't have
+    context.station.objectives.steps[0].requiredItemId = 'item_keycard';
+    // Engineer starts with only 'multitool', no keycard
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const result = await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      expect(result.success).toBe(true);
+      // No completion because required item missing
+      expect(result.objective_update).toBeUndefined();
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[S] complete_objective is a safe no-op after auto-completion fires', async () => {
+    const { context } = createTestGameContext();
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    // First auto-complete via repair
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      // Step_0 is now completed; try manual complete_objective
+      const result = await runTool(tools.all as Record<string, unknown>, 'complete_objective', {
+        step_description: 'Manual completion after auto-complete.',
+      });
+      // Should not throw; result should be some valid response
+      expect(result).toBeTypeOf('object');
+    } finally { randomSpy.mockRestore(); }
+  });
+});
+
+describe('moral choice detection via tools', () => {
+  it('[Z] non-triggering tool calls do not record any moral choices', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'look_around');
+    expect(context.state.moralProfile.choices.length).toBe(0);
+  });
+
+  it('[O] single successful offer_mercy interaction records mercy with magnitude 2', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
+        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'spare them', tone: 'calm',
+      });
+      expect(context.state.moralProfile.tendencies.mercy).toBe(2);
+      expect(context.state.moralProfile.choices[0]?.tendency).toBe('mercy');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[M] multiple mercy triggers in the same turn are deduplicated', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
+        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'first time', tone: 'calm',
+      });
+      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
+        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'second time', tone: 'calm',
+      });
+      // alreadyThisTurn('mercy') prevents double recording
+      expect(context.state.moralProfile.choices.length).toBe(1);
+      expect(context.state.moralProfile.tendencies.mercy).toBe(2);
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[B] repairing a non-objective system records sacrifice at exactly magnitude 1', async () => {
+    const { context } = createTestGameContext();
+    // Advance past step_0 so power_relay is no longer the objective system
+    context.station.objectives.currentStepIndex = 1;
+    context.station.objectives.steps[0].completed = true;
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      expect(context.state.moralProfile.tendencies.sacrifice).toBe(1);
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[I] moral choice record contains required turn, tendency, and description fields', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
+        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'spare them', tone: 'calm',
+      });
+      const choice = context.state.moralProfile.choices[0];
+      expect(choice).toBeDefined();
+      expect(typeof choice.turn).toBe('number');
+      expect(typeof choice.tendency).toBe('string');
+      expect(typeof choice.description).toBe('string');
+      expect(typeof choice.magnitude).toBe('number');
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[E] failed NPC interaction does not record moral choice', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    // Mock high roll → failure (roll=100, any target < 100 → failure)
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
+        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'please', tone: 'desperate',
+      });
+      expect(context.state.moralProfile.choices.length).toBe(0);
+    } finally { randomSpy.mockRestore(); }
+  });
+
+  it('[S] successful negotiate interaction records mercy with standard magnitude 1', async () => {
+    const { context } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
+        approach: 'negotiate', target_npc: 'npc_0', leverage: 'logic', tone: 'calm',
+      });
+      expect(context.state.moralProfile.tendencies.mercy).toBe(1);
+    } finally { randomSpy.mockRestore(); }
+  });
+});

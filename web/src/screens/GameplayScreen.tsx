@@ -12,6 +12,7 @@ import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
 import { usePreferences } from '../hooks/usePreferences';
 import { useDevSettings } from '../hooks/useDevSettings';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   extractGameStatus,
   type ConvexGameDoc,
@@ -287,14 +288,16 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
           )}
         </div>
 
-        <NarrativePanel
-          segments={segments}
-          typewriterCards={twCards}
-          choices={choices}
-          onChoice={handleChoice}
-          isStreaming={isStreaming}
-          allFinalized={twAllFinalized}
-        />
+        <ErrorBoundary>
+          <NarrativePanel
+            segments={segments}
+            typewriterCards={twCards}
+            choices={choices}
+            onChoice={handleChoice}
+            isStreaming={isStreaming}
+            allFinalized={twAllFinalized}
+          />
+        </ErrorBoundary>
 
         {streamError && (
           <div className="px-4 py-2 bg-red-900/30 border-t border-red-700 text-red-300 text-xs">

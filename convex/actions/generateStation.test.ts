@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Id } from '../_generated/dataModel';
 import type { Difficulty, CharacterClassId } from '../../src/types.js';
 import type { ProgressStatus } from '../generationProgress.js';
-import { extractHandler } from '../test-utils.js';
+import { extractHandler } from '../test_utils.js';
 
 const dynamicMocks = vi.hoisted(() => ({
   generateStation: vi.fn(),

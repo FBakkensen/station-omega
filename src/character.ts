@@ -114,6 +114,7 @@ export function initializePlayerState(
         fieldSurgeryUsedInRoom: new Set<string>(),
         npcAllies: new Set<string>(),
         missionElapsedMinutes: 0,
+        eventCooldowns: {},
     };
 }
 

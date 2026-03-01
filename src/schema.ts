@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
+export const SEGMENT_TYPES = [
+    'narration', 'dialogue', 'thought', 'station_pa', 'crew_echo', 'diagnostic_readout',
+] as const;
+
 export const GameSegmentSchema = z.object({
-    type: z.enum(['narration', 'dialogue', 'thought', 'station_pa', 'crew_echo', 'diagnostic_readout']),
+    type: z.enum(SEGMENT_TYPES),
     text: z.string(),
     npcId: z.string().nullable().describe('NPC internal ID from the NPC list (e.g. "enemy_room_1"), or null'),
     crewName: z.string().nullable().describe('Crew member full name from the crew roster, or null'),

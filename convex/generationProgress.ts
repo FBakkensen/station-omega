@@ -1,6 +1,16 @@
 import { query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
+export type ProgressStatus =
+  | 'pending'
+  | 'topology'
+  | 'systems'
+  | 'objectives'
+  | 'creative'
+  | 'assembly'
+  | 'complete'
+  | 'error';
+
 /** Get generation progress by ID (reactive — UI subscribes to this). */
 export const get = query({
   args: { id: v.id("generationProgress") },

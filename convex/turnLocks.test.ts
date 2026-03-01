@@ -1,15 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import { acquire, isLocked, release } from "./turnLocks";
+import { extractHandler, type QueryBuilder, createQueryBuilder } from "./test-utils";
 
 type LockDoc = {
   _id: string;
   gameId: Id<"games">;
   lockedAt: number;
-};
-
-type QueryBuilder = {
-  eq: (field: string, value: unknown) => QueryBuilder;
 };
 
 type TurnLocksCtx = {
@@ -31,34 +28,11 @@ type HarnessState = {
   deletedLockIds: string[];
 };
 
-const isLockedHandler = (
-  isLocked as unknown as {
-    _handler: (ctx: TurnLocksCtx, args: { gameId: Id<"games"> }) => Promise<boolean>;
-  }
-)._handler;
+const isLockedHandler = extractHandler<TurnLocksCtx, { gameId: Id<"games"> }, boolean>(isLocked);
 
-const acquireHandler = (
-  acquire as unknown as {
-    _handler: (ctx: TurnLocksCtx, args: { gameId: Id<"games"> }) => Promise<boolean>;
-  }
-)._handler;
+const acquireHandler = extractHandler<TurnLocksCtx, { gameId: Id<"games"> }, boolean>(acquire);
 
-const releaseHandler = (
-  release as unknown as {
-    _handler: (ctx: TurnLocksCtx, args: { gameId: Id<"games"> }) => Promise<null>;
-  }
-)._handler;
-
-function createQueryBuilder(onGameId: (gameId: Id<"games">) => void): QueryBuilder {
-  return {
-    eq: (field: string, value: unknown) => {
-      if (field === "gameId") {
-        onGameId(value as Id<"games">);
-      }
-      return createQueryBuilder(onGameId);
-    },
-  };
-}
+const releaseHandler = extractHandler<TurnLocksCtx, { gameId: Id<"games"> }, null>(release);
 
 function createTurnLocksHarness(initialLocks?: LockDoc[]) {
   const locksByGame = new Map<string, LockDoc>();

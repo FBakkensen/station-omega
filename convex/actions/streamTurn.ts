@@ -223,6 +223,14 @@ export const processAITurn = internalAction({
         rawJsonLength: rawJson.length,
       });
 
+      // ── Post-turn: apply event damage for action-elapsed time ──
+      if (gameCtx.turnElapsedMinutes > 0) {
+        const postEventCtx = tracker.tickActiveEvents(state, gameCtx.turnElapsedMinutes);
+        const postCascadeCtx = tracker.processCascadeEffects(state, stationObj, gameCtx.turnElapsedMinutes);
+        void postEventCtx;
+        void postCascadeCtx;
+      }
+
       // ── Persist state after successful stream ────────────────────────
       state.eventCooldowns = Object.fromEntries(tracker.lastTriggered);
       state.turnCount = turnNumber;

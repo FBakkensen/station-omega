@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from './streamTurn.helpers';
+import { EventTracker } from '../../src/events.js';
+import { createTestState } from '../../test/fixtures/factories.js';
 
 describe('streamTurn helper contracts', () => {
   it('[Z] builds a minimal user-only message when context/history are empty', () => {
@@ -123,5 +125,68 @@ describe('segment validation helpers', () => {
     expect(shouldDowngradeDialogue('dialogue', 'speak with Ari about the plan')).toBe(false);
     // narration never downgraded regardless of input
     expect(shouldDowngradeDialogue('narration', 'repair the relay')).toBe(false);
+  });
+});
+
+describe('EventTracker tickActiveEvents damage application', () => {
+  it('[O] applies HP damage proportional to elapsed minutes for hull_breach', () => {
+    const state = createTestState();
+    const initialHp = state.hp;
+    state.activeEvents = [
+      {
+        type: 'hull_breach',
+        description: 'Hull breach in sector 7',
+        minutesRemaining: 30,
+        effect: 'decompression',
+        resolutionHint: 'Seal the breach',
+      },
+    ];
+
+    const tracker = new EventTracker();
+    const context = tracker.tickActiveEvents(state, 10);
+
+    // hull_breach has damagePerMinute: 0.4 → Math.round(0.4 * 10) = 4 HP damage
+    expect(state.hp).toBe(initialHp - 4);
+    expect(state.metrics.totalDamageTaken).toBe(4);
+    expect(context.length).toBeGreaterThan(0);
+  });
+
+  it('[M] applies zero damage when elapsed minutes is zero', () => {
+    const state = createTestState();
+    const initialHp = state.hp;
+    state.activeEvents = [
+      {
+        type: 'hull_breach',
+        description: 'Hull breach in sector 7',
+        minutesRemaining: 30,
+        effect: 'decompression',
+        resolutionHint: 'Seal the breach',
+      },
+    ];
+
+    const tracker = new EventTracker();
+    tracker.tickActiveEvents(state, 0);
+
+    expect(state.hp).toBe(initialHp);
+  });
+
+  it('[B] caps effective damage to event minutesRemaining when elapsed exceeds duration', () => {
+    const state = createTestState();
+    const initialHp = state.hp;
+    state.activeEvents = [
+      {
+        type: 'hull_breach',
+        description: 'Hull breach in sector 7',
+        minutesRemaining: 5,
+        effect: 'decompression',
+        resolutionHint: 'Seal the breach',
+      },
+    ];
+
+    const tracker = new EventTracker();
+    tracker.tickActiveEvents(state, 100);
+
+    // Only 5 minutes of damage: Math.round(0.4 * 5) = 2 HP
+    expect(state.hp).toBe(initialHp - 2);
   });
 });

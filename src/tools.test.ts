@@ -661,6 +661,25 @@ describe('auto-complete objectives via tools', () => {
       expect(result).toBeTypeOf('object');
     } finally { randomSpy.mockRestore(); }
   });
+
+  it('[P] autoCheckObjectiveCompletion does not set state.won on final step', async () => {
+    const { context } = createTestGameContext();
+    // Make step_0 the only step so autoCheckObjectiveCompletion triggers obj.completed
+    context.station.objectives.steps = [context.station.objectives.steps[0]];
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+      // autoCheckObjectiveCompletion should mark objectives as completed...
+      expect(context.station.objectives.completed).toBe(true);
+      // ...but should NOT set state.won (only move_to escape room does that)
+      expect(context.state.won).toBe(false);
+    } finally { randomSpy.mockRestore(); }
+  });
 });
 
 describe('moral choice detection via tools', () => {

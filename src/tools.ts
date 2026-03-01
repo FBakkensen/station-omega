@@ -123,7 +123,6 @@ function autoCheckObjectiveCompletion(
 
         if (obj.currentStepIndex >= obj.steps.length) {
             obj.completed = true;
-            state.won = true;
             return 'OBJECTIVE COMPLETE: All steps done! Mission complete.';
         }
         const nextStep = obj.steps[obj.currentStepIndex];
@@ -404,6 +403,14 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             for (const id of availableItems) state.revealedItems.add(id);
 
             const completion = autoCheckObjectiveCompletion(state, station);
+
+            // Post-completion win check: handle edge case where autoCheckObjectiveCompletion
+            // completes the final step during this move to the escape room
+            if (targetId === station.escapeRoomId && station.objectives.completed) {
+                state.gameOver = true;
+                state.won = true;
+                state.metrics.won = true;
+            }
 
             return JSON.stringify({
                 success: true,

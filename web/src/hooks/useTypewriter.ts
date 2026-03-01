@@ -66,7 +66,7 @@ function snapshotCards(source: Map<number, CardRevealState>): Map<number, Typewr
 }
 
 /**
- * Typewriter reveal hook using requestAnimationFrame.
+ * Typewriter reveal hook using setTimeout.
  *
  * Each segment gets its own card with independent reveal state.
  * Header spans are always fully revealed. Body text reveals gradually.
@@ -103,9 +103,7 @@ export function useTypewriter(
       for (const card of cardsRef.current.values()) {
         if (card.finalized) continue;
 
-        // Clamp dt to avoid jumps on tab switch
-        const clampedDt = Math.min(dt, 0.1);
-        const charsToAdd = card.revealRate * clampedDt;
+        const charsToAdd = card.revealRate * dt;
         const newRevealed = Math.min(
           card.revealedChars + charsToAdd,
           card.revealAllowedChars,
@@ -132,7 +130,7 @@ export function useTypewriter(
       syncSnapshot();
 
       if (anyActive) {
-        animFrameRef.current = requestAnimationFrame(() => { tickRef.current(); });
+        animFrameRef.current = window.setTimeout(() => { tickRef.current(); }, 16);
       } else {
         animFrameRef.current = 0;
       }
@@ -143,7 +141,7 @@ export function useTypewriter(
   const ensureRunning = useCallback(() => {
     if (animFrameRef.current === 0) {
       lastFrameRef.current = performance.now();
-      animFrameRef.current = requestAnimationFrame(() => { tickRef.current(); });
+      animFrameRef.current = window.setTimeout(() => { tickRef.current(); }, 16);
     }
   }, []);
 
@@ -151,7 +149,7 @@ export function useTypewriter(
   useEffect(() => {
     return () => {
       if (animFrameRef.current !== 0) {
-        cancelAnimationFrame(animFrameRef.current);
+        clearTimeout(animFrameRef.current);
         animFrameRef.current = 0;
       }
     };
@@ -219,7 +217,7 @@ export function useTypewriter(
       card.finalized = true;
     }
     if (animFrameRef.current !== 0) {
-      cancelAnimationFrame(animFrameRef.current);
+      clearTimeout(animFrameRef.current);
       animFrameRef.current = 0;
     }
     syncSnapshot();

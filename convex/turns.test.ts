@@ -16,6 +16,7 @@ type LockDoc = {
 type StartArgs = {
   gameId: Id<"games">;
   playerInput: string;
+  modelId?: string;
 };
 
 type IsProcessingArgs = {
@@ -306,6 +307,121 @@ describe("turn lifecycle safety behavior", () => {
     await expect(
       isProcessingHandler(staleHarness.ctx, { gameId: "game-1" as Id<"games"> }),
     ).resolves.toBe(false);
+
+    nowSpy.mockRestore();
+  });
+});
+
+describe("modelId allowlist validation", () => {
+  it("[Z] omits modelId from scheduled payload when none is provided", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+    const { ctx, state } = createTurnsHarness({
+      game: { isOver: false, turnCount: 0 },
+      lock: null,
+    });
+
+    const result = await startHandler(ctx, makeArgs());
+
+    expect(result).toEqual({ ok: true, turnNumber: 1 });
+    const payload = state.scheduled[0]?.payload as Record<string, unknown>;
+    expect(payload.modelId).toBeUndefined();
+
+    nowSpy.mockRestore();
+  });
+
+  it("[O] forwards a single valid modelId to the scheduled action", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+    const { ctx, state } = createTurnsHarness({
+      game: { isOver: false, turnCount: 0 },
+      lock: null,
+    });
+
+    const result = await startHandler(ctx, makeArgs({ modelId: "google/gemini-3-flash-preview" }));
+
+    expect(result).toEqual({ ok: true, turnNumber: 1 });
+    const payload = state.scheduled[0]?.payload as Record<string, unknown>;
+    expect(payload.modelId).toBe("google/gemini-3-flash-preview");
+
+    nowSpy.mockRestore();
+  });
+
+  it("[M] rejects each invalid modelId independently across multiple calls", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+    const harness1 = createTurnsHarness({ game: { isOver: false, turnCount: 0 }, lock: null });
+    const harness2 = createTurnsHarness({ game: { isOver: false, turnCount: 1 }, lock: null });
+
+    const r1 = await startHandler(harness1.ctx, makeArgs({ modelId: "evil/expensive-model" }));
+    const r2 = await startHandler(harness2.ctx, makeArgs({ modelId: "another/bad-model" }));
+
+    expect(r1).toEqual({ ok: false, error: "Invalid model" });
+    expect(r2).toEqual({ ok: false, error: "Invalid model" });
+    expect(harness1.state.scheduled).toHaveLength(0);
+    expect(harness2.state.scheduled).toHaveLength(0);
+
+    nowSpy.mockRestore();
+  });
+
+  it("[B] rejects a modelId that is a substring of a valid ID", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+    const { ctx, state } = createTurnsHarness({
+      game: { isOver: false, turnCount: 0 },
+      lock: null,
+    });
+
+    const result = await startHandler(ctx, makeArgs({ modelId: "google/gemini-3-flash" }));
+
+    expect(result).toEqual({ ok: false, error: "Invalid model" });
+    expect(state.scheduled).toHaveLength(0);
+
+    nowSpy.mockRestore();
+  });
+
+  it("[I] preserves the ok/error response contract when model is invalid", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+    const { ctx } = createTurnsHarness({
+      game: { isOver: false, turnCount: 0 },
+      lock: null,
+    });
+
+    const result = await startHandler(ctx, makeArgs({ modelId: "invalid" }));
+
+    expect(result).toHaveProperty("ok", false);
+    expect(result).toHaveProperty("error");
+    expect(Object.keys(result).sort()).toEqual(["error", "ok"]);
+
+    nowSpy.mockRestore();
+  });
+
+  it("[E] rejects an empty string modelId", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+    const { ctx, state } = createTurnsHarness({
+      game: { isOver: false, turnCount: 0 },
+      lock: null,
+    });
+
+    const result = await startHandler(ctx, makeArgs({ modelId: "" }));
+
+    expect(result).toEqual({ ok: false, error: "Invalid model" });
+    expect(state.scheduled).toHaveLength(0);
+
+    nowSpy.mockRestore();
+  });
+
+  it("[S] accepts each allowlisted model ID in standard flow", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
+
+    for (const validId of ["google/gemini-3-flash-preview", "google/gemini-3.1-flash-lite-preview"]) {
+      const { ctx, state } = createTurnsHarness({
+        game: { isOver: false, turnCount: 0 },
+        lock: null,
+      });
+
+      const result = await startHandler(ctx, makeArgs({ modelId: validId }));
+
+      expect(result).toEqual({ ok: true, turnNumber: 1 });
+      const payload = state.scheduled[0]?.payload as Record<string, unknown>;
+      expect(payload.modelId).toBe(validId);
+    }
 
     nowSpy.mockRestore();
   });

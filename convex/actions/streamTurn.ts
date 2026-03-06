@@ -55,6 +55,7 @@ export const processAITurn = internalAction({
       // ── Dynamic imports (ESM from src/) ──────────────────────────────
       const { OpenRouterAITextClient } = await import("../../src/io/openrouter-ai-client.js");
       const { GAME_MASTER_MODEL_ID } = await import("../../src/models.js");
+      const { isValidGameMasterModelId } = await import("../../src/model-catalog.js");
       const { createGameToolSets } = await import("../../src/tools.js");
       const { buildOrchestratorPrompt } = await import("../../src/prompt.js");
       const { buildTurnContext } = await import("../../src/turn-context.js");
@@ -167,9 +168,19 @@ export const processAITurn = internalAction({
       // Steps 0–10: tools available; step 11: toolChoice 'none' forces JSON.
       const MAX_TOOL_STEPS = 11;
 
+      // Defense-in-depth: normalize invalid modelId to default
+      let effectiveModelId = GAME_MASTER_MODEL_ID;
+      if (args.modelId) {
+        if (isValidGameMasterModelId(args.modelId)) {
+          effectiveModelId = args.modelId;
+        } else {
+          console.warn("[processAITurn] Invalid modelId rejected, using default", { modelId: args.modelId });
+        }
+      }
+
       console.time("[processAITurn] AI streaming");
       const result = aiClient.streamStructuredObject({
-        modelId: args.modelId ?? GAME_MASTER_MODEL_ID,
+        modelId: effectiveModelId,
         system: systemPrompt,
         messages,
         tools: toolSets.all,

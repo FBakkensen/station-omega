@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { isValidGameMasterModelId } from "../src/model-catalog.js";
 
 /**
  * Start a new turn — validates state, acquires lock, schedules AI processing.
@@ -21,6 +22,12 @@ export const start = mutation({
     const game = await ctx.db.get(args.gameId);
     if (!game) { console.error("[turns.start] Game not found"); return { ok: false as const, error: "Game not found" }; }
     if (game.isOver) { console.warn("[turns.start] Game is over"); return { ok: false as const, error: "Game is over" }; }
+
+    // Validate modelId against allowlist
+    if (args.modelId !== undefined && !isValidGameMasterModelId(args.modelId)) {
+      console.warn("[turns.start] Invalid model ID rejected", { modelId: args.modelId });
+      return { ok: false as const, error: "Invalid model" };
+    }
 
     // Check turn lock
     const existingLock = await ctx.db

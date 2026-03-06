@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GAME_MASTER_MODEL_ID, GAME_MASTER_MODELS } from '../../../src/models.js';
+import { GAME_MASTER_MODEL_ID, GAME_MASTER_MODELS } from '../../../src/model-catalog.js';
 
 const STORAGE_KEY = 'station-omega-preferences';
 
@@ -48,15 +48,19 @@ export function usePreferences() {
   const [prefs, setPrefs] = useState(loadPreferences);
 
   const setSoundEnabled = (enabled: boolean) => {
-    const next = { ...prefs, soundEnabled: enabled };
-    setPrefs(next);
-    savePreferences(next);
+    setPrefs(prev => {
+      const next = { ...prev, soundEnabled: enabled };
+      savePreferences(next);
+      return next;
+    });
   };
 
   const setGameMasterModelId = (modelId: string) => {
-    const next = { ...prefs, gameMasterModelId: modelId };
-    setPrefs(next);
-    savePreferences(next);
+    setPrefs(prev => {
+      const next = { ...prev, gameMasterModelId: modelId };
+      savePreferences(next);
+      return next;
+    });
   };
 
   return {

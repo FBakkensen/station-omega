@@ -40,7 +40,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   const stationData = station?.data ?? null;
   const missionElapsedMinutes = game?.state?.missionElapsedMinutes ?? 0;
 
-  const { gameMasterModelId } = usePreferences();
+  const { gameMasterModelId, soundEnabled: initialSound, setSoundEnabled: persistSound } = usePreferences();
 
   const streaming = useStreamingTurn({
     gameId,
@@ -63,7 +63,6 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   }, []);
   const ttsAvailable = ttsProxyUrl !== null;
   const devSettings = useDevSettings();
-  const { soundEnabled: initialSound, setSoundEnabled: persistSound } = usePreferences();
   const [userSoundEnabled, setUserSoundEnabled] = useState(initialSound);
   const ttsEnabled = ttsAvailable && !devSettings.forceMute && userSoundEnabled;
 

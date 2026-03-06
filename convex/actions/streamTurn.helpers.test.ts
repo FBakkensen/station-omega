@@ -186,7 +186,7 @@ describe('EventTracker tickActiveEvents damage application', () => {
     const tracker = new EventTracker();
     tracker.tickActiveEvents(state, 5);
 
-    // Both events should apply damage; HP should be lower than initial
+    // hull_breach is damaging (power_failure is not); HP should be lower than initial
     expect(state.hp).toBeLessThan(initialHp);
   });
 

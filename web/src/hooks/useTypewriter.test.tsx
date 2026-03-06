@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { useTypewriter } from './useTypewriter';
 import { makeSegment } from './__test-support__/makeSegment';
 
@@ -16,10 +16,6 @@ vi.mock('../engine/segmentStyles', () => ({
 }));
 
 describe('useTypewriter reveal contracts', () => {
-  let nowMs: number;
-  let rafId: number;
-  let pendingTimers: Map<number, ReturnType<typeof setTimeout>>;
-
   const advance = (ms: number) => {
     act(() => {
       vi.advanceTimersByTime(ms);
@@ -28,34 +24,10 @@ describe('useTypewriter reveal contracts', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    nowMs = 0;
-    rafId = 0;
-    pendingTimers = new Map();
-
-    vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
-    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-      rafId += 1;
-      const id = rafId;
-      const timer = setTimeout(() => {
-        nowMs += 16;
-        cb(nowMs);
-      }, 16);
-      pendingTimers.set(id, timer);
-      return id;
-    });
-    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
-      const timer = pendingTimers.get(id);
-      if (timer) {
-        clearTimeout(timer);
-        pendingTimers.delete(id);
-      }
-    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
   it('[Z] starts with zero cards and reports all-finalized for empty state', () => {

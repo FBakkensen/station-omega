@@ -1,3 +1,4 @@
+import { StrictMode, createElement, type PropsWithChildren } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -95,5 +96,25 @@ describe('usePreferences functional state updates', () => {
     const stored = JSON.parse(raw as string) as Record<string, unknown>;
     expect(stored.soundEnabled).toBe(true);
     expect(stored.gameMasterModelId).toBe('google/gemini-3.1-flash-lite-preview');
+  });
+
+  it('[S] persists a standard committed update once under StrictMode', () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const wrapper = ({ children }: PropsWithChildren) => createElement(StrictMode, null, children);
+
+    const { result } = renderHook(() => usePreferences(), { wrapper });
+
+    act(() => {
+      result.current.setSoundEnabled(true);
+    });
+
+    expect(result.current.soundEnabled).toBe(true);
+    expect(setItemSpy).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('station-omega-preferences')).toBe(
+      JSON.stringify({
+        soundEnabled: true,
+        gameMasterModelId: 'google/gemini-3-flash-preview',
+      }),
+    );
   });
 });

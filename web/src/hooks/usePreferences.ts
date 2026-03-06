@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GAME_MASTER_MODEL_ID, GAME_MASTER_MODELS } from '../../../src/model-catalog.js';
 
 const STORAGE_KEY = 'station-omega-preferences';
@@ -46,21 +46,22 @@ function savePreferences(prefs: Preferences): void {
 
 export function usePreferences() {
   const [prefs, setPrefs] = useState(loadPreferences);
+  const hasCommittedRef = useRef(false);
+
+  useEffect(() => {
+    if (!hasCommittedRef.current) {
+      hasCommittedRef.current = true;
+      return;
+    }
+    savePreferences(prefs);
+  }, [prefs]);
 
   const setSoundEnabled = (enabled: boolean) => {
-    setPrefs(prev => {
-      const next = { ...prev, soundEnabled: enabled };
-      savePreferences(next);
-      return next;
-    });
+    setPrefs(prev => ({ ...prev, soundEnabled: enabled }));
   };
 
   const setGameMasterModelId = (modelId: string) => {
-    setPrefs(prev => {
-      const next = { ...prev, gameMasterModelId: modelId };
-      savePreferences(next);
-      return next;
-    });
+    setPrefs(prev => ({ ...prev, gameMasterModelId: modelId }));
   };
 
   return {

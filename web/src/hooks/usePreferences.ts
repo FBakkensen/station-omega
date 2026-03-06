@@ -1,13 +1,18 @@
 import { useState } from 'react';
+import { GAME_MASTER_MODEL_ID, GAME_MASTER_MODELS } from '../../../src/models.js';
 
 const STORAGE_KEY = 'station-omega-preferences';
 
+export { GAME_MASTER_MODELS };
+
 interface Preferences {
   soundEnabled: boolean;
+  gameMasterModelId: string;
 }
 
 const DEFAULTS: Preferences = {
   soundEnabled: false,
+  gameMasterModelId: GAME_MASTER_MODEL_ID,
 };
 
 function loadPreferences(): Preferences {
@@ -17,7 +22,13 @@ function loadPreferences(): Preferences {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed === 'object' && parsed !== null && 'soundEnabled' in parsed) {
       const p = parsed as Record<string, unknown>;
-      return { soundEnabled: p.soundEnabled === true };
+      return {
+        soundEnabled: p.soundEnabled === true,
+        gameMasterModelId:
+          typeof p.gameMasterModelId === 'string' && GAME_MASTER_MODELS.some(m => m.id === p.gameMasterModelId)
+            ? p.gameMasterModelId
+            : DEFAULTS.gameMasterModelId,
+      };
     }
     return DEFAULTS;
   } catch {
@@ -34,12 +45,24 @@ function savePreferences(prefs: Preferences): void {
 }
 
 export function usePreferences() {
-  const [soundEnabled, setSoundEnabledState] = useState(() => loadPreferences().soundEnabled);
+  const [prefs, setPrefs] = useState(loadPreferences);
 
   const setSoundEnabled = (enabled: boolean) => {
-    setSoundEnabledState(enabled);
-    savePreferences({ soundEnabled: enabled });
+    const next = { ...prefs, soundEnabled: enabled };
+    setPrefs(next);
+    savePreferences(next);
   };
 
-  return { soundEnabled, setSoundEnabled } as const;
+  const setGameMasterModelId = (modelId: string) => {
+    const next = { ...prefs, gameMasterModelId: modelId };
+    setPrefs(next);
+    savePreferences(next);
+  };
+
+  return {
+    soundEnabled: prefs.soundEnabled,
+    setSoundEnabled,
+    gameMasterModelId: prefs.gameMasterModelId,
+    setGameMasterModelId,
+  } as const;
 }

@@ -10,6 +10,7 @@ export const start = mutation({
   args: {
     gameId: v.id("games"),
     playerInput: v.string(),
+    modelId: v.optional(v.string()),
   },
   returns: v.union(
     v.object({ ok: v.literal(true), turnNumber: v.number() }),
@@ -68,6 +69,7 @@ export const start = mutation({
       gameId: args.gameId,
       playerInput: args.playerInput,
       turnNumber,
+      ...(args.modelId ? { modelId: args.modelId } : {}),
     });
 
     console.debug("[turns.start] processAITurn scheduled");

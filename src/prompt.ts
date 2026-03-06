@@ -348,7 +348,7 @@ ${buildEndingsSection()}
 - Items must be narratively described before I can pick them up.
 - Before resolving any action, consider my class, inventory, active events, system states, and health.
 - Before calling a tool, write a brief line that narratively sets up the action.
-- I start in: ${station.rooms.get(station.entryRoomId)?.name ?? station.entryRoomId}.
+- I start in: ${station.rooms.get(station.entryRoomId)?.name ?? station.entryRoomId}. Do NOT call move_to on the opening turn — stay in this room and explore it first.
 - dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction.
 - Every turn must advance or block a technical objective with explicit reason.
 

@@ -27,6 +27,7 @@ export const processAITurn = internalAction({
     gameId: v.id("games"),
     playerInput: v.string(),
     turnNumber: v.number(),
+    modelId: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -133,6 +134,7 @@ export const processAITurn = internalAction({
         },
         turnElapsedMinutes: 0,
         cascadeAdvancedMinutes: 0,
+        isOpeningTurn: turnNumber === 1,
       };
 
       // Build tools, prompt, context
@@ -167,7 +169,7 @@ export const processAITurn = internalAction({
 
       console.time("[processAITurn] AI streaming");
       const result = aiClient.streamStructuredObject({
-        modelId: GAME_MASTER_MODEL_ID,
+        modelId: args.modelId ?? GAME_MASTER_MODEL_ID,
         system: systemPrompt,
         messages,
         tools: toolSets.all,

@@ -129,7 +129,19 @@ describe('segment validation helpers', () => {
 });
 
 describe('EventTracker tickActiveEvents damage application', () => {
-  it('[O] applies HP damage proportional to elapsed minutes for hull_breach', () => {
+  it('[Z] applies zero damage when no active events exist', () => {
+    const state = createTestState();
+    const initialHp = state.hp;
+    state.activeEvents = [];
+
+    const tracker = new EventTracker();
+    const context = tracker.tickActiveEvents(state, 10);
+
+    expect(state.hp).toBe(initialHp);
+    expect(context).toEqual([]);
+  });
+
+  it('[O] applies HP damage for a single hull_breach event over one interval', () => {
     const state = createTestState();
     const initialHp = state.hp;
     state.activeEvents = [
@@ -151,7 +163,7 @@ describe('EventTracker tickActiveEvents damage application', () => {
     expect(context.length).toBeGreaterThan(0);
   });
 
-  it('[M] applies zero damage when elapsed minutes is zero', () => {
+  it('[M] applies damage across multiple active events simultaneously', () => {
     const state = createTestState();
     const initialHp = state.hp;
     state.activeEvents = [
@@ -162,12 +174,20 @@ describe('EventTracker tickActiveEvents damage application', () => {
         effect: 'decompression',
         resolutionHint: 'Seal the breach',
       },
+      {
+        type: 'power_failure',
+        description: 'Main bus offline',
+        minutesRemaining: 20,
+        effect: 'darkness',
+        resolutionHint: 'Restart main bus',
+      },
     ];
 
     const tracker = new EventTracker();
-    tracker.tickActiveEvents(state, 0);
+    tracker.tickActiveEvents(state, 5);
 
-    expect(state.hp).toBe(initialHp);
+    // Both events should apply damage; HP should be lower than initial
+    expect(state.hp).toBeLessThan(initialHp);
   });
 
   it('[B] caps effective damage to event minutesRemaining when elapsed exceeds duration', () => {
@@ -188,5 +208,60 @@ describe('EventTracker tickActiveEvents damage application', () => {
 
     // Only 5 minutes of damage: Math.round(0.4 * 5) = 2 HP
     expect(state.hp).toBe(initialHp - 2);
+  });
+
+  it('[I] returns context array with shape containing event type description', () => {
+    const state = createTestState();
+    state.activeEvents = [
+      {
+        type: 'hull_breach',
+        description: 'Hull breach detected',
+        minutesRemaining: 10,
+        effect: 'decompression',
+        resolutionHint: 'Seal the breach',
+      },
+    ];
+
+    const tracker = new EventTracker();
+    const context = tracker.tickActiveEvents(state, 5);
+
+    expect(Array.isArray(context)).toBe(true);
+    expect(context.length).toBeGreaterThan(0);
+    expect(context[0]).toBeTypeOf('string');
+  });
+
+  it('[E] tolerates an unknown event type without throwing', () => {
+    const state = createTestState();
+    state.activeEvents = [
+      {
+        type: 'unknown_anomaly' as 'hull_breach',
+        description: 'Strange anomaly',
+        minutesRemaining: 10,
+        effect: 'unknown',
+        resolutionHint: 'Investigate',
+      },
+    ];
+
+    const tracker = new EventTracker();
+    expect(() => tracker.tickActiveEvents(state, 5)).not.toThrow();
+  });
+
+  it('[S] produces a stable deterministic HP result for a standard hull_breach tick', () => {
+    const state = createTestState();
+    state.activeEvents = [
+      {
+        type: 'hull_breach',
+        description: 'Hull breach in sector 7',
+        minutesRemaining: 30,
+        effect: 'decompression',
+        resolutionHint: 'Seal the breach',
+      },
+    ];
+
+    const tracker = new EventTracker();
+    tracker.tickActiveEvents(state, 10);
+
+    // Deterministic: 0.4 * 10 = 4 damage, stable across repeated runs
+    expect(state.hp).toBe(state.maxHp - 4);
   });
 });

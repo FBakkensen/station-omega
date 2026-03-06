@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createGameToolSets } from './tools.js';
 import { createTestGameContext, parseJsonResult } from '../test/fixtures/factories.js';
+import type { SystemFailure } from './types.js';
 
 type ExecutableTool = {
   execute: (args: Record<string, unknown>) => unknown;
@@ -26,6 +27,31 @@ describe('createGameToolSets', () => {
     });
 
     expect(result.error).toBe('Unknown room: "Nowhere Bay".');
+  });
+
+  it('[B] blocks move_to at the opening turn boundary before exploration', async () => {
+    const { context } = createTestGameContext();
+    context.isOpeningTurn = true;
+    const tools = createGameToolSets('engineer', context);
+    const result = await runTool(tools.all as Record<string, unknown>, 'move_to', {
+      room: 'Cargo Hold',
+    });
+
+    expect(result.error).toBe('You just arrived. Explore the current room before moving.');
+    expect(context.state.currentRoom).toBe('room_0');
+  });
+
+  it('[S] allows move_to after the opening turn', async () => {
+    const { context } = createTestGameContext();
+    context.isOpeningTurn = false;
+    context.state.inventory.push('item_keycard');
+    const tools = createGameToolSets('engineer', context);
+    const result = await runTool(tools.all as Record<string, unknown>, 'move_to', {
+      room: 'Escape Gantry',
+    });
+
+    expect(result.success).toBe(true);
+    expect(context.state.currentRoom).toBe('room_1');
   });
 
   it('[O] look_around reveals room loot and returns sidebar-critical fields', async () => {
@@ -147,7 +173,7 @@ describe('createGameToolSets', () => {
     await runTool(tools.all as Record<string, unknown>, 'diagnose_system', {
       system: 'power_relay',
     });
-    const failureBeforeRepair = context.station.rooms.get('room_0')?.systemFailures.find(f => f.systemId === 'power_relay');
+    const failureBeforeRepair = context.station.rooms.get('room_0')?.systemFailures.find((f: SystemFailure) => f.systemId === 'power_relay');
     if (!failureBeforeRepair) throw new Error('Expected power_relay failure fixture');
     const cascadeBeforeRepair = failureBeforeRepair.minutesUntilCascade;
 
@@ -158,7 +184,7 @@ describe('createGameToolSets', () => {
         materials_used: ['item_wire'],
       });
 
-      const failure = context.station.rooms.get('room_0')?.systemFailures.find(f => f.systemId === 'power_relay');
+      const failure = context.station.rooms.get('room_0')?.systemFailures.find((f: SystemFailure) => f.systemId === 'power_relay');
       expect(result.success).toBe(false);
       expect(result.partial).toBe(true);
       expect(result.outcome).toBe('partial_success');
@@ -189,7 +215,7 @@ describe('createGameToolSets', () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
 
-    const failure = context.station.rooms.get('room_0')?.systemFailures.find(f => f.systemId === 'power_relay');
+    const failure = context.station.rooms.get('room_0')?.systemFailures.find((f: SystemFailure) => f.systemId === 'power_relay');
     if (!failure) throw new Error('Expected power_relay failure fixture in room_0');
     failure.challengeState = 'resolved';
     failure.status = 'repaired';
@@ -662,7 +688,7 @@ describe('auto-complete objectives via tools', () => {
     } finally { randomSpy.mockRestore(); }
   });
 
-  it('[P] autoCheckObjectiveCompletion does not set state.won on final step', async () => {
+  it('[I] autoCheckObjectiveCompletion invariant: does not set state.won on final step', async () => {
     const { context } = createTestGameContext();
     // Make step_0 the only step so autoCheckObjectiveCompletion triggers obj.completed
     context.station.objectives.steps = [context.station.objectives.steps[0]];

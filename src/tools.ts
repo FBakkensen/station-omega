@@ -220,6 +220,8 @@ export interface GameContext {
     onChoices: ChoicesCallback;
     turnElapsedMinutes: number;
     cascadeAdvancedMinutes: number;
+    /** When true, move_to is blocked so the player stays in the entry room. */
+    isOpeningTurn?: boolean;
 }
 
 // ─── Tool Sets ──────────────────────────────────────────────────────────────
@@ -335,6 +337,11 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         execute: (args: { room: string }) => {
             const { state, station } = gameCtx;
             if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
+
+            // Block movement on the opening turn — player must explore the entry room first
+            if (gameCtx.isOpeningTurn) {
+                return JSON.stringify({ error: 'You just arrived. Explore the current room before moving.' });
+            }
 
             // Find room by name
             let targetId: string | null = null;

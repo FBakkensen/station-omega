@@ -1,14 +1,24 @@
 import { OpenRouterAITextClient } from './io/openrouter-ai-client.js';
 
-/** Model used for the main game master (tool calling + narrative). */
-export const GAME_MASTER_MODEL_ID = 'google/gemini-3-flash-preview';
-
-/** Model used for creative content generation (structured output only). */
-export const CREATIVE_MODEL_ID = 'anthropic/claude-opus-4.6';
+// Re-export browser-safe catalog (no AI client, no process.env)
+export {
+  GAME_MASTER_MODELS,
+  GAME_MASTER_MODEL_ID,
+  CREATIVE_MODEL_ID,
+  isValidGameMasterModelId,
+} from './model-catalog.js';
+export type { GameMasterModel } from './model-catalog.js';
 
 /** Shared default OpenRouter-backed AI client used by scripts and actions. */
-export const defaultAITextClient = new OpenRouterAITextClient({
-  apiKey: process.env['OPENROUTER_API_KEY'] ?? '',
-  referer: 'https://github.com/station-omega',
-  title: 'Station Omega',
-});
+let _defaultAITextClient: OpenRouterAITextClient | undefined;
+export function getDefaultAITextClient(): OpenRouterAITextClient {
+  if (!_defaultAITextClient) {
+    _defaultAITextClient = new OpenRouterAITextClient({
+      apiKey: process.env['OPENROUTER_API_KEY'] ?? '',
+      referer: 'https://github.com/station-omega',
+      title: 'Station Omega',
+    });
+  }
+  return _defaultAITextClient;
+}
+

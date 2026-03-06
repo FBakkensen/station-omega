@@ -46,12 +46,14 @@ interface UseStreamingTurnOptions {
   gameId: string;
   stationData: StationData | null;
   missionElapsedMinutes: number;
+  modelId?: string;
 }
 
 export function useStreamingTurn({
   gameId,
   stationData,
   missionElapsedMinutes,
+  modelId,
 }: UseStreamingTurnOptions) {
   console.log('[useStreamingTurn] hook called, gameId:', gameId);
   const [state, dispatch] = useReducer(turnReducer, initialState);
@@ -139,6 +141,7 @@ export function useStreamingTurn({
       const result = await startTurnMutation({
         gameId: gameId as Id<"games">,
         playerInput,
+        ...(modelId ? { modelId } : {}),
       });
 
       console.log('[useStreamingTurn] turns.start result:', result);
@@ -156,7 +159,7 @@ export function useStreamingTurn({
         error: err instanceof Error ? err.message : 'Failed to start turn',
       });
     }
-  }, [isStreaming, startTurnMutation, gameId]);
+  }, [isStreaming, startTurnMutation, gameId, modelId]);
 
   // Auto-detect when processing finishes
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { isValidGameMasterModelId } from "../src/model-catalog.js";
 
 /**
  * Start a new turn — validates state, acquires lock, schedules AI processing.
@@ -10,6 +11,7 @@ export const start = mutation({
   args: {
     gameId: v.id("games"),
     playerInput: v.string(),
+    modelId: v.optional(v.string()),
   },
   returns: v.union(
     v.object({ ok: v.literal(true), turnNumber: v.number() }),
@@ -20,6 +22,12 @@ export const start = mutation({
     const game = await ctx.db.get(args.gameId);
     if (!game) { console.error("[turns.start] Game not found"); return { ok: false as const, error: "Game not found" }; }
     if (game.isOver) { console.warn("[turns.start] Game is over"); return { ok: false as const, error: "Game is over" }; }
+
+    // Validate modelId against allowlist
+    if (args.modelId !== undefined && !isValidGameMasterModelId(args.modelId)) {
+      console.warn("[turns.start] Invalid model ID rejected", { modelId: args.modelId });
+      return { ok: false as const, error: "Invalid model" };
+    }
 
     // Check turn lock
     const existingLock = await ctx.db
@@ -68,6 +76,7 @@ export const start = mutation({
       gameId: args.gameId,
       playerInput: args.playerInput,
       turnNumber,
+      ...(args.modelId ? { modelId: args.modelId } : {}),
     });
 
     console.debug("[turns.start] processAITurn scheduled");

@@ -1,4 +1,4 @@
-import { usePreferences } from '../hooks/usePreferences';
+import { usePreferences, GAME_MASTER_MODELS } from '../hooks/usePreferences';
 
 interface TitleScreenProps {
   onNewGame: () => void;
@@ -21,7 +21,14 @@ const TITLE_ART = [
 ];
 
 export function TitleScreen({ onNewGame, onHistory }: TitleScreenProps) {
-  const { soundEnabled, setSoundEnabled } = usePreferences();
+  const { soundEnabled, setSoundEnabled, gameMasterModelId, setGameMasterModelId } = usePreferences();
+
+  const currentModelLabel = GAME_MASTER_MODELS.find(m => m.id === gameMasterModelId)?.label ?? gameMasterModelId;
+  const cycleModel = () => {
+    const idx = GAME_MASTER_MODELS.findIndex(m => m.id === gameMasterModelId);
+    const next = GAME_MASTER_MODELS[(idx + 1) % GAME_MASTER_MODELS.length];
+    setGameMasterModelId(next.id);
+  };
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-12">
@@ -56,15 +63,23 @@ export function TitleScreen({ onNewGame, onHistory }: TitleScreenProps) {
         </button>
       </div>
 
-      {/* Sound Toggle */}
-      <button
-        onClick={() => { setSoundEnabled(!soundEnabled); }}
-        className={`text-xs tracking-wider uppercase transition-colors ${
-          soundEnabled ? 'text-omega-title' : 'text-omega-dim hover:text-omega-text'
-        }`}
-      >
-        {soundEnabled ? 'Sound: ON' : 'Sound: OFF'}
-      </button>
+      {/* Settings */}
+      <div className="flex flex-col items-center gap-2">
+        <button
+          onClick={() => { setSoundEnabled(!soundEnabled); }}
+          className={`text-xs tracking-wider uppercase transition-colors ${
+            soundEnabled ? 'text-omega-title' : 'text-omega-dim hover:text-omega-text'
+          }`}
+        >
+          {soundEnabled ? 'Sound: ON' : 'Sound: OFF'}
+        </button>
+        <button
+          onClick={cycleModel}
+          className="text-xs tracking-wider uppercase transition-colors text-omega-dim hover:text-omega-text"
+        >
+          Model: {currentModelLabel}
+        </button>
+      </div>
 
       {/* Version */}
       <p className="text-omega-dim/50 text-xs">

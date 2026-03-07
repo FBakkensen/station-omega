@@ -10,6 +10,7 @@ import { useTypewriter } from '../hooks/useTypewriter';
 import { useTTS } from '../hooks/useTTS';
 import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
+import { SituationModal } from '../components/modals/SituationModal';
 import { usePreferences } from '../hooks/usePreferences';
 import { useDevSettings } from '../hooks/useDevSettings';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -34,6 +35,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
 
   const [showMap, setShowMap] = useState(false);
   const [showMission, setShowMission] = useState(false);
+  const [showSituation, setShowSituation] = useState(false);
 
   const status = extractGameStatus(game, station);
   const stationName = station?.stationName ?? 'Station Omega';
@@ -204,9 +206,15 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
       } else if (e.key === 'F2') {
         e.preventDefault();
         setShowMission((prev) => !prev);
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        setShowMap(false);
+        setShowMission(false);
+        setShowSituation((prev) => !prev);
       } else if (e.key === 'Escape') {
         setShowMap(false);
         setShowMission(false);
+        setShowSituation(false);
       } else if (e.key === ' ') {
         // Spacebar skips current typewriter card (only when input not focused)
         const active = document.activeElement;
@@ -255,6 +263,13 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
             className="hover:text-omega-text transition-colors"
           >
             [F2] Mission
+          </button>
+          <span>•</span>
+          <button
+            onClick={() => { setShowMap(false); setShowMission(false); setShowSituation(true); }}
+            className="hover:text-omega-text transition-colors"
+          >
+            [F3] Status
           </button>
           {devSettings.enabled && (
             <>
@@ -340,6 +355,13 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
           currentStepIndex={status.objectiveStep - 1}
           isComplete={status.objectivesComplete}
           onClose={() => { setShowMission(false); }}
+        />
+      )}
+
+      {showSituation && (
+        <SituationModal
+          status={status}
+          onClose={() => { setShowSituation(false); }}
         />
       )}
     </div>

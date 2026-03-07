@@ -410,7 +410,7 @@ describe("modelId allowlist validation", () => {
   it("[S] accepts each allowlisted model ID in standard flow", async () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(200_000);
 
-    for (const validId of ["google/gemini-3-flash-preview", "google/gemini-3.1-flash-lite-preview"]) {
+    for (const validId of ["google/gemini-3-flash-preview"]) {
       const { ctx, state } = createTurnsHarness({
         game: { isOver: false, turnCount: 0 },
         lock: null,

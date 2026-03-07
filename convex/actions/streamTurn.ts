@@ -58,6 +58,7 @@ export const processAITurn = internalAction({
       const { GAME_MASTER_MODEL_ID } = await import("../../src/models.js");
       const { isValidGameMasterModelId } = await import("../../src/model-catalog.js");
       const { createGameToolSets } = await import("../../src/tools.js");
+      const { normalizeObjectiveChainWithLegacySupport } = await import("../../src/objectives.js");
       const { buildOrchestratorPrompt } = await import("../../src/prompt.js");
       const { buildTurnContext } = await import("../../src/turn-context.js");
       const { GameResponseSchema } = await import("../../src/schema.js");
@@ -95,6 +96,7 @@ export const processAITurn = internalAction({
       if (game.objectivesOverride) {
         Object.assign(stationObj.objectives, game.objectivesOverride);
       }
+      normalizeObjectiveChainWithLegacySupport(stationObj.objectives);
 
       // Set current room on first turn (entry room)
       if (!state.currentRoom) {
@@ -261,6 +263,7 @@ export const processAITurn = internalAction({
         gameId,
         state: serializedState,
         npcOverrides,
+        objectivesOverride: stationObj.objectives,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         roomOverrides: game.roomOverrides ?? {},
         isOver: state.gameOver,

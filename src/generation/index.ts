@@ -198,6 +198,7 @@ export async function generateStation(
             roomId: s.roomId,
             requiredItemId: s.requiredItemId,
             requiredSystemRepair: s.requiredSystemRepair,
+            revealed: false,
             completed: false,
         })),
         currentStepIndex: 0,

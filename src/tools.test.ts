@@ -650,6 +650,45 @@ describe('auto-complete objectives via tools', () => {
     } finally { randomSpy.mockRestore(); }
   });
 
+  it('[M] hidden future steps complete silently across many reveal-order transitions until the chain reaches them', async () => {
+    const { context } = createTestGameContext();
+    context.station.objectives.steps.splice(1, 0, {
+      id: 'step_1b',
+      description: 'Secure the Ops Keycard in Docking Vestibule.',
+      roomId: 'room_0',
+      requiredItemId: 'item_keycard',
+      requiredSystemRepair: null,
+      revealed: false,
+      completed: false,
+    });
+    context.station.objectives.steps[2].id = 'step_2';
+    context.station.objectives.steps[2].revealed = false;
+    context.state.inventory.push('item_wire');
+    const tools = createGameToolSets('engineer', context);
+
+    await runTool(tools.all as Record<string, unknown>, 'look_around');
+    const pickupResult = await runTool(tools.all as Record<string, unknown>, 'pick_up_item', {
+      item: 'Ops Keycard',
+    });
+
+    expect(pickupResult.objective_update).toBeUndefined();
+    expect(context.station.objectives.steps[1].completed).toBe(true);
+    expect(context.station.objectives.steps[1].revealed).toBe(false);
+    expect(context.station.objectives.currentStepIndex).toBe(0);
+
+    await runTool(tools.all as Record<string, unknown>, 'diagnose_system', { system: 'power_relay' });
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const repairResult = await runTool(tools.all as Record<string, unknown>, 'repair_system', {
+        system: 'power_relay', materials_used: ['item_wire'],
+      });
+
+      expect(repairResult.objective_update).toContain('Secure the Ops Keycard in Docking Vestibule.');
+      expect(context.station.objectives.steps[1].revealed).toBe(true);
+      expect(context.station.objectives.currentStepIndex).toBe(2);
+    } finally { randomSpy.mockRestore(); }
+  });
+
   it('[B] completing the final objective step sets won to true', async () => {
     const { context } = createTestGameContext();
     context.state.inventory.push('item_wire');
@@ -666,7 +705,7 @@ describe('auto-complete objectives via tools', () => {
     } finally { randomSpy.mockRestore(); }
   });
 
-  it('[I] objective_update field is present in repair_system result contract', async () => {
+  it('[I] repair_system exposes structured objective progress alongside the summary string', async () => {
     const { context } = createTestGameContext();
     context.state.inventory.push('item_wire');
     const tools = createGameToolSets('engineer', context);
@@ -676,8 +715,10 @@ describe('auto-complete objectives via tools', () => {
       const result = await runTool(tools.all as Record<string, unknown>, 'repair_system', {
         system: 'power_relay', materials_used: ['item_wire'],
       });
-      // Field exists and is a string when step completes
       expect(result).toHaveProperty('objective_update');
+      expect(result).toHaveProperty('objective_progress');
+      const progress = result.objective_progress as Record<string, unknown>;
+      expect(progress.activeStep).toBeTypeOf('object');
     } finally { randomSpy.mockRestore(); }
   });
 
@@ -720,9 +761,9 @@ describe('auto-complete objectives via tools', () => {
     } finally { randomSpy.mockRestore(); }
   });
 
-  it('[I] autoCheckObjectiveCompletion invariant: does not set state.won on final step', async () => {
+  it('[I] objective sync does not set state.won on the final non-escape step', async () => {
     const { context } = createTestGameContext();
-    // Make step_0 the only step so autoCheckObjectiveCompletion triggers obj.completed
+    // Make step_0 the only step so objective sync marks the mission complete in place.
     context.station.objectives.steps = [context.station.objectives.steps[0]];
     context.state.inventory.push('item_wire');
     const tools = createGameToolSets('engineer', context);
@@ -732,7 +773,7 @@ describe('auto-complete objectives via tools', () => {
       await runTool(tools.all as Record<string, unknown>, 'repair_system', {
         system: 'power_relay', materials_used: ['item_wire'],
       });
-      // autoCheckObjectiveCompletion should mark objectives as completed...
+      // Objective sync should mark objectives as completed...
       expect(context.station.objectives.completed).toBe(true);
       // ...but should NOT set state.won (only move_to escape room does that)
       expect(context.state.won).toBe(false);

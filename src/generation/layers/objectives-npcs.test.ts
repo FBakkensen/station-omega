@@ -149,9 +149,12 @@ describe('objectivesNPCsLayer validation', () => {
   it('[I] includes station context and retry guidance in prompt construction', () => {
     const prompt = objectivesNPCsLayer.buildPrompt(context, ['Room mismatch in step_1']);
     expect(prompt.system).toContain('Objective Design');
+    expect(prompt.system).toContain('strict ordered dependency chain');
+    expect(prompt.system).toContain('Do not write descriptions that spoil future rooms');
     expect(prompt.user).toContain('Fix ALL of them');
     expect(prompt.user).toContain('Room mismatch in step_1');
     expect(prompt.user).toContain('Entry: room_0');
+    expect(prompt.user).toContain('ordered dependency chain');
   });
 
   it('[E] reports invalid room and required item references', () => {

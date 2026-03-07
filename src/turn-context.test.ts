@@ -3,6 +3,13 @@ import type { ActiveEvent } from './types.js';
 import { buildTurnContext } from './turn-context.js';
 import { createTestGameContext } from '../test/fixtures/factories.js';
 
+function setRevealed(
+  step: { completed: boolean } & Record<string, unknown>,
+  revealed: boolean,
+): void {
+  step['revealed'] = revealed;
+}
+
 function makeEvent(overrides: Partial<ActiveEvent> = {}): ActiveEvent {
   return {
     type: 'power_failure',
@@ -155,6 +162,21 @@ describe('buildTurnContext', () => {
     expect(built).toContain('MISSION ELAPSED TIME:');
     expect(built).not.toContain('ENVIRONMENT:');
     expect(built).not.toContain('SYSTEM FAILURES:');
+  });
+
+  it('[E] skips hidden future objectives and keeps pressure on the active revealed step', () => {
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_1';
+    context.station.objectives.currentStepIndex = 1;
+    context.station.objectives.steps[0].completed = false;
+    setRevealed(context.station.objectives.steps[0] as unknown as Record<string, unknown> & { completed: boolean }, true);
+    setRevealed(context.station.objectives.steps[1] as unknown as Record<string, unknown> & { completed: boolean }, false);
+
+    const built = expectContext(buildTurnContext(context.state, context.station));
+
+    expect(built).not.toContain('Reach the Escape Gantry.');
+    expect(built).toContain('OBJECTIVE PRESSURE:');
+    expect(built).toContain('Diagnose the relay fault in Docking Vestibule.');
   });
 
   it('[S] formats standard mission elapsed time with zero-padded hours and minutes', () => {

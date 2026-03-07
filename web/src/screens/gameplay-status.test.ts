@@ -55,8 +55,8 @@ function buildDocs(): { game: ConvexGameDoc; station: ConvexStationDoc } {
         objectives: {
           title: 'Restore Main Relay',
           steps: [
-            { description: 'Diagnose the relay', completed: true },
-            { description: 'Repair the relay', completed: false },
+            { description: 'Diagnose the relay', completed: true, revealed: true },
+            { description: 'Repair the relay', completed: false, revealed: true },
           ],
           currentStepIndex: 1,
           completed: false,
@@ -100,11 +100,12 @@ describe('extractGameStatus', () => {
     };
     const objectives = stationData.objectives;
     if (!objectives) throw new Error('missing objectives fixture');
-    objectives.steps.push({ description: 'Reach escape', completed: false });
+    objectives.steps.push({ description: 'Reach escape', completed: false, revealed: false });
 
     const status = extractGameStatus(game, station);
     expect(status?.inventory).toEqual(['Insulated Wire', 'Ops Keycard', 'Sealant Patch']);
     expect(status?.objectiveTotal).toBe(3);
+    expect(status?.objectiveSteps).toHaveLength(2);
   });
 
   it('[B] handles out-of-range objective index safely', () => {
@@ -113,7 +114,7 @@ describe('extractGameStatus', () => {
     if (!objectives) throw new Error('missing objectives fixture');
     objectives.currentStepIndex = 99;
     const status = extractGameStatus(game, station);
-    expect(status?.objectiveCurrentDesc).toBe('');
+    expect(status?.objectiveCurrentDesc).toBe('Repair the relay');
   });
 
   it('[I] preserves the GameStatusData contract fields used by sidebar', () => {
@@ -147,5 +148,39 @@ describe('extractGameStatus', () => {
 
     const status = extractGameStatus(game, station);
     expect(status?.inventoryKeyFlags).toEqual([false, true]);
+  });
+
+  it('[O] hides unrevealed future steps from the mission checklist', () => {
+    const { game, station } = buildDocs();
+    const objectives = requireStationData(station).objectives;
+    if (!objectives) throw new Error('missing objectives fixture');
+    objectives.steps.push({ description: 'Launch evac shuttle', completed: false, revealed: false });
+
+    const status = extractGameStatus(game, station);
+
+    expect(status?.objectiveCurrentDesc).toBe('Repair the relay');
+    expect(status?.objectiveSteps).toEqual([
+      { description: 'Diagnose the relay', completed: true },
+      { description: 'Repair the relay', completed: false },
+    ]);
+  });
+
+  it('[E] falls back to completed-prefix visibility when revealed flags are missing', () => {
+    const { game, station } = buildDocs();
+    const objectives = requireStationData(station).objectives;
+    if (!objectives) throw new Error('missing objectives fixture');
+    objectives.steps = [
+      { description: 'Diagnose the relay', completed: true },
+      { description: 'Repair the relay', completed: false },
+      { description: 'Launch evac shuttle', completed: false },
+    ];
+
+    const status = extractGameStatus(game, station);
+
+    expect(status?.objectiveSteps).toEqual([
+      { description: 'Diagnose the relay', completed: true },
+      { description: 'Repair the relay', completed: false },
+    ]);
+    expect(status?.objectiveCurrentDesc).toBe('Repair the relay');
   });
 });

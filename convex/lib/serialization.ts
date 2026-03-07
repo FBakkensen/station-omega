@@ -12,6 +12,7 @@ import type {
   Item,
   GameState,
 } from "../../src/types.js";
+import { normalizeObjectiveChainWithLegacySupport } from "../../src/objectives.js";
 
 // ─── Serialized Types ──────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
     rooms,
     npcs,
     items,
-    objectives: data.objectives,
+    objectives: normalizeObjectiveChainWithLegacySupport(data.objectives),
     entryRoomId: data.entryRoomId,
     escapeRoomId: data.escapeRoomId,
     crewRoster: data.crewRoster,

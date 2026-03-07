@@ -19,7 +19,7 @@ export interface ConvexGameDoc {
   };
   objectivesOverride?: {
     title: string;
-    steps: Array<{ description: string; completed: boolean }>;
+    steps: Array<{ description: string; completed: boolean; revealed?: boolean }>;
     currentStepIndex: number;
     completed: boolean;
   };
@@ -56,7 +56,7 @@ export interface ConvexStationDoc {
     arrivalScenario?: { playerCallsign?: string };
     objectives?: {
       title: string;
-      steps: Array<{ description: string; completed: boolean }>;
+      steps: Array<{ description: string; completed: boolean; revealed?: boolean }>;
       currentStepIndex: number;
       completed: boolean;
     };
@@ -102,6 +102,16 @@ export function extractGameStatus(
   const objectives = game.objectivesOverride ?? sData.objectives;
   const steps = objectives?.steps ?? [];
   const currentStepIndex = objectives?.currentStepIndex ?? 0;
+  const visibleSteps = steps.filter((step, index) => {
+    if (typeof step.revealed === 'boolean') {
+      return step.revealed;
+    }
+    return step.completed || index === currentStepIndex;
+  });
+  const currentVisibleStepIndex = objectives?.completed
+    ? visibleSteps.length
+    : visibleSteps.findIndex((step) => !step.completed);
+  const currentVisibleStep = currentVisibleStepIndex >= 0 ? visibleSteps[currentVisibleStepIndex] : null;
 
   return {
     hp: state.hp,
@@ -119,11 +129,11 @@ export function extractGameStatus(
     maxInventory: state.maxInventory,
     activeEvents: state.activeEvents,
     objectiveTitle: objectives?.title ?? 'Unknown',
-    objectiveStep: currentStepIndex + 1,
+    objectiveStep: currentVisibleStepIndex >= 0 ? currentVisibleStepIndex + 1 : visibleSteps.length,
     objectiveTotal: steps.length,
-    objectiveCurrentDesc: steps[currentStepIndex]?.description ?? '',
+    objectiveCurrentDesc: currentVisibleStep?.description ?? '',
     objectivesComplete: objectives?.completed ?? false,
-    objectiveSteps: steps.map((s) => ({
+    objectiveSteps: visibleSteps.map((s) => ({
       description: s.description,
       completed: s.completed,
     })),

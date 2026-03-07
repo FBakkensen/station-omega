@@ -48,7 +48,7 @@ Station Omega is a web-first game with a Bun-powered TypeScript backend/shared e
 
 ## Build, Test, and Development Commands
 - `bun install` installs root dependencies.
-- `bun run dev` starts Convex + web dev servers together.
+- `bun run dev` starts Convex + web dev servers together. Convex dev hot-reloads functions to the cloud deployment while providing a local proxy for the web app.
 - `bun run dev:web` starts only the web app.
 - `bun run dev:convex` starts only Convex dev.
 - `bun run typecheck` runs root `tsc --noEmit` checks.

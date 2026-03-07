@@ -21,11 +21,12 @@ export const generate = internalAction({
       v.literal("medic"),
       v.literal("commander"),
     ),
+    modelId: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const { progressId, difficulty, characterClass } = args;
-    console.info("[generateStation] Starting generation", { progressId, difficulty, characterClass });
+    const { progressId, difficulty, characterClass, modelId } = args;
+    console.info("[generateStation] Starting generation", { progressId, difficulty, characterClass, modelId });
     const progressUpdatePromises: Promise<unknown>[] = [];
 
     try {
@@ -33,10 +34,13 @@ export const generate = internalAction({
       console.debug("[generateStation] Importing modules...");
       const { generateStation } = await import("../../src/generation/index.js");
       const { OpenRouterAITextClient } = await import("../../src/io/openrouter-ai-client.js");
-      const { CREATIVE_MODEL_ID } = await import("../../src/models.js");
+      const { GENERATION_MODEL_ID, isValidGenerationModelId } = await import("../../src/model-catalog.js");
       const { assembleStation } = await import("../../src/assembly.js");
       const { serializeStation } = await import("../lib/serialization.js");
       console.debug("[generateStation] Modules imported");
+
+      const effectiveModelId = modelId && isValidGenerationModelId(modelId) ? modelId : GENERATION_MODEL_ID;
+      console.info("[generateStation] Using model", { modelId: effectiveModelId });
 
       const aiClient = new OpenRouterAITextClient({
         apiKey: process.env.OPENROUTER_API_KEY ?? "",
@@ -75,7 +79,7 @@ export const generate = internalAction({
       console.time("[generateStation] Generation pipeline");
       // Run the generation pipeline
       const { skeleton, creative } = await generateStation(
-        { difficulty, characterClass, aiClient, modelId: CREATIVE_MODEL_ID },
+        { difficulty, characterClass, aiClient, modelId: effectiveModelId },
         onProgress,
       );
       console.timeEnd("[generateStation] Generation pipeline");

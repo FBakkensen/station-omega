@@ -17,6 +17,7 @@ export const start = mutation({
       v.literal("medic"),
       v.literal("commander"),
     ),
+    modelId: v.optional(v.string()),
   },
   returns: v.id("generationProgress"),
   handler: async (ctx, args) => {
@@ -31,6 +32,7 @@ export const start = mutation({
       progressId,
       difficulty: args.difficulty,
       characterClass: args.characterClass,
+      ...(args.modelId ? { modelId: args.modelId } : {}),
     });
 
     return progressId;

@@ -4,6 +4,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useScreenManager } from './hooks/useScreenManager';
 import { useGameSetup } from './hooks/useGameSetup';
+import { usePreferences } from './hooks/usePreferences';
 import { TitleScreen } from './screens/TitleScreen';
 import { CharacterSelectScreen } from './screens/CharacterSelectScreen';
 import { StationPickerScreen } from './screens/StationPickerScreen';
@@ -16,6 +17,7 @@ import { RunHistoryScreen } from './screens/RunHistoryScreen';
 export function App() {
   const nav = useScreenManager();
   const setup = useGameSetup();
+  const { generationModelId } = usePreferences();
   const startGeneration = useMutation(api.stationGeneration.start);
   const createGame = useMutation(api.games.create);
   const { goToTitle } = nav;
@@ -48,13 +50,14 @@ export function App() {
       const progressId = await startGeneration({
         difficulty: setup.selectedDifficulty,
         characterClass: setup.selectedClass,
+        modelId: generationModelId,
       });
       console.log('[App] generation started, progressId:', progressId);
       nav.goToLoading(progressId);
     } catch (err) {
       console.error('[App] handleGenerate error:', err);
     }
-  }, [setup.selectedClass, setup.selectedDifficulty, startGeneration, nav]);
+  }, [setup.selectedClass, setup.selectedDifficulty, startGeneration, nav, generationModelId]);
 
   const handleStartGame = useCallback(async (stationId: string) => {
     console.log('[App] handleStartGame called, stationId:', stationId, 'selectedClass:', setup.selectedClass);

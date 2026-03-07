@@ -10,7 +10,7 @@ import type { ModelMessage } from 'ai';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { CREATIVE_MODEL_ID, getDefaultAITextClient } from '../src/models.js';
+import { GENERATION_MODEL_ID, getDefaultAITextClient } from '../src/models.js';
 import { assembleStation } from '../src/assembly.js';
 import { initializePlayerState, getBuild } from '../src/character.js';
 import { createGameToolSets } from '../src/tools.js';
@@ -167,7 +167,7 @@ async function loadOrGenerateStation(): Promise<GeneratedStation> {
             difficulty: 'normal',
             characterClass: 'engineer',
             aiClient: getDefaultAITextClient(),
-            modelId: CREATIVE_MODEL_ID,
+            modelId: GENERATION_MODEL_ID,
         },
         (msg) => { console.log(`  ${msg}`); },
     );

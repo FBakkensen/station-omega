@@ -23,7 +23,7 @@ export interface LayerConfig<TSchema, TValidated> {
     buildPrompt: (context: LayerContext, errors?: string[]) => { system: string; user: string };
     validate: (output: TSchema, context: LayerContext) => ValidationResult<TValidated>;
     maxRetries: number;
-    /** Per-attempt timeout in milliseconds. Default: 90_000 (90s). */
+    /** Per-attempt timeout in milliseconds. Default: 300_000 (5min). */
     timeoutMs?: number;
     /** Max output tokens for this layer. Default: 8192. */
     maxOutputTokens?: number;
@@ -236,7 +236,7 @@ export async function runLayer<TSchema, TValidated>(
                 prompt: user,
                 schema: config.schema,
                 maxOutputTokens: config.maxOutputTokens ?? 8192,
-                timeoutMs: config.timeoutMs ?? 90_000,
+                timeoutMs: config.timeoutMs ?? 300_000,
                 providerOptions,
                 label,
                 onProgress,

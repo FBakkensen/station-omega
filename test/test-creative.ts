@@ -8,7 +8,7 @@
 import { streamText, Output } from 'ai';
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { CREATIVE_MODEL_ID, getDefaultAITextClient } from '../src/models.js';
+import { GENERATION_MODEL_ID, getDefaultAITextClient } from '../src/models.js';
 import { CreativeLayerSchema } from '../src/generation/layers/creative.js';
 import type { StationSkeleton } from '../src/types.js';
 import {
@@ -231,7 +231,7 @@ async function main() {
             difficulty: 'normal',
             characterClass: 'engineer',
             aiClient: getDefaultAITextClient(),
-            modelId: CREATIVE_MODEL_ID,
+            modelId: GENERATION_MODEL_ID,
         },
         (msg) => { console.log(`  ${msg}`); },
     );

@@ -1,4 +1,4 @@
-import { usePreferences, GAME_MASTER_MODELS } from '../hooks/usePreferences';
+import { usePreferences, GAME_MASTER_MODELS, GENERATION_MODELS } from '../hooks/usePreferences';
 
 interface TitleScreenProps {
   onNewGame: () => void;
@@ -21,13 +21,20 @@ const TITLE_ART = [
 ];
 
 export function TitleScreen({ onNewGame, onHistory }: TitleScreenProps) {
-  const { soundEnabled, setSoundEnabled, gameMasterModelId, setGameMasterModelId } = usePreferences();
+  const { soundEnabled, setSoundEnabled, gameMasterModelId, setGameMasterModelId, generationModelId, setGenerationModelId } = usePreferences();
 
-  const currentModelLabel = GAME_MASTER_MODELS.find(m => m.id === gameMasterModelId)?.label ?? gameMasterModelId;
-  const cycleModel = () => {
+  const currentGameMasterLabel = GAME_MASTER_MODELS.find(m => m.id === gameMasterModelId)?.label ?? gameMasterModelId;
+  const cycleGameMasterModel = () => {
     const idx = GAME_MASTER_MODELS.findIndex(m => m.id === gameMasterModelId);
     const next = GAME_MASTER_MODELS[(idx + 1) % GAME_MASTER_MODELS.length];
     setGameMasterModelId(next.id);
+  };
+
+  const currentGenerationLabel = GENERATION_MODELS.find(m => m.id === generationModelId)?.label ?? generationModelId;
+  const cycleGenerationModel = () => {
+    const idx = GENERATION_MODELS.findIndex(m => m.id === generationModelId);
+    const next = GENERATION_MODELS[(idx + 1) % GENERATION_MODELS.length];
+    setGenerationModelId(next.id);
   };
 
   return (
@@ -74,10 +81,16 @@ export function TitleScreen({ onNewGame, onHistory }: TitleScreenProps) {
           {soundEnabled ? 'Sound: ON' : 'Sound: OFF'}
         </button>
         <button
-          onClick={cycleModel}
+          onClick={cycleGameMasterModel}
           className="text-xs tracking-wider uppercase transition-colors text-omega-dim hover:text-omega-text"
         >
-          Model: {currentModelLabel}
+          Game Master: {currentGameMasterLabel}
+        </button>
+        <button
+          onClick={cycleGenerationModel}
+          className="text-xs tracking-wider uppercase transition-colors text-omega-dim hover:text-omega-text"
+        >
+          Station Gen: {currentGenerationLabel}
         </button>
       </div>
 

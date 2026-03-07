@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { GAME_MASTER_MODEL_ID, GAME_MASTER_MODELS } from '../../../src/model-catalog.js';
+import { GAME_MASTER_MODEL_ID, GAME_MASTER_MODELS, GENERATION_MODEL_ID, GENERATION_MODELS, isValidGenerationModelId } from '../../../src/model-catalog.js';
 
 const STORAGE_KEY = 'station-omega-preferences';
 
-export { GAME_MASTER_MODELS };
+export { GAME_MASTER_MODELS, GENERATION_MODELS };
 
 interface Preferences {
   soundEnabled: boolean;
   gameMasterModelId: string;
+  generationModelId: string;
 }
 
 const DEFAULTS: Preferences = {
   soundEnabled: false,
   gameMasterModelId: GAME_MASTER_MODEL_ID,
+  generationModelId: GENERATION_MODEL_ID,
 };
 
 function loadPreferences(): Preferences {
@@ -28,6 +30,10 @@ function loadPreferences(): Preferences {
           typeof p.gameMasterModelId === 'string' && GAME_MASTER_MODELS.some(m => m.id === p.gameMasterModelId)
             ? p.gameMasterModelId
             : DEFAULTS.gameMasterModelId,
+        generationModelId:
+          typeof p.generationModelId === 'string' && isValidGenerationModelId(p.generationModelId)
+            ? p.generationModelId
+            : DEFAULTS.generationModelId,
       };
     }
     return DEFAULTS;
@@ -64,10 +70,16 @@ export function usePreferences() {
     setPrefs(prev => ({ ...prev, gameMasterModelId: modelId }));
   };
 
+  const setGenerationModelId = (modelId: string) => {
+    setPrefs(prev => ({ ...prev, generationModelId: modelId }));
+  };
+
   return {
     soundEnabled: prefs.soundEnabled,
     setSoundEnabled,
     gameMasterModelId: prefs.gameMasterModelId,
     setGameMasterModelId,
+    generationModelId: prefs.generationModelId,
+    setGenerationModelId,
   } as const;
 }

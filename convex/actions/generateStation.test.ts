@@ -21,8 +21,13 @@ vi.mock('../../src/io/openrouter-ai-client.js', () => ({
   },
 }));
 
-vi.mock('../../src/models.js', () => ({
-  CREATIVE_MODEL_ID: 'creative-model-test',
+vi.mock('../../src/model-catalog.js', () => ({
+  GENERATION_MODEL_ID: 'z-ai/glm-5',
+  GENERATION_MODELS: [
+    { id: 'z-ai/glm-5', label: 'GLM-5' },
+    { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
+  ],
+  isValidGenerationModelId: vi.fn((id: string) => ['z-ai/glm-5', 'anthropic/claude-opus-4.6'].includes(id)),
 }));
 
 vi.mock('../../src/assembly.js', () => ({

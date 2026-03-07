@@ -19,7 +19,7 @@ import { buildOrchestratorPrompt } from '../src/prompt.js';
 import { GameResponseSchema } from '../src/schema.js';
 import type { GameResponse } from '../src/schema.js';
 import { buildTurnContext } from '../src/turn-context.js';
-import { validateGameResponse } from '../src/validation.js';
+import { validateGameResponse, validateNarrativeHooks } from '../src/validation.js';
 import type { GeneratedStation, Room, NPC, ObjectiveChain } from '../src/types.js';
 import {
     type TestModel,
@@ -295,7 +295,10 @@ async function runGMTest(
             try {
                 parsed = GameResponseSchema.parse(JSON.parse(cleanJson));
                 valid = true;
-                guardrailIssues = validateGameResponse(parsed, state, testStation);
+                guardrailIssues = [
+                    ...validateGameResponse(parsed, state, testStation),
+                    ...validateNarrativeHooks(parsed, state, testStation),
+                ];
             } catch {
                 // Try to parse as raw JSON without schema validation
                 try {

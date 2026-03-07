@@ -8,6 +8,7 @@ interface NarrativePanelProps {
   segments: DisplaySegment[];
   typewriterCards: Map<number, TypewriterCard>;
   choices: Choice[] | null;
+  choiceTitle: string | null;
   onChoice: (choiceId: string) => void;
   isStreaming: boolean;
   allFinalized: boolean;
@@ -17,6 +18,7 @@ export function NarrativePanel({
   segments,
   typewriterCards,
   choices,
+  choiceTitle,
   onChoice,
   isStreaming,
   allFinalized,
@@ -99,7 +101,7 @@ export function NarrativePanel({
               )}
 
               {choices && choices.length > 0 && !isStreaming && allFinalized && (
-                <ChoiceCard choices={choices} onChoice={onChoice} />
+                <ChoiceCard title={choiceTitle ?? 'Suggested Actions'} choices={choices} onChoice={onChoice} />
               )}
             </>
           )}

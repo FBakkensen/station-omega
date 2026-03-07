@@ -10,6 +10,7 @@ type StreamingFixture = {
   isStreaming: boolean;
   submitTurn: ReturnType<typeof vi.fn>;
   choices: Choice[] | null;
+  choiceTitle: string | null;
   error: string | null;
   clearError: ReturnType<typeof vi.fn>;
 };
@@ -214,6 +215,7 @@ describe('GameplayScreen reload hydration behavior', () => {
       isStreaming: false,
       submitTurn: vi.fn(),
       choices: null,
+      choiceTitle: null,
       error: null,
       clearError: vi.fn(),
     };

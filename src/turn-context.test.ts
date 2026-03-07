@@ -28,7 +28,11 @@ describe('buildTurnContext', () => {
     const built = expectContext(buildTurnContext(context.state, context.station));
 
     expect(built).toContain('MISSION ELAPSED TIME: T+00:00');
+    expect(built).toContain('OBJECTIVE PRESSURE: Diagnose the relay fault in Docking Vestibule.');
     expect(built).toContain('ENVIRONMENT:');
+    expect(built).not.toContain('EVENT PRESSURE:');
+    expect(built).not.toContain('CASCADE PRESSURE:');
+    expect(built).not.toContain('BODY PRESSURE:');
     expect(built).not.toContain('## Active Station Events');
     expect(built).not.toContain('ALLY:');
     expect(built).not.toContain('MORAL PROFILE:');
@@ -91,11 +95,15 @@ describe('buildTurnContext', () => {
 
     expect(built).toContain('ALLY: Ari Voss is helping you.');
     expect(built).toContain('ALLY: Len Marr is helping you.');
+    expect(built).toContain('OBJECTIVE PRESSURE: Diagnose the relay fault in Docking Vestibule.');
     expect(built).toContain('MORAL PROFILE: mercy=2, sacrifice=1, pragmatic=0');
     expect(built).toContain('PLAYER CONDITION: HP 40/100 (40%)');
     expect(built).toContain('OXYGEN: 82/100');
     expect(built).toContain('SUIT INTEGRITY: 91%');
     expect(built).toContain('SYSTEM FAILURES:');
+    expect(built).toContain('EVENT PRESSURE: radiation_spike in 7 min');
+    expect(built).toContain('CASCADE PRESSURE: power_relay in 30 min');
+    expect(built).toContain('BODY PRESSURE:');
     expect(built).toContain('POWER FAILURE');
     expect(built).toContain('RADIATION SPIKE');
   });
@@ -122,6 +130,20 @@ describe('buildTurnContext', () => {
 
     if (!section) throw new Error('Expected ENVIRONMENT section');
     expect(section).toMatch(/ENVIRONMENT: .*Pressure .*Temp .*Rad .*Structural/);
+  });
+
+  it('[I] summarizes objective, cascade, and body pressure in stable labeled sections', () => {
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_0';
+    context.state.hp = 45;
+    context.state.suitIntegrity = 84;
+
+    const built = expectContext(buildTurnContext(context.state, context.station));
+
+    expect(built).toContain('OBJECTIVE PRESSURE: Diagnose the relay fault in Docking Vestibule.');
+    expect(built).toContain('CASCADE PRESSURE: power_relay in 30 min');
+    expect(built).toContain('BODY PRESSURE:');
+    expect(built).toContain('suit integrity 84%');
   });
 
   it('[E] handles invalid current-room references without throwing context build errors', () => {

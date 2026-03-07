@@ -31,6 +31,63 @@ export function validateGameResponse(
     return issues;
 }
 
+function normalizeForMatch(value: string): string {
+    return value.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function hasPressure(state: GameState, station: GeneratedStation): boolean {
+    const room = station.rooms.get(state.currentRoom);
+    const activeFailures = room?.systemFailures.some((failure) =>
+        failure.challengeState !== 'resolved' && failure.challengeState !== 'failed'
+    ) ?? false;
+    return state.activeEvents.length > 0
+        || activeFailures
+        || state.hp / state.maxHp < 0.5
+        || state.oxygen < state.maxOxygen
+        || state.suitIntegrity < 100;
+}
+
+export function validateNarrativeHooks(
+    response: GameResponse,
+    state: GameState,
+    station: GeneratedStation,
+): string[] {
+    if (response.segments.length === 0) return [];
+
+    const issues: string[] = [];
+    const firstText = response.segments.find((segment) => segment.text.trim().length > 0)?.text.trim() ?? '';
+    const normalizedFirst = normalizeForMatch(firstText);
+
+    if (/^i (look around|scan the room|check the room|take in my surroundings)\b/.test(normalizedFirst)) {
+        issues.push('Opening beat is too generic; start with a sharper hook or consequence.');
+    }
+
+    if (hasPressure(state, station) && !response.segments.some((segment) => segment.type === 'thought')) {
+        issues.push('Pressured turn missing thought segment for stakes, calculations, or consequence framing.');
+    }
+
+    const currentStep = station.objectives.steps[station.objectives.currentStepIndex];
+    if (station.objectives.currentStepIndex < station.objectives.steps.length && !currentStep.completed) {
+        const roomName = station.rooms.get(currentStep.roomId)?.name ?? currentStep.roomId;
+        const systemName = currentStep.requiredSystemRepair?.replace(/_/g, ' ') ?? '';
+        const itemName = currentStep.requiredItemId
+            ? (station.items.get(currentStep.requiredItemId)?.name ?? currentStep.requiredItemId)
+            : '';
+        const joined = normalizeForMatch(response.segments.map((segment) => segment.text).join(' '));
+        const objectiveSignals = [
+            normalizeForMatch(roomName),
+            normalizeForMatch(systemName),
+            normalizeForMatch(itemName),
+        ].filter((signal) => signal.length > 0);
+
+        if (objectiveSignals.length > 0 && !objectiveSignals.some((signal) => joined.includes(signal))) {
+            issues.push('Response does not surface the current objective pressure or blocker clearly enough.');
+        }
+    }
+
+    return issues;
+}
+
 /** Build a corrective system message when the output guardrail trips. */
 export function buildGuardrailFeedback(
     issues: string[],

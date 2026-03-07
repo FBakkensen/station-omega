@@ -38,13 +38,26 @@ describe('streamTurn helper contracts', () => {
     const mapped = mapChoicesForPersistence({
       title: 'Actions',
       choices: [
-        { label: 'Inspect relay', description: 'Run diagnostics on the panel.' },
+        {
+          label: 'Inspect relay',
+          description: 'Run diagnostics on the panel.',
+          risk: 'low',
+          timeCost: '2 min',
+          consequence: 'Improves fault clarity before committing materials.',
+        },
         { label: 'Stabilize coolant', description: 'Prevent thermal cascade.' },
       ],
     });
 
     expect(mapped).toEqual([
-      { id: '0', label: 'Inspect relay', description: 'Run diagnostics on the panel.' },
+      {
+        id: '0',
+        label: 'Inspect relay',
+        description: 'Run diagnostics on the panel.',
+        risk: 'low',
+        timeCost: '2 min',
+        consequence: 'Improves fault clarity before committing materials.',
+      },
       { id: '1', label: 'Stabilize coolant', description: 'Prevent thermal cascade.' },
     ]);
   });

@@ -275,6 +275,7 @@ export interface CreativeContent {
     startingItem: StartingItemCreative;
     npcCreative?: NPCCreative[];
     visualStyleSeed?: string;
+    briefingVideoPrompt?: string;
 }
 
 // ─── Assembled World (final, used during gameplay) ──────────────────────────
@@ -335,6 +336,7 @@ export interface GeneratedStation {
     arrivalScenario: ArrivalScenario;
     mapLayout: MapLayout;
     visualStyleSeed?: string;
+    briefingVideoPrompt?: string;
 }
 
 // ─── Moral Choices ──────────────────────────────────────────────────────────

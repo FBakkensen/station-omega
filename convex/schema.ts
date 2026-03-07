@@ -151,6 +151,7 @@ export default defineSchema({
       v.literal("objectives"),
       v.literal("creative"),
       v.literal("assembly"),
+      v.literal("video"),
       v.literal("complete"),
       v.literal("error"),
     ),
@@ -203,6 +204,7 @@ export default defineSchema({
       v.literal("room_scene"),
       v.literal("npc_portrait"),
       v.literal("briefing"),
+      v.literal("briefing_video"),
     ),
   })
     .index("by_station_cache", ["stationId", "cacheKey"])

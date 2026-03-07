@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoadingScreen } from './LoadingScreen';
 
 type ProgressDoc = {
-  status: 'pending' | 'topology' | 'systems' | 'objectives' | 'creative' | 'assembly' | 'complete' | 'error';
+  status: 'pending' | 'topology' | 'systems' | 'objectives' | 'creative' | 'assembly' | 'video' | 'complete' | 'error';
   message: string;
   progress: number;
   stationId?: string;
@@ -101,6 +101,7 @@ describe('LoadingScreen progress contracts', () => {
       { status: 'objectives', message: 'Designing mission objectives...', progress: 50 },
       { status: 'creative', message: 'Generating creative content...', progress: 70 },
       { status: 'assembly', message: 'Assembling station data...', progress: 90 },
+      { status: 'video', message: 'Generating briefing video...', progress: 95 },
     ];
 
     for (const next of sequence) {

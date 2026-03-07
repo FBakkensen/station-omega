@@ -9,16 +9,18 @@ interface MissionModalProps {
   currentStepIndex: number;
   isComplete: boolean;
   onClose: () => void;
+  videoUrl?: string;
+  muted?: boolean;
 }
 
-export function MissionModal({ title, steps, currentStepIndex, isComplete, onClose }: MissionModalProps) {
+export function MissionModal({ title, steps, currentStepIndex, isComplete, onClose, videoUrl, muted }: MissionModalProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
       onClick={onClose}
     >
       <div
-        className="border border-omega-border bg-omega-panel max-w-lg w-full mx-4 p-6"
+        className={`border border-omega-border bg-omega-panel w-full mx-4 p-6 ${videoUrl ? 'max-w-2xl' : 'max-w-lg'}`}
         onClick={(e) => { e.stopPropagation(); }}
       >
         <div className="flex justify-between items-center mb-4">
@@ -30,6 +32,26 @@ export function MissionModal({ title, steps, currentStepIndex, isComplete, onClo
             [ESC] Close
           </button>
         </div>
+
+        {videoUrl && (
+          <div className="relative mb-4 overflow-hidden">
+            <video
+              src={videoUrl}
+              controls
+              playsInline
+              autoPlay
+              muted={muted}
+              className="w-full max-h-72 object-contain bg-black"
+            />
+            {/* Scanline overlay */}
+            <div
+              className="absolute inset-0 pointer-events-none opacity-10"
+              style={{
+                backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.4) 4px)',
+              }}
+            />
+          </div>
+        )}
 
         <h3 className="text-omega-text font-bold mb-4">{title}</h3>
 

@@ -57,7 +57,7 @@ export const generate = internalAction({
         "Assembling station data...": { status: "assembly", progress: 90 },
       };
 
-      let lastStatus: "pending" | "topology" | "systems" | "objectives" | "creative" | "assembly" | "complete" | "error" = "pending";
+      let lastStatus: "pending" | "topology" | "systems" | "objectives" | "creative" | "assembly" | "video" | "complete" | "error" = "pending";
       let lastProgress = 0;
 
       const onProgress = (msg: string) => {
@@ -102,17 +102,37 @@ export const generate = internalAction({
       });
       console.info("[generateStation] Station saved", { stationId });
 
-      // Schedule briefing image generation (fire-and-forget)
+      // Step 6: Generate briefing video (non-fatal)
       if (process.env.FAL_API_KEY) {
-        const { buildBriefingImagePrompt } = await import("../../src/image-prompts.js");
-        const briefingPrompt = buildBriefingImagePrompt(station);
-        await ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
-          stationId,
-          cacheKey: "briefing",
-          category: "briefing" as const,
-          prompt: briefingPrompt,
+        await ctx.runMutation(internal.generationProgress.update, {
+          id: progressId,
+          status: "video",
+          message: "Generating briefing video...",
+          progress: 95,
         });
-        console.info("[generateStation] Briefing image generation scheduled");
+
+        try {
+          const { buildBriefingVideoPrompt } = await import("../../src/video-prompts.js");
+          const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
+          const videoPrompt = buildBriefingVideoPrompt(station);
+          const client = new FalVideoClient(process.env.FAL_API_KEY);
+          const result = await client.generateVideo({ prompt: videoPrompt });
+
+          const blob = new Blob([result.videoBytes as BlobPart], { type: result.mimeType });
+          const storageId = await ctx.storage.store(blob);
+
+          await ctx.runMutation(internal.stationImages.save, {
+            stationId,
+            cacheKey: "briefing_video",
+            storageId,
+            prompt: videoPrompt,
+            category: "briefing_video" as const,
+          });
+          console.info("[generateStation] Briefing video generated and cached");
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.error("[generateStation] Video generation failed (non-fatal)", { error: message });
+        }
       }
 
       // Mark progress as complete

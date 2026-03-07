@@ -54,9 +54,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ status, stationName, stationImages, currentRoomId }: SidebarProps) {
-  // Resolve the current scene image: room > briefing > none
+  // Resolve the current scene image: room image or none
   const sceneImage = stationImages?.get(`room:${currentRoomId ?? ''}`)
-    ?? stationImages?.get('briefing')
     ?? undefined;
 
   if (!status) {

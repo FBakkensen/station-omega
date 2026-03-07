@@ -8,6 +8,7 @@ export type ProgressStatus =
   | 'objectives'
   | 'creative'
   | 'assembly'
+  | 'video'
   | 'complete'
   | 'error';
 
@@ -55,6 +56,7 @@ export const update = internalMutation({
       v.literal("objectives"),
       v.literal("creative"),
       v.literal("assembly"),
+      v.literal("video"),
       v.literal("complete"),
       v.literal("error"),
     ),

@@ -150,5 +150,6 @@ export function assembleStation(
         arrivalScenario: creative.arrivalScenario,
         mapLayout,
         visualStyleSeed: creative.visualStyleSeed,
+        briefingVideoPrompt: creative.briefingVideoPrompt,
     };
 }

@@ -5,8 +5,8 @@ export interface GameMasterModel {
 
 /** Available game master models (extensible — add new entries here). */
 export const GAME_MASTER_MODELS: readonly GameMasterModel[] = [
-  { id: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash' },
   { id: 'google/gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
+  { id: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash' }
 ];
 
 /** Default model used for the main game master (tool calling + narrative). */

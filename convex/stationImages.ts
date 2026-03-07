@@ -40,6 +40,7 @@ export const save = internalMutation({
       v.literal("room_scene"),
       v.literal("npc_portrait"),
       v.literal("briefing"),
+      v.literal("briefing_video"),
     ),
   },
   returns: v.null(),

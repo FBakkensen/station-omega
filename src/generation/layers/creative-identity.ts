@@ -28,6 +28,7 @@ const IdentitySeedSchema = z.object({
     })),
     toneKeywords: z.array(z.string()),
     visualStyleSeed: z.string(),
+    briefingVideoPrompt: z.string(),
 });
 
 type IdentitySeedOutput = z.infer<typeof IdentitySeedSchema>;
@@ -41,6 +42,7 @@ export interface ValidatedIdentitySeed {
     crewRoster: Array<{ name: string; role: string; fate: string }>;
     toneKeywords: string[];
     visualStyleSeed: string;
+    briefingVideoPrompt: string;
 }
 
 // ─── Prompt Builder ──────────────────────────────────────────────────────────
@@ -61,7 +63,8 @@ Grounded sci-fi with personality. The Martian meets Project Hail Mary. The stati
 - backstory: 2-3 sentences about the station's history and what went wrong
 - crewRoster: 3-5 crew members (engineers, scientists, technicians) with name, role, and fate
 - toneKeywords: 3-5 words/phrases capturing the station's mood (e.g., "claustrophobic", "jury-rigged", "fading hope")
-- visualStyleSeed: A short visual style phrase (10-20 words) describing the station's aesthetic for AI image generation. Focus on lighting, color palette, architectural style, and atmosphere (e.g., "Soviet-era brutalist industrial, amber emergency lighting, corroded steel panels", "Sleek corporate white corridors stained with coolant, flickering fluorescent strips")`;
+- visualStyleSeed: A short visual style phrase (10-20 words) describing the station's aesthetic for AI image generation. Focus on lighting, color palette, architectural style, and atmosphere (e.g., "Soviet-era brutalist industrial, amber emergency lighting, corroded steel panels", "Sleek corporate white corridors stained with coolant, flickering fluorescent strips")
+- briefingVideoPrompt: A cinematic video prompt (40-80 words) for an 8-second mission briefing video, optimized for Google Veo 3.1 text-to-video. This video plays when the player opens the Mission Objectives screen — it must visually convey the SPECIFIC mission and its stakes, not just a generic station shot. Structure: camera direction first (use film terms: dolly, tracking, crane, handheld), then visual details that show what went wrong and what the player must fix, then audio cues (ambient sounds, mechanical noises, alarms). The visuals should create tension about the mission ahead. Example for a comms relay repair mission: "A handheld tracking shot pushes through a darkened communications hub. Severed data cables spark against flooded deck plates, casting flickering light across rows of dead relay terminals. A cracked monitor loops a distress signal waveform. The drip of coolant, crackling electrical arcs, and a distant repeating SOS tone. Retro 1970s sci-fi aesthetic, muted amber palette, heavy film grain."`;
 
     const roomSummary = topology.rooms.map(r => `  ${r.id} (${r.archetype})`).join('\n');
 
@@ -114,6 +117,10 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
         errors.push('visualStyleSeed is empty — provide a 10-20 word visual style phrase');
     }
 
+    if (!output.briefingVideoPrompt.trim()) {
+        errors.push('briefingVideoPrompt is empty — provide a 40-80 word Veo 3.1 video prompt');
+    }
+
     if (errors.length > 0) {
         return validationFailure(errors);
     }
@@ -129,6 +136,7 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
         })),
         toneKeywords: output.toneKeywords,
         visualStyleSeed: output.visualStyleSeed,
+        briefingVideoPrompt: output.briefingVideoPrompt,
     });
 }
 
@@ -149,6 +157,7 @@ export const identitySeedLayer: LayerConfig<IdentitySeedOutput, ValidatedIdentit
             `Crew: ${crewNames.join(', ')}`,
             `Tone: ${v.toneKeywords.join(', ')}`,
             `Visual: ${v.visualStyleSeed}`,
+            `Video: ${v.briefingVideoPrompt.slice(0, 60)}…`,
         ].join('\n');
     },
 };

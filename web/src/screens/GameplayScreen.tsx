@@ -37,6 +37,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
 
   const [showMap, setShowMap] = useState(false);
   const [showMission, setShowMission] = useState(false);
+  const [dismissedInitialBriefing, setDismissedInitialBriefing] = useState(false);
   const [showSituation, setShowSituation] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
 
@@ -107,7 +108,12 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
     prevForceMuteRef.current = devSettings.forceMute;
   }, [devSettings.forceMute, twFinalizeAll]);
 
-  // Auto-submit the first turn when game loads (initial "look around")
+  // Show mission modal on fresh game until explicitly dismissed
+  const showInitialBriefing = !dismissedInitialBriefing && game?.turnCount === 0;
+  const missionVisible = showMission || showInitialBriefing;
+
+  // Auto-submit the first turn when game loads (initial "look around").
+  // Fires immediately — generation runs in the background while the mission briefing is shown.
   const firstTurnSentRef = useRef(false);
   useEffect(() => {
     if (!game || !station || firstTurnSentRef.current) return;
@@ -124,6 +130,10 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   // twFinalizeAll() + beginStream() run before new segments are pushed.
   const prevStreamingRef = useRef(false);
   useEffect(() => {
+    // Suppress while the initial mission briefing is visible — refs stay in their
+    // initial-mount state so hydration logic works correctly once dismissed.
+    if (showInitialBriefing) return;
+
     if (hasSeenInitialStreamingStateRef.current && isStreaming && !prevStreamingRef.current) {
       hasObservedPostMountLiveStreamRef.current = true;
     } else if (!hasSeenInitialStreamingStateRef.current) {
@@ -144,12 +154,16 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       }
     }
     prevStreamingRef.current = isStreaming;
-  }, [isStreaming, twFinalizeAll]);
+  }, [isStreaming, twFinalizeAll, showInitialBriefing]);
 
   // Push new segments to typewriter + TTS as they arrive.
   // Historical segments (before latestTurnStartIndex) are pushed as immediate (no typewriter).
   // Uses ttsHighWaterRef + latestTurnStartIndex to only push current turn to TTS.
   useEffect(() => {
+    // Suppress while the initial mission briefing is visible — segments accumulate
+    // in Convex but aren't pushed to typewriter/TTS until the user dismisses the modal.
+    if (showInitialBriefing) return;
+
     const shouldHydrateInitialSnapshot =
       !hasHydratedInitialSnapshotRef.current
       && !hasObservedPostMountLiveStreamRef.current;
@@ -184,7 +198,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       hasHydratedInitialSnapshotRef.current = true;
       ttsHighWaterRef.current = Math.max(ttsHighWaterRef.current, maxHydratedSegmentIndex);
     }
-  }, [segments, latestTurnStartIndex, twPushSegment]);
+  }, [segments, latestTurnStartIndex, twPushSegment, showInitialBriefing]);
 
   // Detect game over — wait for typewriter to finish before transitioning
   const gameIsOver = game?.isOver;
@@ -218,6 +232,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       } else if (e.key === 'Escape') {
         setShowMap(false);
         setShowMission(false);
+        setDismissedInitialBriefing(true);
         setShowSituation(false);
         setShowQuitConfirm(false);
       } else if (e.key === 'F10') {
@@ -366,13 +381,15 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
         />
       )}
 
-      {showMission && status && (
+      {missionVisible && status && (
         <MissionModal
           title={status.objectiveTitle}
           steps={status.objectiveSteps}
           currentStepIndex={status.objectiveStep - 1}
           isComplete={status.objectivesComplete}
-          onClose={() => { setShowMission(false); }}
+          onClose={() => { setShowMission(false); setDismissedInitialBriefing(true); }}
+          videoUrl={stationImages.get('briefing_video')?.url}
+          muted={!ttsEnabled}
         />
       )}
 

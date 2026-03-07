@@ -31,6 +31,7 @@ export interface SerializedStation {
   arrivalScenario: GeneratedStation["arrivalScenario"];
   mapLayout: SerializedMapLayout;
   visualStyleSeed?: string;
+  briefingVideoPrompt?: string;
 }
 
 type SerializedNPC = Omit<NPC, "behaviors"> & { behaviors: NPCBehaviorFlag[] };
@@ -79,6 +80,7 @@ export function serializeStation(station: GeneratedStation): SerializedStation {
     arrivalScenario: station.arrivalScenario,
     mapLayout,
     visualStyleSeed: station.visualStyleSeed,
+    briefingVideoPrompt: station.briefingVideoPrompt,
   };
 }
 
@@ -120,6 +122,7 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
     arrivalScenario: data.arrivalScenario,
     mapLayout,
     visualStyleSeed: data.visualStyleSeed,
+    briefingVideoPrompt: data.briefingVideoPrompt,
   };
 }
 

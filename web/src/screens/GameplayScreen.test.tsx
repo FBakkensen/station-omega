@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../../convex/_generated/api';
 import { GameplayScreen } from './GameplayScreen';
@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     ttsFlushStreamMock: vi.fn(),
     ttsStopMock: vi.fn(),
     typewriterPushCalls: [] as TypewriterPushCall[],
+    lastMissionModalOnClose: null as (() => void) | null,
   };
 });
 
@@ -81,7 +82,10 @@ vi.mock('../components/modals/MapModal', () => ({
 }));
 
 vi.mock('../components/modals/MissionModal', () => ({
-  MissionModal: () => null,
+  MissionModal: (props: { onClose?: () => void }) => {
+    mocks.lastMissionModalOnClose = props.onClose ?? null;
+    return null;
+  },
 }));
 
 function makeDisplaySegment(
@@ -404,5 +408,254 @@ describe('GameplayScreen reload hydration behavior', () => {
     );
 
     expect(mocks.ttsFlushStreamMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('GameplayScreen initial briefing gate', () => {
+  let streamingFixture: StreamingFixture;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.stubEnv('VITE_CONVEX_URL', 'https://station-omega-test.cloud');
+
+    const seenSegments = new Set<number>();
+    mocks.typewriterPushCalls.length = 0;
+
+    mocks.twPushSegmentMock.mockImplementation((segment: DisplaySegment, immediate?: boolean) => {
+      const isImmediate = immediate === true;
+      mocks.typewriterPushCalls.push({
+        segmentIndex: segment.segmentIndex,
+        immediate: isImmediate,
+      });
+      if (seenSegments.has(segment.segmentIndex)) return -1;
+      seenSegments.add(segment.segmentIndex);
+      return isImmediate ? -1 : 24;
+    });
+
+    mocks.useTypewriterMock.mockReturnValue({
+      cards: new Map(),
+      pushSegment: mocks.twPushSegmentMock,
+      onRevealChunk: mocks.twOnRevealChunkMock,
+      finalizeAll: mocks.twFinalizeAllMock,
+      finalizeSegment: vi.fn(),
+      skipCurrent: mocks.twSkipCurrentMock,
+      allFinalized: true,
+    });
+
+    mocks.useTTSMock.mockReturnValue({
+      pushSegment: mocks.ttsPushSegmentMock,
+      beginStream: mocks.ttsBeginStreamMock,
+      flushStream: mocks.ttsFlushStreamMock,
+      stop: mocks.ttsStopMock,
+    });
+
+    mocks.usePreferencesMock.mockReturnValue({
+      soundEnabled: true,
+      setSoundEnabled: vi.fn(),
+    });
+
+    mocks.useDevSettingsMock.mockReturnValue({
+      enabled: false,
+      forceMute: false,
+      typewriterCharsPerSec: 20,
+    });
+
+    // Fresh game with turnCount: 0
+    const gameDoc = { ...makeGameDoc(), turnCount: 0 };
+    const stationDoc = makeStationDoc();
+    // Return game/station based on call order: 1st=game, 2nd=station, 3rd+=undefined
+    let useQueryCallCount = 0;
+    mocks.useQueryMock.mockImplementation(() => {
+      useQueryCallCount++;
+      const idx = ((useQueryCallCount - 1) % 3);
+      if (idx === 0) return gameDoc;
+      if (idx === 1) return stationDoc;
+      return undefined;
+    });
+
+    streamingFixture = {
+      segments: [],
+      latestTurnStartIndex: 0,
+      isStreaming: false,
+      submitTurn: vi.fn(),
+      choices: null,
+      choiceTitle: null,
+      error: null,
+      clearError: vi.fn(),
+    };
+    mocks.useStreamingTurnMock.mockImplementation(() => streamingFixture);
+  });
+
+  it('[Z] suppresses typewriter/TTS while initial briefing is visible — zero presentation before dismissal', () => {
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Turn submitted immediately
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+
+    // Simulate segments arriving while briefing is still up
+    streamingFixture.segments = [makeDisplaySegment(0, 'You arrive.')];
+    streamingFixture.isStreaming = true;
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Presentation suppressed — zero typewriter/TTS activity
+    expect(mocks.twPushSegmentMock).not.toHaveBeenCalled();
+    expect(mocks.ttsBeginStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('[O] auto-submits exactly one first turn immediately on mount', () => {
+    render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Submitted immediately — no need to dismiss briefing first
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+    expect(streamingFixture.submitTurn).toHaveBeenCalledWith('I look around and take in my surroundings.');
+
+    // Dismissing briefing does not re-submit
+    act(() => { mocks.lastMissionModalOnClose?.(); });
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('[M] does not re-submit first turn on multiple rerenders', () => {
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('[B] does not block first turn when turnCount is already > 0', () => {
+    const gameDoc = { ...makeGameDoc(), turnCount: 2 };
+    const stationDoc = makeStationDoc();
+    let callCount = 0;
+    mocks.useQueryMock.mockImplementation(() => {
+      callCount++;
+      const idx = ((callCount - 1) % 3);
+      if (idx === 0) return gameDoc;
+      if (idx === 1) return stationDoc;
+      return undefined;
+    });
+
+    render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // turnCount > 0 means the guard on turnCount !== 0 returns early,
+    // so submitTurn should NOT be called (it's not a fresh game)
+    expect(streamingFixture.submitTurn).not.toHaveBeenCalled();
+  });
+
+  it('[I] submits first turn immediately while mission modal is visible on fresh game', () => {
+    render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Turn is submitted immediately even though mission modal is still visible
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+    // MissionModal onClose callback is set (modal is rendered)
+    expect(mocks.lastMissionModalOnClose).not.toBeNull();
+  });
+
+  it('[E] handles missing game doc gracefully without submitting', () => {
+    mocks.useQueryMock.mockImplementation(() => undefined);
+
+    expect(() => {
+      render(
+        <GameplayScreen
+          gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+          stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+          onGameOver={vi.fn()}
+          onRunSummary={vi.fn()}
+          onQuit={vi.fn()}
+        />,
+      );
+    }).not.toThrow();
+
+    expect(streamingFixture.submitTurn).not.toHaveBeenCalled();
+  });
+
+  it('[S] follows standard flow: submits immediately and presents after briefing dismissal', () => {
+    render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Turn submitted immediately on mount
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+    expect(streamingFixture.submitTurn).toHaveBeenCalledWith('I look around and take in my surroundings.');
+
+    // Presentation suppressed while briefing is visible
+    expect(mocks.twPushSegmentMock).not.toHaveBeenCalled();
+
+    // Dismiss via MissionModal onClose callback
+    act(() => { mocks.lastMissionModalOnClose?.(); });
+
+    // No duplicate submit after dismissal
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
   });
 });

@@ -18,6 +18,7 @@ export const generate = internalAction({
       v.literal("room_scene"),
       v.literal("npc_portrait"),
       v.literal("briefing"),
+      v.literal("briefing_video"),
     ),
     prompt: v.string(),
   },

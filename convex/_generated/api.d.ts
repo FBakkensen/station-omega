@@ -10,6 +10,7 @@
 
 import type * as actions_generateImage from "../actions/generateImage.js";
 import type * as actions_generateStation from "../actions/generateStation.js";
+import type * as actions_generateVideo from "../actions/generateVideo.js";
 import type * as actions_streamTurn from "../actions/streamTurn.js";
 import type * as actions_ttsProxy from "../actions/ttsProxy.js";
 import type * as choiceSets from "../choiceSets.js";
@@ -36,6 +37,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   "actions/generateImage": typeof actions_generateImage;
   "actions/generateStation": typeof actions_generateStation;
+  "actions/generateVideo": typeof actions_generateVideo;
   "actions/streamTurn": typeof actions_streamTurn;
   "actions/ttsProxy": typeof actions_ttsProxy;
   choiceSets: typeof choiceSets;

@@ -77,8 +77,8 @@ export function LoadingScreen({ progressId, onComplete, onError }: LoadingScreen
 
       {/* Stage indicator */}
       <div className="flex gap-2">
-        {['topology', 'systems', 'objectives', 'creative', 'assembly'].map((stage) => {
-          const stageOrder = ['pending', 'topology', 'systems', 'objectives', 'creative', 'assembly', 'complete'];
+        {['topology', 'systems', 'objectives', 'creative', 'assembly', 'video'].map((stage) => {
+          const stageOrder = ['pending', 'topology', 'systems', 'objectives', 'creative', 'assembly', 'video', 'complete'];
           const currentIdx = stageOrder.indexOf(progress?.status ?? 'pending');
           const stageIdx = stageOrder.indexOf(stage);
           const isActive = currentIdx === stageIdx;

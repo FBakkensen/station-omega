@@ -38,6 +38,20 @@ vi.mock('../lib/serialization.js', () => ({
   serializeStation: dynamicMocks.serializeStation,
 }));
 
+const videoMocks = vi.hoisted(() => ({
+  generateVideo: vi.fn(),
+}));
+
+vi.mock('../../src/video-prompts.js', () => ({
+  buildBriefingVideoPrompt: () => 'mock video prompt',
+}));
+
+vi.mock('../../src/io/fal-video-client.js', () => ({
+  FalVideoClient: function FalVideoClient() {
+    return { generateVideo: videoMocks.generateVideo };
+  },
+}));
+
 import { generate } from './generateStation';
 
 type GenerateArgs = {
@@ -51,8 +65,20 @@ type MutationCall = {
   args: Record<string, unknown>;
 };
 
+type SchedulerCall = {
+  delay: number;
+  ref: unknown;
+  args: Record<string, unknown>;
+};
+
 type GenerateCtx = {
   runMutation: (ref: unknown, args: Record<string, unknown>) => Promise<unknown>;
+  scheduler: {
+    runAfter: (delay: number, ref: unknown, args: Record<string, unknown>) => Promise<unknown>;
+  };
+  storage: {
+    store: (blob: unknown) => Promise<unknown>;
+  };
 };
 
 const handler = extractHandler<GenerateCtx, GenerateArgs, null>(generate);
@@ -68,6 +94,7 @@ function makeArgs(overrides?: Partial<GenerateArgs>): GenerateArgs {
 
 function createHarness() {
   const mutationCalls: MutationCall[] = [];
+  const schedulerCalls: SchedulerCall[] = [];
 
   const ctx: GenerateCtx = {
     runMutation: vi.fn((ref: unknown, args: Record<string, unknown>) => {
@@ -78,9 +105,18 @@ function createHarness() {
       }
       return Promise.resolve(null);
     }),
+    scheduler: {
+      runAfter: vi.fn((delay: number, ref: unknown, args: Record<string, unknown>) => {
+        schedulerCalls.push({ delay, ref, args });
+        return Promise.resolve(null);
+      }),
+    },
+    storage: {
+      store: vi.fn(() => Promise.resolve('storage_video_1' as Id<'_storage'>)),
+    },
   };
 
-  return { ctx, mutationCalls };
+  return { ctx, mutationCalls, schedulerCalls };
 }
 
 function progressCalls(calls: MutationCall[]) {
@@ -272,6 +308,118 @@ describe('generateStation action orchestration contracts', () => {
       progress: 100,
       stationId: 'station_saved',
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+});
+
+describe('generateStation video generation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dynamicMocks.clientCtorArgs.length = 0;
+    videoMocks.generateVideo.mockReset();
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-openrouter-key');
+
+    dynamicMocks.generateStation.mockImplementation(
+      () => Promise.resolve({
+        skeleton: { id: 'skeleton_1' },
+        creative: { id: 'creative_1' },
+      }),
+    );
+    dynamicMocks.assembleStation.mockReturnValue({
+      stationName: 'Tachyon Drift',
+      briefing: 'Restore failing systems and extract.',
+    });
+    dynamicMocks.serializeStation.mockReturnValue({
+      rooms: { room_0: { name: 'Docking Vestibule' } },
+    });
+    videoMocks.generateVideo.mockResolvedValue({
+      videoBytes: new Uint8Array([1, 2, 3]),
+      mimeType: 'video/mp4',
+    });
+  });
+
+  it('[Z] does not generate video when FAL_API_KEY is absent', async () => {
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    expect(videoMocks.generateVideo).not.toHaveBeenCalled();
+    const videoProgress = progressCalls(mutationCalls).find((c) => c.args.status === 'video');
+    expect(videoProgress).toBeUndefined();
+  });
+
+  it('[O] generates exactly one video when FAL_API_KEY is set', async () => {
+    vi.stubEnv('FAL_API_KEY', 'test-fal-key');
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    expect(videoMocks.generateVideo).toHaveBeenCalledTimes(1);
+    const saveCalls = mutationCalls.filter((c) => 'cacheKey' in c.args && c.args.cacheKey === 'briefing_video');
+    expect(saveCalls).toHaveLength(1);
+  });
+
+  it('[M] reports video progress status before generation', async () => {
+    vi.stubEnv('FAL_API_KEY', 'test-fal-key');
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    const videoProgress = progressCalls(mutationCalls).find((c) => c.args.status === 'video');
+    expect(videoProgress?.args).toMatchObject({
+      status: 'video',
+      progress: 95,
+      message: 'Generating briefing video...',
+    });
+  });
+
+  it('[B] still completes when video generation throws (non-fatal)', async () => {
+    vi.stubEnv('FAL_API_KEY', 'test-fal-key');
+    videoMocks.generateVideo.mockRejectedValue(new Error('video generation failed'));
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    expect(completionCall(mutationCalls)?.args).toMatchObject({
+      status: 'complete',
+      progress: 100,
+    });
+  });
+
+  it('[I] passes correct prompt and storage contract to video pipeline', async () => {
+    vi.stubEnv('FAL_API_KEY', 'test-fal-key');
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    expect(videoMocks.generateVideo).toHaveBeenCalledWith({ prompt: 'mock video prompt' });
+    expect(ctx.storage.store).toHaveBeenCalledTimes(1);
+    const saveCalls = mutationCalls.filter((c) => 'cacheKey' in c.args && c.args.cacheKey === 'briefing_video');
+    expect(saveCalls[0].args).toMatchObject({
+      stationId: 'station_saved',
+      cacheKey: 'briefing_video',
+      storageId: 'storage_video_1',
+      prompt: 'mock video prompt',
+      category: 'briefing_video',
+    });
+  });
+
+  it('[E] logs error but does not set error status when video fails', async () => {
+    vi.stubEnv('FAL_API_KEY', 'test-fal-key');
+    videoMocks.generateVideo.mockRejectedValue(new Error('fal.ai timeout'));
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    const errorProgress = progressCalls(mutationCalls).find((c) => c.args.status === 'error');
+    expect(errorProgress).toBeUndefined();
+    expect(completionCall(mutationCalls)?.args.status).toBe('complete');
+    consoleSpy.mockRestore();
+  });
+
+  it('[S] follows standard flow: progress update → generate → store → save → complete', async () => {
+    vi.stubEnv('FAL_API_KEY', 'test-fal-key');
+    const { ctx, mutationCalls } = createHarness();
+    await handler(ctx, makeArgs());
+    const statuses = progressCalls(mutationCalls).map((c) => c.args.status);
+    const videoIdx = statuses.indexOf('video');
+    const completeIdx = statuses.indexOf('complete');
+    expect(videoIdx).toBeGreaterThanOrEqual(0);
+    expect(completeIdx).toBeGreaterThan(videoIdx);
+    expect(videoMocks.generateVideo).toHaveBeenCalledTimes(1);
+    expect(ctx.storage.store).toHaveBeenCalledTimes(1);
   });
 
   afterEach(() => {

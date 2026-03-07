@@ -125,10 +125,14 @@ export function useStreamingTurn({
   }, [rawChoices]);
 
   const choiceTitle = useMemo(() => {
-    if (!rawChoices || typeof rawChoices.title !== 'string' || rawChoices.title.length === 0) {
+    if (!rawChoices || typeof rawChoices.title !== 'string') {
       return null;
     }
-    return rawChoices.title;
+    const trimmed = rawChoices.title.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+    return trimmed;
   }, [rawChoices]);
 
   const hasSegmentsForActiveTurn = useMemo(() => {

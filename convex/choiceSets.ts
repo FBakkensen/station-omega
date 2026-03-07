@@ -20,11 +20,22 @@ export const save = internalMutation({
   args: {
     gameId: v.id("games"),
     turnNumber: v.number(),
+    title: v.string(),
     choices: v.array(
       v.object({
         id: v.string(),
         label: v.string(),
         description: v.string(),
+        risk: v.optional(
+          v.union(
+            v.literal("low"),
+            v.literal("medium"),
+            v.literal("high"),
+            v.literal("critical"),
+          ),
+        ),
+        timeCost: v.optional(v.string()),
+        consequence: v.optional(v.string()),
       }),
     ),
   },
@@ -33,6 +44,7 @@ export const save = internalMutation({
     await ctx.db.insert("choiceSets", {
       gameId: args.gameId,
       turnNumber: args.turnNumber,
+      title: args.title,
       choices: args.choices,
     });
     return null;

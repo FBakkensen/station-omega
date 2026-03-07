@@ -29,8 +29,13 @@ export interface StyledSpan {
 }
 
 /** Choice from the suggest_actions tool. */
+export type ChoiceRisk = 'low' | 'medium' | 'high' | 'critical';
+
 export interface Choice {
   id: string;
   label: string;
   description: string;
+  risk?: ChoiceRisk;
+  timeCost?: string;
+  consequence?: string;
 }

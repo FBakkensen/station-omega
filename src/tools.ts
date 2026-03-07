@@ -205,9 +205,19 @@ function detectMoralChoice(
 
 // ─── Callbacks ──────────────────────────────────────────────────────────────
 
+export type ChoiceRisk = 'low' | 'medium' | 'high' | 'critical';
+
+export interface ChoiceOption {
+    label: string;
+    description: string;
+    risk?: ChoiceRisk;
+    timeCost?: string;
+    consequence?: string;
+}
+
 export interface ChoiceSet {
     title: string;
-    choices: { label: string; description: string }[];
+    choices: ChoiceOption[];
 }
 export type ChoicesCallback = (choiceSet: ChoiceSet) => void;
 
@@ -245,7 +255,10 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         const schema = z.object({
             [fieldName]: z.array(z.object({
                 label: z.string().describe('Short punchy name (2-6 words)'),
-                description: z.string().describe('One-sentence evocative description'),
+                description: z.string().describe('One-sentence actionable description of what the move does right now'),
+                risk: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('Relative danger or commitment for this move'),
+                timeCost: z.string().optional().describe('Short time or exposure cost, like "2 min" or "6 min in radiation"'),
+                consequence: z.string().optional().describe('Specific tactical tradeoff or likely consequence if this move is taken'),
             })).describe(fieldDesc),
         });
 
@@ -253,7 +266,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             description,
             inputSchema: schema,
             execute: (args: z.infer<typeof schema>) => {
-                const choices = (args as Record<string, { label: string; description: string }[]>)[fieldName];
+                const choices = (args as Record<string, ChoiceOption[]>)[fieldName];
                 gameCtx.onChoices({ title, choices });
                 return JSON.stringify({ presented: true, note });
             },
@@ -850,15 +863,15 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
     });
 
     const suggestActions = defineSuggestTool(
-        'Present 3-5 contextual creative actions the player can attempt in the current situation. Use for non-combat situations. Actions are displayed as interactive UI buttons.',
-        'What Do You Do?',
+        'Present 3-5 contextual creative actions the player can attempt in the current situation. Use for non-combat situations. Actions are displayed as interactive UI buttons. Make the options tactically distinct and include risk, time cost, or tradeoff metadata whenever possible.',
+        'Tactical Options',
         'actions',
         '3-5 contextual creative actions',
         'Action options displayed as interactive UI buttons. Do NOT list them in text.',
     );
 
     const suggestInteractions = defineSuggestTool(
-        'Present 3-5 contextual NPC interaction approaches. Call BEFORE interact_npc when player wants to interact but hasn\'t specified an approach.',
+        'Present 3-5 contextual NPC interaction approaches. Call BEFORE interact_npc when player wants to interact but hasn\'t specified an approach. Include tradeoffs when the approach carries social or tactical risk.',
         'How Do You Approach?',
         'interactions',
         '3-5 contextual NPC interaction approaches',
@@ -1415,8 +1428,8 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
     });
 
     const suggestDiagnostics = defineSuggestTool(
-        'Present 3-5 contextual engineering diagnostic actions. Call when the player wants to investigate or repair systems but hasn\'t specified a specific action.',
-        'Engineering Assessment',
+        'Present 3-5 contextual engineering diagnostic actions. Call when the player wants to investigate or repair systems but hasn\'t specified a specific action. Make the options feel like tactical engineering decisions, not generic prompts, and include risk, time cost, or tradeoff metadata whenever possible.',
+        'Engineering Decision Point',
         'diagnostics',
         '3-5 contextual engineering actions',
         'Diagnostic options displayed as interactive UI buttons. Focus on engineering: characterize failures, check sensors, analyze components. Do NOT list in text.',

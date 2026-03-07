@@ -4,6 +4,7 @@ import type { GameResponse } from './schema.js';
 import {
   buildGuardrailFeedback,
   validateGameResponse,
+  validateNarrativeHooks,
   validateStateConsistency,
 } from './validation.js';
 
@@ -137,5 +138,57 @@ describe('validation helpers', () => {
     expect(state.suitIntegrity).toBe(baseline.suitIntegrity);
     expect(state.inventory).toEqual(baseline.inventory);
     expect(state.currentRoom).toBe(baseline.currentRoom);
+  });
+
+  it('[M] reports narrative hook issues for generic pressured turns without thought or objective linkage', () => {
+    const station = cloneFixtureStation();
+    const state = cloneFixtureState();
+    state.currentRoom = 'room_0';
+    state.oxygen = 82;
+
+    const response: GameResponse = {
+      segments: [
+        {
+          type: 'narration',
+          text: 'I look around and take in my surroundings.',
+          npcId: null,
+          crewName: null,
+        },
+      ],
+    };
+
+    const issues = validateNarrativeHooks(response, state, station);
+
+    expect(issues).toContain('Opening beat is too generic; start with a sharper hook or consequence.');
+    expect(issues).toContain('Pressured turn missing thought segment for stakes, calculations, or consequence framing.');
+    expect(issues).toContain('Response does not surface the current objective pressure or blocker clearly enough.');
+  });
+
+  it('[O] accepts one hooked pressured turn that includes thought and objective pressure', () => {
+    const station = cloneFixtureStation();
+    const state = cloneFixtureState();
+    state.currentRoom = 'room_0';
+    state.oxygen = 82;
+
+    const response: GameResponse = {
+      segments: [
+        {
+          type: 'narration',
+          text: 'The **power relay** coughs another blue flash across the **Docking Vestibule**, like it is reminding me which problem is trying to kill me first.',
+          npcId: null,
+          crewName: null,
+        },
+        {
+          type: 'thought',
+          text: 'Relay is still unstable, oxygen is already down, and that means I fix the **power relay** now or the whole evac plan stays theoretical.',
+          npcId: null,
+          crewName: null,
+        },
+      ],
+    };
+
+    const issues = validateNarrativeHooks(response, state, station);
+
+    expect(issues).toEqual([]);
   });
 });

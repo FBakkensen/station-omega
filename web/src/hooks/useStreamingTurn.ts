@@ -114,7 +114,21 @@ export function useStreamingTurn({
   // Map choices
   const choices: Choice[] | null = useMemo(() => {
     if (!rawChoices?.choices) return null;
-    return (rawChoices.choices as Array<{ id: string; label: string; description: string }>);
+    return (rawChoices.choices as Array<{
+      id: string;
+      label: string;
+      description: string;
+      risk?: Choice['risk'];
+      timeCost?: string;
+      consequence?: string;
+    }>);
+  }, [rawChoices]);
+
+  const choiceTitle = useMemo(() => {
+    if (!rawChoices || typeof rawChoices.title !== 'string' || rawChoices.title.length === 0) {
+      return null;
+    }
+    return rawChoices.title;
   }, [rawChoices]);
 
   const hasSegmentsForActiveTurn = useMemo(() => {
@@ -199,6 +213,7 @@ export function useStreamingTurn({
   return {
     segments,
     choices,
+    choiceTitle,
     isStreaming,
     latestTurnStartIndex,
     error: state.error,

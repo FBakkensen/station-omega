@@ -8,6 +8,9 @@ export interface ConversationMessage {
 export interface ChoiceOption {
   label: string;
   description: string;
+  risk?: "low" | "medium" | "high" | "critical";
+  timeCost?: string;
+  consequence?: string;
 }
 
 export interface ChoiceSetInput {
@@ -31,11 +34,17 @@ export function mapChoicesForPersistence(choiceSet: ChoiceSetInput): Array<{
   id: string;
   label: string;
   description: string;
+  risk?: "low" | "medium" | "high" | "critical";
+  timeCost?: string;
+  consequence?: string;
 }> {
   return choiceSet.choices.map((choice, index) => ({
     id: String(index),
     label: choice.label,
     description: choice.description,
+    ...(choice.risk ? { risk: choice.risk } : {}),
+    ...(choice.timeCost ? { timeCost: choice.timeCost } : {}),
+    ...(choice.consequence ? { consequence: choice.consequence } : {}),
   }));
 }
 

@@ -28,12 +28,15 @@ interface RawChoice {
   id: string;
   label: string;
   description: string;
+  risk?: 'low' | 'medium' | 'high' | 'critical';
+  timeCost?: string;
+  consequence?: string;
 }
 
 interface QueryFixtures {
   rawSegments: RawSegmentDoc[] | undefined;
   isProcessing: boolean | undefined;
-  rawChoices: { choices: RawChoice[] } | null | undefined;
+  rawChoices: { title?: string; choices: RawChoice[] } | null | undefined;
 }
 
 type StartTurnResult = { ok: true; turnNumber: number } | { ok: false; error: string };
@@ -302,9 +305,10 @@ describe('useStreamingTurn', () => {
       },
     ];
     fixtures.rawChoices = {
+      title: 'Engineering Decision Point',
       choices: [
-        { id: 'choice_1', label: 'Inspect console', description: 'Look for fault traces' },
-        { id: 'choice_2', label: 'Call crew', description: 'Ask for status report' },
+        { id: 'choice_1', label: 'Inspect console', description: 'Look for fault traces', risk: 'low', timeCost: '2 min' },
+        { id: 'choice_2', label: 'Call crew', description: 'Ask for status report', consequence: 'Costs time but may reveal a shortcut.' },
       ],
     };
 
@@ -336,6 +340,7 @@ describe('useStreamingTurn', () => {
       segmentIndex: 2,
     });
     expect(result.current.choices).toEqual(fixtures.rawChoices.choices);
+    expect(result.current.choiceTitle).toBe('Engineering Decision Point');
 
     expect(convexMocks.useMutation).toHaveBeenCalledWith(api.turns.start);
     expect(convexMocks.useQuery.mock.calls.length).toBeGreaterThanOrEqual(3);

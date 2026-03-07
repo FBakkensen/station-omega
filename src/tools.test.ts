@@ -64,6 +64,38 @@ describe('createGameToolSets', () => {
     expect(context.state.revealedItems.has('item_wire')).toBe(true);
   });
 
+  it('[I] suggest_actions preserves tactical choice metadata for the UI contract', async () => {
+    const { context, capturedChoices } = createTestGameContext();
+    const tools = createGameToolSets('engineer', context);
+
+    await runTool(tools.all as Record<string, unknown>, 'suggest_actions', {
+      actions: [
+        {
+          label: 'Shunt the relay',
+          description: 'Reroute power through the emergency bus.',
+          risk: 'high',
+          timeCost: '4 min',
+          consequence: 'Stabilizes life support, but leaves coolant exposed.',
+        },
+      ],
+    });
+
+    expect(capturedChoices).toEqual([
+      {
+        title: 'Tactical Options',
+        choices: [
+          {
+            label: 'Shunt the relay',
+            description: 'Reroute power through the emergency bus.',
+            risk: 'high',
+            timeCost: '4 min',
+            consequence: 'Stabilizes life support, but leaves coolant exposed.',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('[M] supports objective-complete escape movement to trigger victory', async () => {
     const { context } = createTestGameContext();
     context.state.inventory.push('item_keycard');

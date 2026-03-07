@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
+import type { ChoiceSet } from "../../src/tools.js";
 
 /**
  * Process an AI turn — runs the full game loop server-side.
@@ -119,18 +120,12 @@ export const processAITurn = internalAction({
       const mechanicalEvents = [...preEventCtx, ...preCascadeCtx];
 
       // Build GameContext (captured by tool closures)
-      const choiceBuffer: Array<{
-        title: string;
-        choices: { label: string; description: string }[];
-      }> = [];
+      const choiceBuffer: ChoiceSet[] = [];
       const gameCtx = {
         state,
         station: stationObj,
         build,
-        onChoices: (choiceSet: {
-          title: string;
-          choices: { label: string; description: string }[];
-        }) => {
+        onChoices: (choiceSet: ChoiceSet) => {
           choiceBuffer.push(choiceSet);
         },
         turnElapsedMinutes: 0,
@@ -288,6 +283,7 @@ export const processAITurn = internalAction({
         await ctx.runMutation(internal.choiceSets.save, {
           gameId,
           turnNumber,
+          title: lastChoices.title,
           choices: mapChoicesForPersistence(lastChoices),
         });
       }

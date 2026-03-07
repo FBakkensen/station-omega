@@ -7,6 +7,9 @@ type Choice = {
   id: string;
   label: string;
   description: string;
+  risk?: 'low' | 'medium' | 'high' | 'critical';
+  timeCost?: string;
+  consequence?: string;
 };
 
 type ChoiceSetDoc = {
@@ -14,6 +17,7 @@ type ChoiceSetDoc = {
   _creationTime: number;
   gameId: Id<'games'>;
   turnNumber: number;
+  title: string;
   choices: Choice[];
 };
 
@@ -36,7 +40,7 @@ type ChoiceSetsCtx = {
 
 const getCurrentHandler = extractHandler<ChoiceSetsCtx, { gameId: Id<'games'> }, ChoiceSetDoc | null>(getCurrent);
 
-const saveHandler = extractHandler<ChoiceSetsCtx, { gameId: Id<'games'>; turnNumber: number; choices: Choice[] }, null>(save);
+const saveHandler = extractHandler<ChoiceSetsCtx, { gameId: Id<'games'>; turnNumber: number; title: string; choices: Choice[] }, null>(save);
 
 function createHarness(initialRows?: ChoiceSetDoc[]) {
   const rows = [...(initialRows ?? [])];
@@ -102,7 +106,8 @@ describe('choiceSets current-choice contracts', () => {
       saveHandler(ctx, {
         gameId: 'game_1' as Id<'games'>,
         turnNumber: 2,
-        choices: [{ id: 'choice_1', label: 'Inspect panel', description: 'Check for arc damage' }],
+        title: 'Engineering Decision Point',
+        choices: [{ id: 'choice_1', label: 'Inspect panel', description: 'Check for arc damage', risk: 'low', timeCost: '2 min' }],
       }),
     ).resolves.toBeNull();
 
@@ -110,7 +115,8 @@ describe('choiceSets current-choice contracts', () => {
       {
         gameId: 'game_1',
         turnNumber: 2,
-        choices: [{ id: 'choice_1', label: 'Inspect panel', description: 'Check for arc damage' }],
+        title: 'Engineering Decision Point',
+        choices: [{ id: 'choice_1', label: 'Inspect panel', description: 'Check for arc damage', risk: 'low', timeCost: '2 min' }],
       },
     ]);
   });
@@ -124,6 +130,7 @@ describe('choiceSets current-choice contracts', () => {
         _creationTime: 100,
         gameId: gameA,
         turnNumber: 1,
+        title: 'First',
         choices: [{ id: 'a1', label: 'A1', description: 'first' }],
       },
       {
@@ -131,6 +138,7 @@ describe('choiceSets current-choice contracts', () => {
         _creationTime: 200,
         gameId: gameB,
         turnNumber: 4,
+        title: 'Other',
         choices: [{ id: 'b1', label: 'B1', description: 'other game' }],
       },
       {
@@ -138,6 +146,7 @@ describe('choiceSets current-choice contracts', () => {
         _creationTime: 300,
         gameId: gameA,
         turnNumber: 2,
+        title: 'Latest',
         choices: [{ id: 'a2', label: 'A2', description: 'latest for game A' }],
       },
     ]);
@@ -147,6 +156,7 @@ describe('choiceSets current-choice contracts', () => {
       _id: 'choice_set_3',
       gameId: gameA,
       turnNumber: 2,
+      title: 'Latest',
       choices: [{ id: 'a2', label: 'A2', description: 'latest for game A' }],
     });
   });
@@ -159,6 +169,7 @@ describe('choiceSets current-choice contracts', () => {
         _creationTime: 10,
         gameId,
         turnNumber: 0,
+        title: 'Low',
         choices: [{ id: 'zero', label: 'Zero', description: 'boundary low turn' }],
       },
       {
@@ -166,6 +177,7 @@ describe('choiceSets current-choice contracts', () => {
         _creationTime: 20,
         gameId,
         turnNumber: 999,
+        title: 'High',
         choices: [{ id: 'high', label: 'High', description: 'boundary high turn' }],
       },
     ]);
@@ -183,17 +195,29 @@ describe('choiceSets current-choice contracts', () => {
         _creationTime: 111,
         gameId,
         turnNumber: 7,
-        choices: [{ id: 'route', label: 'Route power', description: 'Shift power to life support' }],
+        title: 'Route',
+        choices: [{
+          id: 'route',
+          label: 'Route power',
+          description: 'Shift power to life support',
+          risk: 'medium',
+          timeCost: '4 min',
+          consequence: 'Life support stabilizes, but coolant stays exposed.',
+        }],
       },
     ]);
 
     const current = await getCurrentHandler(ctx, { gameId });
     if (!current) throw new Error('Expected current choice set');
     expect(Object.keys(current.choices[0] ?? {}).sort()).toEqual([
+      'consequence',
       'description',
       'id',
       'label',
+      'risk',
+      'timeCost',
     ]);
+    expect(current.title).toBe('Route');
   });
 
   it('[E] handles empty-choice saves safely for error-adjacent no-choice turns', async () => {
@@ -203,6 +227,7 @@ describe('choiceSets current-choice contracts', () => {
       saveHandler(ctx, {
         gameId: 'game_no_choices' as Id<'games'>,
         turnNumber: 3,
+        title: 'No Choices',
         choices: [],
       }),
     ).resolves.toBeNull();
@@ -211,6 +236,7 @@ describe('choiceSets current-choice contracts', () => {
       {
         gameId: 'game_no_choices',
         turnNumber: 3,
+        title: 'No Choices',
         choices: [],
       },
     ]);
@@ -224,7 +250,8 @@ describe('choiceSets current-choice contracts', () => {
     await saveHandler(ctx, {
       gameId,
       turnNumber: 1,
-      choices: [{ id: 'diag', label: 'Run diagnostics', description: 'Collect system telemetry' }],
+      title: 'Engineering Decision Point',
+      choices: [{ id: 'diag', label: 'Run diagnostics', description: 'Collect system telemetry', consequence: 'Clarifies the fault before you commit parts.' }],
     });
 
     const current = await getCurrentHandler(ctx, { gameId });
@@ -232,7 +259,8 @@ describe('choiceSets current-choice contracts', () => {
       _creationTime: 5_555,
       gameId,
       turnNumber: 1,
-      choices: [{ id: 'diag', label: 'Run diagnostics', description: 'Collect system telemetry' }],
+      title: 'Engineering Decision Point',
+      choices: [{ id: 'diag', label: 'Run diagnostics', description: 'Collect system telemetry', consequence: 'Clarifies the fault before you commit parts.' }],
     });
 
     nowSpy.mockRestore();

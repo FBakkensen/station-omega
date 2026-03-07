@@ -52,7 +52,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
   // Destructure stable properties from streaming to use in effect deps
   const {
     segments, latestTurnStartIndex, isStreaming,
-    submitTurn, choices, error: streamError, clearError,
+    submitTurn, choices, choiceTitle, error: streamError, clearError,
   } = streaming;
 
   // TTS proxy URL: derive from Convex URL (.cloud → .site) + /api/tts
@@ -295,6 +295,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
             segments={segments}
             typewriterCards={twCards}
             choices={choices}
+            choiceTitle={choiceTitle}
             onChoice={handleChoice}
             isStreaming={isStreaming}
             allFinalized={twAllFinalized}

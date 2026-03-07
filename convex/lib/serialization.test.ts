@@ -87,6 +87,36 @@ describe('serialization helpers', () => {
     expect(twice).toEqual(once);
   });
 
+  it('[M] normalizes legacy objective reveal state across many deserialized mission steps', () => {
+    const station = createTestStation();
+    station.objectives.steps.push({
+      id: 'step_2',
+      description: 'Signal extraction.',
+      roomId: 'room_1',
+      requiredItemId: null,
+      requiredSystemRepair: null,
+      revealed: false,
+      completed: false,
+    });
+    station.objectives.steps[0].completed = true;
+    station.objectives.currentStepIndex = 99;
+
+    const serialized = serializeStation(station);
+    const legacySteps = serialized.objectives.steps as unknown as Array<
+      Omit<typeof serialized.objectives.steps[number], 'revealed'> & { revealed?: boolean }
+    >;
+    for (const step of legacySteps) {
+      Reflect.deleteProperty(step, 'revealed');
+    }
+
+    const restored = deserializeStation(serialized);
+
+    expect(restored.objectives.currentStepIndex).toBe(1);
+    expect(restored.objectives.steps[0].revealed).toBe(true);
+    expect(restored.objectives.steps[1].revealed).toBe(true);
+    expect(restored.objectives.steps[2].revealed).toBe(false);
+  });
+
   it('[O] single populated eventCooldowns round-trips correctly', () => {
     const state = createTestState();
     state.eventCooldowns = { power_failure: 3, radiation_spike: 7 };

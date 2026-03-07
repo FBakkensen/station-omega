@@ -10,6 +10,7 @@ type GameDoc = {
   state: Record<string, unknown>;
   npcOverrides: Record<string, unknown>;
   roomOverrides: Record<string, unknown>;
+  objectivesOverride?: Record<string, unknown>;
   roomDrops: Record<string, unknown>;
   isOver: boolean;
   won: boolean;

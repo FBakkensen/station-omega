@@ -1,5 +1,6 @@
 import type { GameState, GeneratedStation } from './types.js';
 import type { GameResponse } from './schema.js';
+import { getActiveObjectiveStep } from './objectives.js';
 
 /** Validate AI output against game rules. Returns issue strings or empty array. */
 export function validateGameResponse(
@@ -66,8 +67,8 @@ export function validateNarrativeHooks(
         issues.push('Pressured turn missing thought segment for stakes, calculations, or consequence framing.');
     }
 
-    const currentStep = station.objectives.steps[station.objectives.currentStepIndex];
-    if (station.objectives.currentStepIndex < station.objectives.steps.length && !currentStep.completed) {
+    const currentStep = getActiveObjectiveStep(station.objectives);
+    if (currentStep) {
         const roomName = station.rooms.get(currentStep.roomId)?.name ?? currentStep.roomId;
         const systemName = currentStep.requiredSystemRepair?.replace(/_/g, ' ') ?? '';
         const itemName = currentStep.requiredItemId

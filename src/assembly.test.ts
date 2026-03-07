@@ -112,6 +112,7 @@ function makeSkeleton(overrides: Partial<StationSkeleton> = {}): StationSkeleton
           roomId: 'room_1',
           requiredItemId: 'item_wire',
           requiredSystemRepair: 'power_relay',
+          revealed: true,
           completed: false,
         },
         {
@@ -120,6 +121,7 @@ function makeSkeleton(overrides: Partial<StationSkeleton> = {}): StationSkeleton
           roomId: 'room_2',
           requiredItemId: 'keycard_ops',
           requiredSystemRepair: null,
+          revealed: false,
           completed: false,
         },
       ],

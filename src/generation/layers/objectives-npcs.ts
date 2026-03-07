@@ -88,7 +88,10 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
 # Objective Design
 - Create a compelling 3-7 step objective chain that guides the player through the station
 - Each step has: id (like "step_0"), description, roomId, optional requiredItemId, optional requiredSystemRepair
-- Steps should progress logically from entry toward escape
+- Steps should progress logically from entry toward escape as a strict ordered dependency chain
+- Treat the array order as the reveal order: each step must feel unlocked by completing the previous one
+- Each step must stand on its own when revealed later. Do not write descriptions that spoil future rooms, items, repairs, or twists before the player should know them
+- It must still make sense if the player physically reaches a later room or satisfies a later condition early; the revealed text should read like the next discovered objective, not like a retrospective spoiler dump
 - The LAST step MUST target the escape room (${topology.escapeRoomId})
 - requiredItemId: reference an existing item ID from the items list, or null
 - requiredSystemRepair: reference a system that has a failure in the target room, or null
@@ -110,6 +113,7 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
 - If a step requires an item, that item ID must exist in the items list
 - If a step requires a system repair, that system must have a failure in the specified room
 - The objective chain should be completable given the station layout and available items
+- Avoid "and then later" spoiler phrasing. Each description should read like the immediate next task, not a summary of the whole plan
 - Make the objectives narratively connected to the scenario theme`;
 
     const roomsSummary = topology.rooms.map(r => {
@@ -137,7 +141,7 @@ ${roomsSummary}
 Items placed:
 ${itemsSummary}
 
-Create a 3-7 step objective chain and 0-3 NPCs.`;
+Create a 3-7 step objective chain and 0-3 NPCs. Make the objective list an ordered dependency chain where each step becomes the natural next reveal after the previous one.`;
 
     if (errors && errors.length > 0) {
         user += `\n\nYour previous output had the following errors. Fix ALL of them:\n\n${errors.map((e, i) => `${String(i + 1)}. ${e}`).join('\n')}\n\nGenerate a corrected version addressing all errors above.`;

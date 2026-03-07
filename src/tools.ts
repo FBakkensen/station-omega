@@ -16,6 +16,12 @@ import { getProficiencyModifier } from './character.js';
 import { CRAFT_RECIPES, computeActionMinutes } from './data.js';
 import { computeEnvironment } from './environment.js';
 import { advanceCascadeCountdowns } from './events.js';
+import {
+    formatObjectiveUpdate,
+    getActiveObjectiveStep,
+    normalizeObjectiveChainWithLegacySupport,
+    syncObjectiveProgress,
+} from './objectives.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -93,42 +99,39 @@ function recordMoralChoiceInternal(
     state.moralProfile.tendencies[tendency] += clampedMag;
 }
 
-// ─── Phase 3: Auto-Complete Objectives ─────────────────────────────────────
+// ─── Phase 3: Objective Progression ────────────────────────────────────────
 
-function autoCheckObjectiveCompletion(
+function buildObjectiveProgressPayload(
     state: GameState,
     station: GeneratedStation,
-): string | null {
-    const obj = station.objectives;
-    if (obj.completed) return null;
-    if (obj.currentStepIndex >= obj.steps.length) return null;
-    const step = obj.steps[obj.currentStepIndex];
-    if (step.completed) return null;
+): { objective_update?: string; objective_progress?: Record<string, unknown> } {
+    const progress = syncObjectiveProgress(state, station);
+    const summary = formatObjectiveUpdate(progress);
+    if (!progress || !summary) return {};
 
-    const inRoom = state.currentRoom === step.roomId;
-    const hasItem = step.requiredItemId === null || state.inventory.includes(step.requiredItemId) || state.hasObjectiveItem;
-
-    // Check system repair requirement via room failure state
-    let systemRepaired = step.requiredSystemRepair === null;
-    if (!systemRepaired) {
-        const stepRoom = station.rooms.get(step.roomId);
-        systemRepaired = stepRoom?.systemFailures.some(f =>
-            f.systemId === step.requiredSystemRepair && f.challengeState === 'resolved',
-        ) ?? false;
-    }
-
-    if (inRoom && hasItem && systemRepaired) {
-        step.completed = true;
-        obj.currentStepIndex++;
-
-        if (obj.currentStepIndex >= obj.steps.length) {
-            obj.completed = true;
-            return 'OBJECTIVE COMPLETE: All steps done! Mission complete.';
-        }
-        const nextStep = obj.steps[obj.currentStepIndex];
-        return `OBJECTIVE STEP COMPLETE: "${step.description}" completed. Next: "${nextStep.description}"`;
-    }
-    return null;
+    return {
+        objective_update: summary,
+        objective_progress: {
+            missionCompleted: progress.missionCompleted,
+            newlyCompletedSteps: progress.newlyCompletedSteps.map((step) => ({
+                id: step.id,
+                description: step.description,
+                revealed: step.revealed,
+            })),
+            newlyRevealedSteps: progress.newlyRevealedSteps.map((step) => ({
+                id: step.id,
+                description: step.description,
+                completed: step.completed,
+            })),
+            activeStep: progress.activeStep
+                ? {
+                    id: progress.activeStep.id,
+                    description: progress.activeStep.description,
+                    roomId: progress.activeStep.roomId,
+                }
+                : null,
+        },
+    };
 }
 
 // ─── Phase 4: Moral Choice Detection ───────────────────────────────────────
@@ -193,9 +196,8 @@ function detectMoralChoice(
     if (toolName === 'repair_system') {
         if (success) {
             const systemId = (args.system ?? '') as string;
-            const stepIdx = station.objectives.currentStepIndex;
-            const isObjectiveSystem = stepIdx < station.objectives.steps.length &&
-                station.objectives.steps[stepIdx].requiredSystemRepair === systemId;
+            const activeStep = getActiveObjectiveStep(station.objectives);
+            const isObjectiveSystem = activeStep?.requiredSystemRepair === systemId;
             if (!isObjectiveSystem && !alreadyThisTurn('sacrifice')) {
                 recordMoralChoiceInternal(state, 'sacrifice', 1, 'repaired non-objective system');
             }
@@ -241,6 +243,7 @@ export interface GameToolSets {
 }
 
 export function createGameToolSets(classId: string, gameCtx: GameContext): GameToolSets {
+    normalizeObjectiveChainWithLegacySupport(gameCtx.station.objectives);
 
     function advanceTime(minutes: number): void {
         gameCtx.turnElapsedMinutes += minutes;
@@ -295,8 +298,8 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             });
 
             const objectives = station.objectives;
-            const currentStep = objectives.steps[objectives.currentStepIndex] as typeof objectives.steps[number] | undefined;
-            const isObjectiveHere = currentStep !== undefined && currentStep.roomId === state.currentRoom && !currentStep.completed;
+            const currentStep = getActiveObjectiveStep(objectives);
+            const isObjectiveHere = currentStep !== null && currentStep.roomId === state.currentRoom && !currentStep.completed;
 
             return JSON.stringify({
                 action_minutes: minutes,
@@ -422,9 +425,9 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const availableItems = room ? room.loot.filter(id => !state.itemsTaken.has(id)) : [];
             for (const id of availableItems) state.revealedItems.add(id);
 
-            const completion = autoCheckObjectiveCompletion(state, station);
+            const objectiveProgress = buildObjectiveProgressPayload(state, station);
 
-            // Post-completion win check: handle edge case where autoCheckObjectiveCompletion
+            // Post-completion win check: handle edge case where objective sync
             // completes the final step during this move to the escape room
             if (targetId === station.escapeRoomId && station.objectives.completed) {
                 state.gameOver = true;
@@ -449,7 +452,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                     (f.systemId === 'atmosphere_processor' || f.systemId === 'life_support' || f.systemId === 'pressure_seal')
                     && f.challengeState !== 'resolved'
                 ) ?? false),
-                objective_update: completion ?? undefined,
+                ...objectiveProgress,
             });
         },
     });
@@ -497,26 +500,26 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 if (item?.effect.type === 'objective') {
                     state.hasObjectiveItem = true;
                     state.metrics.itemsCollected.push(matchId);
-                    const completion = autoCheckObjectiveCompletion(state, station);
+                    const objectiveProgress = buildObjectiveProgressPayload(state, station);
                     return JSON.stringify({
                         success: true,
                         item_id: matchId,
                         item_name: item.name,
                         is_objective_item: true,
-                        objective_update: completion ?? undefined,
+                        ...objectiveProgress,
                     });
                 }
 
                 state.inventory.push(matchId);
                 state.metrics.itemsCollected.push(matchId);
-                const completion = autoCheckObjectiveCompletion(state, station);
+                const objectiveProgress = buildObjectiveProgressPayload(state, station);
                 return JSON.stringify({
                     success: true,
                     item_id: matchId,
                     item_name: item?.name ?? matchId,
                     inventory: inventoryList(state, station),
                     slots_remaining: state.maxInventory - state.inventory.length,
-                    objective_update: completion ?? undefined,
+                    ...objectiveProgress,
                 });
             }
 
@@ -893,6 +896,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             }
 
             const objectives = station.objectives;
+            normalizeObjectiveChainWithLegacySupport(objectives);
             if (objectives.currentStepIndex >= objectives.steps.length) {
                 return JSON.stringify({ error: 'No more objectives.' });
             }
@@ -923,25 +927,18 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             }
 
             currentStep.completed = true;
-            objectives.currentStepIndex++;
-
-            if (objectives.currentStepIndex >= objectives.steps.length) {
-                objectives.completed = true;
-                return JSON.stringify({
-                    success: true,
-                    description: args.step_description,
-                    all_complete: true,
-                    escape_room: station.rooms.get(station.escapeRoomId)?.name ?? 'escape',
-                });
-            }
-
-            const next = objectives.steps[objectives.currentStepIndex];
+            const objectiveProgress = buildObjectiveProgressPayload(state, station);
+            const next = getActiveObjectiveStep(objectives);
             return JSON.stringify({
                 success: true,
                 description: args.step_description,
-                all_complete: false,
-                next_objective: next.description,
-                next_room: station.rooms.get(next.roomId)?.name ?? next.roomId,
+                all_complete: objectives.completed,
+                next_objective: next?.description,
+                next_room: next ? (station.rooms.get(next.roomId)?.name ?? next.roomId) : undefined,
+                escape_room: objectives.completed
+                    ? (station.rooms.get(station.escapeRoomId)?.name ?? 'escape')
+                    : undefined,
+                ...objectiveProgress,
             });
         },
     });
@@ -1096,12 +1093,12 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 failure.status = 'repaired';
                 state.repairedSystems.add(`${failure.systemId}:${state.currentRoom}`);
                 state.metrics.systemsRepaired++;
-                const completion = autoCheckObjectiveCompletion(state, station);
+                const objectiveProgress = buildObjectiveProgressPayload(state, station);
                 const repairResultObj = {
                     action_minutes: minutes,
                     success: true, outcome, system_id: failure.systemId, roll, target,
                     inventory: inventoryList(state, station),
-                    objective_update: completion ?? undefined,
+                    ...objectiveProgress,
                 };
                 detectMoralChoice('repair_system', args as Record<string, unknown>, repairResultObj, state, station);
                 return JSON.stringify(repairResultObj);
@@ -1304,10 +1301,12 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             state.inventory.push(recipe.resultId);
             state.craftedItems.push(recipe.resultId);
             state.metrics.itemsCrafted++;
+            const objectiveProgress = buildObjectiveProgressPayload(state, station);
 
             return JSON.stringify({
                 success: true, crafted: recipe.resultName, roll, target,
                 inventory: inventoryList(state, station),
+                ...objectiveProgress,
             });
         },
     });

@@ -189,6 +189,7 @@ export interface ObjectiveStep {
     roomId: string;
     requiredItemId: string | null;
     requiredSystemRepair: SystemId | null;
+    revealed: boolean;
     completed: boolean;
 }
 

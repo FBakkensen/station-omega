@@ -1,13 +1,14 @@
-import type { ActiveEvent, GameState, GeneratedStation, ObjectiveStep, SystemFailure } from './types.js';
+import type { ActiveEvent, GameState, GeneratedStation, SystemFailure } from './types.js';
 import { getEventContext } from './events.js';
 import { computeEnvironment, type EnvironmentSnapshot } from './environment.js';
+import { getActiveObjectiveStep } from './objectives.js';
 
 function describeObjectivePressure(
     state: GameState,
     station: GeneratedStation,
 ): string | null {
-    const currentStep = station.objectives.steps[station.objectives.currentStepIndex] as ObjectiveStep | undefined;
-    if (!currentStep || currentStep.completed) return null;
+    const currentStep = getActiveObjectiveStep(station.objectives);
+    if (!currentStep) return null;
 
     const targetRoom = station.rooms.get(currentStep.roomId);
     const location = currentStep.roomId === state.currentRoom

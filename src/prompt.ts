@@ -1,4 +1,5 @@
 import type { GeneratedStation, CharacterBuild, ArrivalScenario } from './types.js';
+import { getActiveObjectiveStep } from './objectives.js';
 
 function knowledgeLevelGuidance(level: ArrivalScenario['knowledgeLevel']): string {
     switch (level) {
@@ -28,10 +29,19 @@ function formatNpcList(station: GeneratedStation): string {
         .join('\n');
 }
 
-function formatObjectiveSteps(station: GeneratedStation): string {
-    return station.objectives.steps
-        .map((s, i) => `${String(i + 1)}. ${s.description} (room: ${s.roomId}${s.requiredItemId ? `, requires: ${s.requiredItemId}` : ''})`)
-        .join('\n');
+function formatObjectiveBlockers(step: GeneratedStation['objectives']['steps'][number], station: GeneratedStation): string {
+    const blockers: string[] = [];
+
+    if (step.requiredItemId) {
+        const itemName = station.items.get(step.requiredItemId)?.name ?? step.requiredItemId;
+        blockers.push(`collect **${itemName}**`);
+    }
+
+    if (step.requiredSystemRepair) {
+        blockers.push(`repair **${step.requiredSystemRepair}**`);
+    }
+
+    return blockers.length > 0 ? blockers.join('; ') : 'No confirmed hard blocker yet.';
 }
 
 function formatCrewRoster(station: GeneratedStation): string {
@@ -210,14 +220,32 @@ When \`check_environment\` returns derived physics (partial pressures, boiling p
 }
 
 function buildObjectivesSection(station: GeneratedStation): string {
+    const activeStep = getActiveObjectiveStep(station.objectives);
+
+    if (!activeStep) {
+        return `# Mission: ${station.objectives.title}
+
+## Mission Status
+<current_objective>
+All known mission steps are resolved. Extraction is now the only remaining objective.
+</current_objective>
+
+Only the current revealed mission step is known to me at runtime. Future mission steps stay hidden until the engine reveals them.`;
+    }
+
+    const targetRoom = station.rooms.get(activeStep.roomId);
+    const roomLabel = targetRoom?.name ?? activeStep.roomId;
+
     return `# Mission: ${station.objectives.title}
 
-## Objective Steps
-<objective_steps>
-${formatObjectiveSteps(station)}
-</objective_steps>
+## Current Objective
+<current_objective>
+Description: ${activeStep.description}
+Location: ${roomLabel} (${activeStep.roomId})
+Known blockers: ${formatObjectiveBlockers(activeStep, station)}
+</current_objective>
 
-Guide me through these objectives organically. Do not reveal future steps — only hint at the current objective through system readouts, crew logs, and environmental clues.`;
+Only the current revealed mission step is known to me at runtime. Future mission steps stay hidden until the engine reveals them. Guide me through the current objective organically through system readouts, crew logs, and environmental clues without inventing or foreshadowing unrevealed mission text.`;
 }
 
 function buildEndingsSection(): string {

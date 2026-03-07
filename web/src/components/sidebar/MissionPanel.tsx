@@ -15,11 +15,8 @@ interface MissionPanelProps {
 export function MissionPanel({ title, currentStep, totalSteps, currentDescription, steps, isComplete }: MissionPanelProps) {
   return (
     <div className="border border-omega-border p-3">
-      <div className="flex items-center justify-between mb-2">
+      <div className="mb-2">
         <span className="text-omega-dim text-xs uppercase tracking-wider">Mission</span>
-        <span className="text-omega-dim text-xs">
-          {currentStep}/{totalSteps}
-        </span>
       </div>
 
       <h3 className="text-omega-title text-xs mb-2 truncate">{title}</h3>
@@ -27,7 +24,9 @@ export function MissionPanel({ title, currentStep, totalSteps, currentDescriptio
       {isComplete ? (
         <p className="text-grade-a text-xs">All objectives complete!</p>
       ) : (
-        <p className="text-omega-text text-xs mb-2">{currentDescription}</p>
+        <p className="text-omega-text text-xs mb-2">
+          {currentDescription || (currentStep > totalSteps ? '' : 'Awaiting next objective...')}
+        </p>
       )}
 
       {/* Step checklist */}

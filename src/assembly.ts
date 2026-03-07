@@ -9,6 +9,7 @@ import type {
     SystemFailureSkeleton,
 } from './types.js';
 import { generateMapLayout } from './map-layout.js';
+import { normalizeObjectiveChainWithLegacySupport } from './objectives.js';
 
 function assembleFailure(sk: SystemFailureSkeleton): SystemFailure {
     return {
@@ -129,6 +130,11 @@ export function assembleStation(
 
     const mapLayout = generateMapLayout(rooms, skeleton.config.seed, skeleton.entryRoomId);
 
+    const objectives = normalizeObjectiveChainWithLegacySupport({
+        ...skeleton.objectives,
+        steps: skeleton.objectives.steps.map(s => ({ ...s })),
+    });
+
     return {
         config: skeleton.config,
         stationName: creative.stationName,
@@ -137,7 +143,7 @@ export function assembleStation(
         rooms,
         npcs,
         items,
-        objectives: { ...skeleton.objectives, steps: skeleton.objectives.steps.map(s => ({ ...s })) },
+        objectives,
         entryRoomId: skeleton.entryRoomId,
         escapeRoomId: skeleton.escapeRoomId,
         crewRoster: [...creative.crewRoster],

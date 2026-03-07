@@ -159,6 +159,7 @@ export function createTestStation(): GeneratedStation {
           roomId: 'room_0',
           requiredItemId: null,
           requiredSystemRepair: 'power_relay',
+          revealed: true,
           completed: false,
         },
         {
@@ -167,6 +168,7 @@ export function createTestStation(): GeneratedStation {
           roomId: 'room_1',
           requiredItemId: 'item_keycard',
           requiredSystemRepair: null,
+          revealed: false,
           completed: false,
         },
       ],

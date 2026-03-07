@@ -11,7 +11,7 @@ run-history.json
 saved-stations/
 NUL
 test/results/
-test/fixtures/
+test/fixtures/*.json
 generation-logs/
 voice-tests/
 coverage/

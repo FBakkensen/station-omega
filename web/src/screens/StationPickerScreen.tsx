@@ -127,7 +127,7 @@ export function StationPickerScreen({ onGenerate, onSelectStation, onBack }: Sta
                       type="button"
                       aria-label={`Delete ${station.stationName}`}
                       onClick={() => { handleOpenDelete(station); }}
-                      className="flex items-center justify-center px-4 text-omega-dim transition-all hover:text-red-300 focus:text-red-300 focus:outline-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="flex items-center justify-center px-4 text-omega-dim opacity-60 transition-all hover:text-red-300 hover:opacity-100 focus:text-red-300 focus:opacity-100 focus:outline-none"
                     >
                       <svg
                         aria-hidden="true"
@@ -210,7 +210,7 @@ function StationDeleteModal({
           Delete <span className="text-red-300">{stationName}</span>?
         </p>
         <p className="text-omega-dim text-sm mb-4">
-          This removes the station and all linked run history, messages, segments, and saved progress.
+          This removes the station and its linked saved progress, messages, turn segments, and choice prompts.
         </p>
 
         {error ? (

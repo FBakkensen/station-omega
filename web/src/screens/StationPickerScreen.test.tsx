@@ -308,7 +308,7 @@ describe('StationPickerScreen deletion contracts', () => {
     resolveDelete();
   });
 
-  it('[B] preserves hover and focus visibility classes for the hidden delete icon affordance', () => {
+  it('[B] keeps the delete affordance visible without relying on hover-only classes', () => {
     stationsFixture = [
       {
         _id: 'station_boundary_delete',
@@ -328,9 +328,10 @@ describe('StationPickerScreen deletion contracts', () => {
     );
 
     const deleteButton = screen.getByRole('button', { name: /delete boundary loom/i });
-    expect(deleteButton.className).toContain('opacity-0');
-    expect(deleteButton.className).toContain('group-hover:opacity-100');
-    expect(deleteButton.className).toContain('group-focus-within:opacity-100');
+    expect(deleteButton.className).toContain('opacity-60');
+    expect(deleteButton.className).toContain('hover:opacity-100');
+    expect(deleteButton.className).not.toContain('opacity-0');
+    expect(deleteButton.className).not.toContain('group-hover:opacity-100');
   });
 
   it('[I] sends the exact station id to the remove mutation and exposes an accessible delete label', async () => {
@@ -386,6 +387,36 @@ describe('StationPickerScreen deletion contracts', () => {
 
     expect(await screen.findByText(/unable to delete station/i)).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: /delete station/i })).toBeInTheDocument();
+  });
+
+  it('[E] keeps confirmation copy aligned with retained run history records', async () => {
+    stationsFixture = [
+      {
+        _id: 'station_error_copy',
+        _creationTime: 1,
+        stationName: 'History Relay',
+        briefing: 'Copy should stay accurate.',
+        difficulty: 'hard',
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(
+      <StationPickerScreen
+        onGenerate={vi.fn()}
+        onSelectStation={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /delete history relay/i }));
+
+    expect(
+      screen.getByText(
+        'This removes the station and its linked saved progress, messages, turn segments, and choice prompts.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/run history/i)).not.toBeInTheDocument();
   });
 
   it('[S] completes the standard confirm-delete flow without selecting the station row', async () => {

@@ -27,15 +27,17 @@ interface GameplayScreenProps {
   stationId: string;
   onGameOver: (gameId: string) => void;
   onRunSummary: (gameId: string) => void;
+  onQuit: () => void;
 }
 
-export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: GameplayScreenProps) {
+export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, onQuit }: GameplayScreenProps) {
   const game = useQuery(api.games.get, { id: gameId as Id<"games"> }) as ConvexGameDoc | null | undefined;
   const station = useQuery(api.stations.get, { id: stationId as Id<"stations"> }) as ConvexStationDoc | null | undefined;
 
   const [showMap, setShowMap] = useState(false);
   const [showMission, setShowMission] = useState(false);
   const [showSituation, setShowSituation] = useState(false);
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
 
   const status = extractGameStatus(game, station);
   const stationName = station?.stationName ?? 'Station Omega';
@@ -215,6 +217,10 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
         setShowMap(false);
         setShowMission(false);
         setShowSituation(false);
+        setShowQuitConfirm(false);
+      } else if (e.key === 'F10') {
+        e.preventDefault();
+        setShowQuitConfirm((prev) => !prev);
       } else if (e.key === ' ') {
         // Spacebar skips current typewriter card (only when input not focused)
         const active = document.activeElement;
@@ -303,6 +309,12 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
               )}
             </>
           )}
+          <button
+            onClick={() => { setShowQuitConfirm(true); }}
+            className="ml-auto hover:text-omega-text transition-colors"
+          >
+            [F10] Quit
+          </button>
         </div>
 
         <ErrorBoundary>
@@ -363,6 +375,35 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary }: 
           status={status}
           onClose={() => { setShowSituation(false); }}
         />
+      )}
+
+      {showQuitConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          onClick={() => { setShowQuitConfirm(false); }}
+        >
+          <div
+            className="border border-omega-border bg-omega-panel max-w-sm w-full mx-4 p-6"
+            onClick={(e) => { e.stopPropagation(); }}
+          >
+            <h2 className="text-omega-title text-sm uppercase tracking-wider mb-4">Quit Game?</h2>
+            <p className="text-omega-dim text-sm mb-6">Return to the main screen?</p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setShowQuitConfirm(false); }}
+                className="px-4 py-2 text-xs text-omega-dim hover:text-omega-text transition-colors"
+              >
+                Stay
+              </button>
+              <button
+                onClick={() => { onQuit(); }}
+                className="px-4 py-2 text-xs bg-red-900/50 border border-red-700 text-red-300 hover:bg-red-900/70 transition-colors"
+              >
+                Quit
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

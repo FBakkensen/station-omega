@@ -13,6 +13,7 @@ import { MissionModal } from '../components/modals/MissionModal';
 import { SituationModal } from '../components/modals/SituationModal';
 import { usePreferences } from '../hooks/usePreferences';
 import { useDevSettings } from '../hooks/useDevSettings';
+import { useGameImages } from '../hooks/useStationImages';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   extractGameStatus,
@@ -45,6 +46,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   const missionElapsedMinutes = game?.state?.missionElapsedMinutes ?? 0;
 
   const { gameMasterModelId, soundEnabled: initialSound, setSoundEnabled: persistSound } = usePreferences();
+  const stationImages = useGameImages(gameId, stationId);
 
   const streaming = useStreamingTurn({
     gameId,
@@ -252,11 +254,9 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   const visitedRoomIds = game?.state?.roomsVisited ?? [];
 
   return (
-    <div className="flex h-full">
-      {/* Narrative Panel + Command Input */}
-      <div className="flex-1 flex flex-col">
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-omega-border bg-omega-panel text-xs text-omega-dim">
+    <div className="flex flex-col h-full">
+      {/* Toolbar — full width */}
+      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-omega-border bg-omega-panel text-xs text-omega-dim">
           <button
             onClick={() => { setShowMap(true); }}
             className="hover:text-omega-text transition-colors"
@@ -315,7 +315,12 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
           >
             [F10] Quit
           </button>
-        </div>
+      </div>
+
+      {/* Two-column layout */}
+      <div className="flex flex-1 min-h-0">
+        {/* Narrative Panel + Command Input */}
+        <div className="flex-1 flex flex-col min-h-0">
 
         <ErrorBoundary>
           <NarrativePanel
@@ -345,10 +350,11 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
           onSubmit={handleSubmit}
           disabled={isStreaming || !twAllFinalized}
         />
-      </div>
+        </div>
 
-      {/* Sidebar */}
-      <Sidebar status={status} stationName={stationName} />
+        {/* Sidebar */}
+        <Sidebar status={status} stationName={stationName} stationImages={stationImages} currentRoomId={currentRoomId} />
+      </div>
 
       {/* Modals */}
       {showMap && mapRooms && (

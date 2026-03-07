@@ -14,7 +14,7 @@ interface MissionPanelProps {
 
 export function MissionPanel({ title, currentStep, totalSteps, currentDescription, steps, isComplete }: MissionPanelProps) {
   return (
-    <div className="border border-omega-border p-3">
+    <div className="border border-omega-border p-4">
       <div className="mb-2">
         <span className="text-omega-dim text-xs uppercase tracking-wider">Mission</span>
       </div>

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as actions_generateImage from "../actions/generateImage.js";
 import type * as actions_generateStation from "../actions/generateStation.js";
 import type * as actions_streamTurn from "../actions/streamTurn.js";
 import type * as actions_ttsProxy from "../actions/ttsProxy.js";
@@ -19,6 +20,7 @@ import type * as lib_serialization from "../lib/serialization.js";
 import type * as messages from "../messages.js";
 import type * as runHistory from "../runHistory.js";
 import type * as stationGeneration from "../stationGeneration.js";
+import type * as stationImages from "../stationImages.js";
 import type * as stations from "../stations.js";
 import type * as test_utils from "../test_utils.js";
 import type * as turnLocks from "../turnLocks.js";
@@ -32,6 +34,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "actions/generateImage": typeof actions_generateImage;
   "actions/generateStation": typeof actions_generateStation;
   "actions/streamTurn": typeof actions_streamTurn;
   "actions/ttsProxy": typeof actions_ttsProxy;
@@ -43,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   runHistory: typeof runHistory;
   stationGeneration: typeof stationGeneration;
+  stationImages: typeof stationImages;
   stations: typeof stations;
   test_utils: typeof test_utils;
   turnLocks: typeof turnLocks;

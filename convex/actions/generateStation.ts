@@ -102,6 +102,19 @@ export const generate = internalAction({
       });
       console.info("[generateStation] Station saved", { stationId });
 
+      // Schedule briefing image generation (fire-and-forget)
+      if (process.env.FAL_API_KEY) {
+        const { buildBriefingImagePrompt } = await import("../../src/image-prompts.js");
+        const briefingPrompt = buildBriefingImagePrompt(station);
+        await ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
+          stationId,
+          cacheKey: "briefing",
+          category: "briefing" as const,
+          prompt: briefingPrompt,
+        });
+        console.info("[generateStation] Briefing image generation scheduled");
+      }
+
       // Mark progress as complete
       await ctx.runMutation(internal.generationProgress.update, {
         id: progressId,

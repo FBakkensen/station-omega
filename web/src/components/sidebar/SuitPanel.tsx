@@ -40,7 +40,7 @@ export function SuitPanel({ hp, maxHp, oxygen, maxOxygen, suitIntegrity, charact
   const met = `T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 
   return (
-    <div className="border border-omega-border p-3">
+    <div className="border border-omega-border p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-omega-dim text-xs uppercase tracking-wider">Suit Status</span>
         <span className="text-omega-dim text-xs">{icon} {met}</span>

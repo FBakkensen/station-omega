@@ -14,7 +14,7 @@ export function HazardsPanel({ events }: HazardsPanelProps) {
   if (events.length === 0) return null;
 
   return (
-    <div className="border border-hp-low/30 p-3 bg-hp-low/5">
+    <div className="border border-hp-low/30 p-4 bg-hp-low/5">
       <span className="text-hp-low text-xs uppercase tracking-wider">Active Hazards</span>
 
       <div className="mt-2 space-y-2">

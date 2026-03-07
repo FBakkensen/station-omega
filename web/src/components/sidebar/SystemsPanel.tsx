@@ -50,7 +50,7 @@ export function SystemsPanel({ failures }: SystemsPanelProps) {
   if (active.length === 0) return null;
 
   return (
-    <div className="border border-omega-border p-3">
+    <div className="border border-omega-border p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-omega-dim text-xs uppercase tracking-wider">Systems</span>
         <span className="text-hp-low text-xs">{active.length} FAILING</span>

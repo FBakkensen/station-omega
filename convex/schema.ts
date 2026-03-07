@@ -182,4 +182,29 @@ export default defineSchema({
     gameId: v.id("games"),
     lockedAt: v.number(),
   }).index("by_game", ["gameId"]),
+
+  /**
+   * Cached AI-generated images.
+   * Room/NPC images are scoped per game (narrative-informed).
+   * Briefing images are scoped per station (shared across games).
+   */
+  stationImages: defineTable({
+    stationId: v.id("stations"),
+    /** Game ID for per-game scoping. Undefined for station-scoped images (briefings). */
+    gameId: v.optional(v.id("games")),
+    /** Cache key for deduplication (e.g., "room:reactor", "npc:chen", "briefing"). */
+    cacheKey: v.string(),
+    /** Convex file storage blob ID. */
+    storageId: v.id("_storage"),
+    /** The prompt used to generate this image. */
+    prompt: v.string(),
+    /** Image category for UI rendering. */
+    category: v.union(
+      v.literal("room_scene"),
+      v.literal("npc_portrait"),
+      v.literal("briefing"),
+    ),
+  })
+    .index("by_station_cache", ["stationId", "cacheKey"])
+    .index("by_game_cache", ["gameId", "cacheKey"]),
 });

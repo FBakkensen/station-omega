@@ -30,6 +30,7 @@ export interface SerializedStation {
   crewRoster: GeneratedStation["crewRoster"];
   arrivalScenario: GeneratedStation["arrivalScenario"];
   mapLayout: SerializedMapLayout;
+  visualStyleSeed?: string;
 }
 
 type SerializedNPC = Omit<NPC, "behaviors"> & { behaviors: NPCBehaviorFlag[] };
@@ -77,6 +78,7 @@ export function serializeStation(station: GeneratedStation): SerializedStation {
     crewRoster: station.crewRoster,
     arrivalScenario: station.arrivalScenario,
     mapLayout,
+    visualStyleSeed: station.visualStyleSeed,
   };
 }
 
@@ -117,6 +119,7 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
     crewRoster: data.crewRoster,
     arrivalScenario: data.arrivalScenario,
     mapLayout,
+    visualStyleSeed: data.visualStyleSeed,
   };
 }
 

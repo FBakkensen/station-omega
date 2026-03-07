@@ -4,6 +4,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
+import { buildRoomImagePrompt, buildNPCImagePrompt, extractNarrativeVisuals } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
@@ -175,6 +176,11 @@ export const processAITurn = internalAction({
         }
       }
 
+      // Track room before AI execution for image generation triggers
+      const previousRoom = state.currentRoom;
+      const seenNpcIds = new Set<string>();
+      const collectedSegments: Array<{ type: string; text: string }> = [];
+
       console.time("[processAITurn] AI streaming");
       const result = aiClient.streamStructuredObject({
         modelId: effectiveModelId,
@@ -210,6 +216,14 @@ export const processAITurn = internalAction({
               (seg as Record<string, unknown>).npcId = null;
               console.debug("[processAITurn] Downgraded dialogue to narration for non-social turn");
             }
+
+            // Track NPC IDs from dialogue for image generation
+            if (seg.type === 'dialogue' && seg.npcId) {
+              seenNpcIds.add(seg.npcId);
+            }
+
+            // Accumulate segments for narrative-aware image prompts
+            collectedSegments.push({ type: seg.type, text: seg.text });
 
             await ctx.runMutation(internal.turnSegments.save, {
               gameId,
@@ -289,6 +303,41 @@ export const processAITurn = internalAction({
           title: lastChoices.title,
           choices: mapChoicesForPersistence(lastChoices),
         });
+      }
+
+      // ── Schedule image generation (fire-and-forget) ──────────────
+      const roomChanged = state.currentRoom !== previousRoom || turnNumber === 1;
+      if (roomChanged) {
+        const room = stationObj.rooms.get(state.currentRoom);
+        if (room) {
+          const cacheKey = `room:${state.currentRoom}`;
+          const narrativeContext = extractNarrativeVisuals(collectedSegments);
+          const prompt = buildRoomImagePrompt(room, stationObj, state.activeEvents, narrativeContext);
+          await ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey,
+            category: "room_scene" as const,
+            prompt,
+          });
+        }
+      }
+
+      // Schedule NPC portrait generation for new dialogue encounters
+      for (const npcId of seenNpcIds) {
+        const npc = stationObj.npcs.get(npcId);
+        const room = npc ? stationObj.rooms.get(npc.roomId) : undefined;
+        if (npc && room) {
+          const cacheKey = `npc:${npcId}`;
+          const prompt = buildNPCImagePrompt(npc, room, stationObj.visualStyleSeed);
+          await ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey,
+            category: "npc_portrait" as const,
+            prompt,
+          });
+        }
       }
 
       // Mark turn as complete

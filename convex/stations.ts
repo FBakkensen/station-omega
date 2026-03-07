@@ -105,6 +105,16 @@ export const remove = mutation({
       await ctx.db.delete(game._id);
     }
 
+    // Delete cached images
+    const images = await ctx.db
+      .query("stationImages")
+      .withIndex("by_station_cache", (q) => q.eq("stationId", args.id))
+      .collect();
+    for (const img of images) {
+      await ctx.storage.delete(img.storageId);
+      await ctx.db.delete(img._id);
+    }
+
     await ctx.db.delete(args.id);
     return null;
   },

@@ -274,6 +274,7 @@ export interface CreativeContent {
     arrivalScenario: ArrivalScenario;
     startingItem: StartingItemCreative;
     npcCreative?: NPCCreative[];
+    visualStyleSeed?: string;
 }
 
 // ─── Assembled World (final, used during gameplay) ──────────────────────────
@@ -333,6 +334,7 @@ export interface GeneratedStation {
     crewRoster: CrewMember[];
     arrivalScenario: ArrivalScenario;
     mapLayout: MapLayout;
+    visualStyleSeed?: string;
 }
 
 // ─── Moral Choices ──────────────────────────────────────────────────────────

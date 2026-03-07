@@ -255,6 +255,7 @@ export async function runCreativeSublayers(
         arrivalScenario: arrival.arrivalScenario,
         startingItem: arrival.startingItem,
         npcCreative: npcCreative && npcCreative.length > 0 ? npcCreative : undefined,
+        visualStyleSeed: identity.visualStyleSeed,
     };
 
     debugLog?.('GENERATION', `Creative assembly complete: "${creative.stationName}" — ${String(creative.rooms.length)} rooms, ${String(creative.items.length)} items, ${String(creative.npcCreative?.length ?? 0)} NPCs`);

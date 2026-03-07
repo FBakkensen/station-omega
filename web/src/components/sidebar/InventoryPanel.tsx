@@ -11,7 +11,7 @@ export function InventoryPanel({ items, maxInventory, keyFlags }: InventoryPanel
   const slotColor = slotPct >= 1 ? COLORS.hpLow : slotPct >= 0.8 ? COLORS.hpMid : COLORS.hpGood;
 
   return (
-    <div className="border border-omega-border p-3">
+    <div className="border border-omega-border p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-omega-dim text-xs uppercase tracking-wider">Inventory</span>
         <span className="text-xs" style={{ color: slotColor }}>

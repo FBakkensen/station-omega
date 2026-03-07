@@ -81,7 +81,7 @@ function MetricRow({ label, value, level, pct }: MetricRowProps) {
 export function AtmospherePanel({ environment }: AtmospherePanelProps) {
   if (!environment) {
     return (
-      <div className="border border-omega-border p-3">
+      <div className="border border-omega-border p-4">
         <span className="text-omega-dim text-xs uppercase tracking-wider">Atmosphere</span>
         <p className="text-omega-dim/50 text-xs mt-2">No sensor data</p>
       </div>
@@ -91,7 +91,7 @@ export function AtmospherePanel({ environment }: AtmospherePanelProps) {
   const { oxygenPct, co2Ppm, pressureKpa, temperatureC, radiationMsv, structuralPct } = environment;
 
   return (
-    <div className="border border-omega-border p-3">
+    <div className="border border-omega-border p-4">
       <span className="text-omega-dim text-xs uppercase tracking-wider">Atmosphere</span>
 
       <div className="mt-2 space-y-1">

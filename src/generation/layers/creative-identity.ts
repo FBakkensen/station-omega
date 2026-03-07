@@ -27,6 +27,7 @@ const IdentitySeedSchema = z.object({
         fate: z.string(),
     })),
     toneKeywords: z.array(z.string()),
+    visualStyleSeed: z.string(),
 });
 
 type IdentitySeedOutput = z.infer<typeof IdentitySeedSchema>;
@@ -39,6 +40,7 @@ export interface ValidatedIdentitySeed {
     backstory: string;
     crewRoster: Array<{ name: string; role: string; fate: string }>;
     toneKeywords: string[];
+    visualStyleSeed: string;
 }
 
 // ─── Prompt Builder ──────────────────────────────────────────────────────────
@@ -58,7 +60,8 @@ Grounded sci-fi with personality. The Martian meets Project Hail Mary. The stati
 - briefing: 1-2 sentences summarizing the mission/situation
 - backstory: 2-3 sentences about the station's history and what went wrong
 - crewRoster: 3-5 crew members (engineers, scientists, technicians) with name, role, and fate
-- toneKeywords: 3-5 words/phrases capturing the station's mood (e.g., "claustrophobic", "jury-rigged", "fading hope")`;
+- toneKeywords: 3-5 words/phrases capturing the station's mood (e.g., "claustrophobic", "jury-rigged", "fading hope")
+- visualStyleSeed: A short visual style phrase (10-20 words) describing the station's aesthetic for AI image generation. Focus on lighting, color palette, architectural style, and atmosphere (e.g., "Soviet-era brutalist industrial, amber emergency lighting, corroded steel panels", "Sleek corporate white corridors stained with coolant, flickering fluorescent strips")`;
 
     const roomSummary = topology.rooms.map(r => `  ${r.id} (${r.archetype})`).join('\n');
 
@@ -107,6 +110,10 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
         errors.push('backstory is empty — provide a 2-3 sentence station history');
     }
 
+    if (!output.visualStyleSeed.trim()) {
+        errors.push('visualStyleSeed is empty — provide a 10-20 word visual style phrase');
+    }
+
     if (errors.length > 0) {
         return validationFailure(errors);
     }
@@ -121,6 +128,7 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
             fate: c.fate,
         })),
         toneKeywords: output.toneKeywords,
+        visualStyleSeed: output.visualStyleSeed,
     });
 }
 
@@ -140,6 +148,7 @@ export const identitySeedLayer: LayerConfig<IdentitySeedOutput, ValidatedIdentit
             `Station: "${v.stationName}"`,
             `Crew: ${crewNames.join(', ')}`,
             `Tone: ${v.toneKeywords.join(', ')}`,
+            `Visual: ${v.visualStyleSeed}`,
         ].join('\n');
     },
 };

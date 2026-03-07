@@ -1,5 +1,6 @@
 import { query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 
 /** Check if an image exists for a given cache key (internal). Uses game-scoped index when gameId is provided. */
 export const getByCacheKey = internalQuery({
@@ -55,6 +56,20 @@ export const save = internalMutation({
   },
 });
 
+async function resolveImageUrls(
+  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
+  images: Array<{ cacheKey: string; storageId: Id<"_storage">; category: string }>,
+) {
+  const entries = await Promise.all(
+    images.map(async (img) => ({
+      cacheKey: img.cacheKey,
+      url: await ctx.storage.getUrl(img.storageId),
+      category: img.category,
+    })),
+  );
+  return entries;
+}
+
 /** Get cached images for a game session (game-scoped + station-scoped briefings). */
 export const listForGame = query({
   args: {
@@ -80,23 +95,7 @@ export const listForGame = query({
       .filter((q) => q.eq(q.field("gameId"), undefined))
       .collect();
 
-    const all = [...gameImages, ...stationImages];
-    const results: Array<{
-      cacheKey: string;
-      url: string | null;
-      category: string;
-    }> = [];
-
-    for (const img of all) {
-      const url = await ctx.storage.getUrl(img.storageId);
-      results.push({
-        cacheKey: img.cacheKey,
-        url,
-        category: img.category,
-      });
-    }
-
-    return results;
+    return resolveImageUrls(ctx, [...gameImages, ...stationImages]);
   },
 });
 
@@ -112,22 +111,6 @@ export const listForStation = query({
       )
       .collect();
 
-    // Resolve storage URLs
-    const results: Array<{
-      cacheKey: string;
-      url: string | null;
-      category: string;
-    }> = [];
-
-    for (const img of images) {
-      const url = await ctx.storage.getUrl(img.storageId);
-      results.push({
-        cacheKey: img.cacheKey,
-        url,
-        category: img.category,
-      });
-    }
-
-    return results;
+    return resolveImageUrls(ctx, images);
   },
 });

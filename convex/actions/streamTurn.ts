@@ -305,7 +305,9 @@ export const processAITurn = internalAction({
         });
       }
 
-      // ── Schedule image generation (fire-and-forget) ──────────────
+      // ── Schedule image generation (fire-and-forget, batched) ──────
+      const imageSchedules: Array<Promise<unknown>> = [];
+
       const roomChanged = state.currentRoom !== previousRoom || turnNumber === 1;
       if (roomChanged) {
         const room = stationObj.rooms.get(state.currentRoom);
@@ -313,32 +315,34 @@ export const processAITurn = internalAction({
           const cacheKey = `room:${state.currentRoom}`;
           const narrativeContext = extractNarrativeVisuals(collectedSegments);
           const prompt = buildRoomImagePrompt(room, stationObj, state.activeEvents, narrativeContext);
-          await ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
+          imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,
             cacheKey,
             category: "room_scene" as const,
             prompt,
-          });
+          }));
         }
       }
 
-      // Schedule NPC portrait generation for new dialogue encounters
+      // NPC portrait generation for new dialogue encounters
       for (const npcId of seenNpcIds) {
         const npc = stationObj.npcs.get(npcId);
         const room = npc ? stationObj.rooms.get(npc.roomId) : undefined;
         if (npc && room) {
           const cacheKey = `npc:${npcId}`;
           const prompt = buildNPCImagePrompt(npc, room, stationObj.visualStyleSeed);
-          await ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
+          imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,
             cacheKey,
             category: "npc_portrait" as const,
             prompt,
-          });
+          }));
         }
       }
+
+      await Promise.all(imageSchedules);
 
       // Mark turn as complete
       await ctx.runMutation(internal.turnLocks.release, { gameId });

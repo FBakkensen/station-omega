@@ -195,6 +195,7 @@ export function App() {
             stationId={screen.stationId}
             onGameOver={nav.goToGameOver}
             onRunSummary={nav.goToRunSummary}
+            onQuit={nav.goToTitle}
           />
         );
 

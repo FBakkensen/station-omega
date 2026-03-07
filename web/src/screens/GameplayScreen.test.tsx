@@ -229,6 +229,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 
@@ -246,6 +247,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 
@@ -270,6 +272,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         gameId="j9733s5p0przppv68h942xqd6n81nxmb"
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
+        onQuit={vi.fn()}
         onRunSummary={vi.fn()}
       />,
     );
@@ -297,6 +300,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 
@@ -311,6 +315,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 
@@ -336,6 +341,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 
@@ -361,6 +367,7 @@ describe('GameplayScreen reload hydration behavior', () => {
           stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
           onGameOver={vi.fn()}
           onRunSummary={vi.fn()}
+          onQuit={vi.fn()}
         />,
       );
     }).not.toThrow();
@@ -377,6 +384,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 
@@ -391,6 +399,7 @@ describe('GameplayScreen reload hydration behavior', () => {
         stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
         onGameOver={vi.fn()}
         onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
       />,
     );
 

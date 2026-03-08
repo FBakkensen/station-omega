@@ -22,7 +22,7 @@ export interface GenerationModelTiers {
 /** Change any tier's model in this one place. */
 export const GENERATION_MODEL_TIERS: GenerationModelTiers = {
     premium: 'anthropic/claude-opus-4.6',
-    mid: 'z-ai/glm-5',
+    mid: 'anthropic/claude-sonnet-4.6',
     cheap: 'google/gemini-3.1-flash-lite-preview',
 };
 
@@ -37,10 +37,10 @@ export const GAME_MASTER_MODELS: readonly ModelOption[] = [
 /** Default model used for the main game master (tool calling + narrative). */
 export const GAME_MASTER_MODEL_ID = GAME_MASTER_MODELS[0].id;
 
-/** Check whether a model ID is in the generation allowlist. */
+/** Check whether a model ID is in the generation allowlist (premium tier only). */
 export function isValidGenerationModelId(modelId: string): boolean {
   return GENERATION_MODELS.some(m => m.id === modelId) ||
-    Object.values(GENERATION_MODEL_TIERS).includes(modelId);
+    modelId === GENERATION_MODEL_TIERS.premium;
 }
 
 /** Check whether a model ID is in the game master allowlist. */

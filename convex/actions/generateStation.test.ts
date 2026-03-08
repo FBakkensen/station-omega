@@ -21,21 +21,13 @@ vi.mock('../../src/io/openrouter-ai-client.js', () => ({
   },
 }));
 
-vi.mock('../../src/model-catalog.js', () => ({
-  GENERATION_MODEL_ID: 'z-ai/glm-5',
-  GENERATION_MODEL_TIERS: {
-    premium: 'z-ai/glm-5',
-    mid: 'z-ai/glm-5-mini',
-    cheap: 'z-ai/glm-5-lite',
-  },
-  GENERATION_MODELS: [
-    { id: 'z-ai/glm-5', label: 'GLM-5' },
-    { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
-  ],
-  isValidGenerationModelId: vi.fn((id: string) => ['z-ai/glm-5', 'anthropic/claude-opus-4.6'].includes(id)),
-  VIDEO_MODEL_ID: 'fal-ai/bytedance/seedance/v1/pro/fast/text-to-video',
-  IMAGE_MODEL_ID: 'fal-ai/flux/schnell',
-}));
+vi.mock('../../src/model-catalog.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/model-catalog.js')>();
+  return {
+    ...actual,
+    isValidGenerationModelId: vi.fn(actual.isValidGenerationModelId),
+  };
+});
 
 vi.mock('../../src/assembly.js', () => ({
   assembleStation: dynamicMocks.assembleStation,

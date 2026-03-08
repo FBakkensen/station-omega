@@ -251,11 +251,14 @@ describe('generateTopologyProcedural', () => {
         expect(result.topology).toBe('small_world');
         expect(result.rooms.length).toBeGreaterThanOrEqual(ROOM_COUNTS[diff][0]);
         expect(result.rooms.length).toBeLessThanOrEqual(ROOM_COUNTS[diff][1]);
+        // At least some rooms should be junction rooms (3+ connections)
+        const junctions = result.rooms.filter(r => r.connections.length >= 3);
+        expect(junctions.length, 'expected at least 1 junction room with 3+ connections').toBeGreaterThanOrEqual(1);
       }
     }
   });
 
-  it('[B] respects room count bounds for each difficulty level', () => {
+  it('[B] respects room count bounds and connectivity density for each difficulty level', () => {
     const difficulties: Difficulty[] = ['normal', 'hard', 'nightmare'];
     for (const diff of difficulties) {
       const [min, max] = ROOM_COUNTS[diff];
@@ -263,6 +266,10 @@ describe('generateTopologyProcedural', () => {
         const result = generateTopologyProcedural(diff, 'medic');
         expect(result.rooms.length).toBeGreaterThanOrEqual(min);
         expect(result.rooms.length).toBeLessThanOrEqual(max);
+        // Non-linear structure: average connections per room > 2.5
+        const totalConnections = result.rooms.reduce((sum, r) => sum + r.connections.length, 0);
+        const avgConnections = totalConnections / result.rooms.length;
+        expect(avgConnections, 'average connections per room should exceed 2.5').toBeGreaterThan(2.5);
       }
     }
   });
@@ -289,23 +296,6 @@ describe('generateTopologyProcedural', () => {
       // Max 2 locked doors
       const lockedCount = result.rooms.filter(r => r.lockedBy !== null).length;
       expect(lockedCount).toBeLessThanOrEqual(2);
-    }
-  });
-
-  it('[M] generates graph topologies with multiple junction rooms (3+ connections)', () => {
-    for (let i = 0; i < 30; i++) {
-      const result = generateTopologyProcedural('normal', 'engineer');
-      const junctions = result.rooms.filter(r => r.connections.length >= 3);
-      expect(junctions.length, 'expected at least 1 junction room with 3+ connections').toBeGreaterThanOrEqual(1);
-    }
-  });
-
-  it('[B] average connections per room exceeds 2.5 (non-linear structure)', () => {
-    for (let i = 0; i < 30; i++) {
-      const result = generateTopologyProcedural('normal', 'engineer');
-      const totalConnections = result.rooms.reduce((sum, r) => sum + r.connections.length, 0);
-      const avgConnections = totalConnections / result.rooms.length;
-      expect(avgConnections, 'average connections per room should exceed 2.5').toBeGreaterThan(2.5);
     }
   });
 

@@ -130,35 +130,74 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
     }
   }, [game, station, segments.length, isStreaming, submitTurn]);
 
+  // Synchronous dismiss handler: plays accumulated segments inline in the event
+  // handler instead of relying on effects. Immune to React strict mode and
+  // effect ordering issues.
+  const dismissBriefing = useCallback(() => {
+    if (showInitialBriefing && segments.length > 0) {
+      if (ttsEnabledRef.current) {
+        ttsRef.current.beginStream();
+        ttsHighWaterRef.current = -1;
+      }
+
+      for (const seg of segments) {
+        const immediate = seg.type === 'player_action';
+        const bodyChars = twPushSegment(seg, immediate);
+        if (ttsEnabledRef.current && bodyChars > 0 && !immediate) {
+          ttsHighWaterRef.current = seg.segmentIndex;
+          ttsRef.current.pushSegment(seg, bodyChars);
+        }
+      }
+
+      if (!isStreaming && ttsEnabledRef.current) {
+        ttsRef.current.flushStream();
+      }
+
+      // Set refs so effects don't re-process these segments
+      hasHydratedInitialSnapshotRef.current = true;
+      hasObservedPostMountLiveStreamRef.current = true;
+      hasSeenInitialStreamingStateRef.current = true;
+    } else if (showInitialBriefing) {
+      hasSeenInitialStreamingStateRef.current = true;
+    }
+
+    setDismissedInitialBriefing(true);
+    setShowMission(false);
+  }, [showInitialBriefing, segments, isStreaming, twPushSegment]);
+
+  // Ref for Escape key handler (avoids stale closure)
+  const dismissBriefingRef = useRef(dismissBriefing);
+  useEffect(() => { dismissBriefingRef.current = dismissBriefing; });
+
   // Stream lifecycle: finalize previous cards on turn start, flush TTS on turn end.
   // IMPORTANT: This effect MUST be declared before the segment push effect so that
   // React fires it first when both deps change in the same render. This ensures
   // twFinalizeAll() + beginStream() run before new segments are pushed.
   const prevStreamingRef = useRef(false);
   useEffect(() => {
-    // Suppress while the initial mission briefing is visible — refs stay in their
-    // initial-mount state so hydration logic works correctly once dismissed.
-    if (showInitialBriefing) return;
+    if (showInitialBriefing) {
+      prevStreamingRef.current = isStreaming;
+      return;
+    }
 
-    if (hasSeenInitialStreamingStateRef.current && isStreaming && !prevStreamingRef.current) {
-      hasObservedPostMountLiveStreamRef.current = true;
-    } else if (!hasSeenInitialStreamingStateRef.current) {
+    if (!hasSeenInitialStreamingStateRef.current) {
       hasSeenInitialStreamingStateRef.current = true;
+    } else if (isStreaming && !prevStreamingRef.current) {
+      hasObservedPostMountLiveStreamRef.current = true;
     }
 
     if (isStreaming && !prevStreamingRef.current) {
-      // Turn just started — finalize any lingering cards from previous turn
       twFinalizeAll();
       if (ttsEnabledRef.current) {
         ttsRef.current.beginStream();
-        ttsHighWaterRef.current = -1; // Reset for new turn
+        ttsHighWaterRef.current = -1;
       }
     } else if (!isStreaming && prevStreamingRef.current) {
-      // Turn just ended — let typewriter finish naturally (no finalizeAll)
       if (ttsEnabledRef.current) {
         ttsRef.current.flushStream();
       }
     }
+
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, twFinalizeAll, showInitialBriefing]);
 
@@ -168,7 +207,9 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   useEffect(() => {
     // Suppress while the initial mission briefing is visible — segments accumulate
     // in Convex but aren't pushed to typewriter/TTS until the user dismisses the modal.
-    if (showInitialBriefing) return;
+    if (showInitialBriefing) {
+      return;
+    }
 
     const shouldHydrateInitialSnapshot =
       !hasHydratedInitialSnapshotRef.current
@@ -237,8 +278,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
         setShowSituation((prev) => !prev);
       } else if (e.key === 'Escape') {
         setShowMap(false);
-        setShowMission(false);
-        setDismissedInitialBriefing(true);
+        dismissBriefingRef.current();
         setShowSituation(false);
         setShowQuitConfirm(false);
       } else if (e.key === 'F10') {
@@ -345,10 +385,10 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
 
         <ErrorBoundary>
           <NarrativePanel
-            segments={segments}
+            segments={showInitialBriefing ? [] : segments}
             typewriterCards={twCards}
-            choices={choices}
-            choiceTitle={choiceTitle}
+            choices={showInitialBriefing ? null : choices}
+            choiceTitle={showInitialBriefing ? null : choiceTitle}
             onChoice={handleChoice}
             isStreaming={isStreaming}
             allFinalized={twAllFinalized}
@@ -393,7 +433,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
           steps={status.objectiveSteps}
           currentStepIndex={status.objectiveStep - 1}
           isComplete={status.objectivesComplete}
-          onClose={() => { setShowMission(false); setDismissedInitialBriefing(true); }}
+          onClose={dismissBriefing}
           videoUrl={stationImages.get('briefing_video')?.url}
           muted={!ttsEnabled}
         />

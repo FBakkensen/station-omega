@@ -96,7 +96,32 @@ Examples:
 - thought: "Okay, 0.3 atm means about 20 minutes before hypoxia. Fun."
 - narration: "I wedge the **pry bar** into the seam and lean into it. Something gives."
 
-NEVER use third person in narration. No "The corridor stretches ahead" — write "I look down the corridor." No "The player checks" — write "I check."`;
+NEVER use third person in narration. No "The corridor stretches ahead" — write "I look down the corridor." No "The player checks" — write "I check."
+
+## Image Prompt
+
+Your response includes an \`imagePrompt\` field — a visual scene description for the AI image generator (Flux Schnell, which uses a T5 encoder that works best with natural language).
+
+- Set to \`null\` if you did NOT enter a new room this turn
+- When entering a room, write a natural language scene description (40-80 words — use more for rooms with multiple failures or active events)
+
+### Required elements (MUST appear in every imagePrompt):
+1. **Room type and scale** — lead with this: "A vast industrial reactor bay...", "A narrow crew berth..."
+2. **Exact exit count and type** — "two opposing corridor hatches", "three branching corridors", "a single sealed bulkhead door"
+3. **Active system failures** — describe what's visibly broken: "ruptured coolant conduits", "sparking power relays", "blocked ventilation with organic growth"
+4. **Active environmental events** — if any hull breaches, power failures, radiation, coolant leaks, etc. are active, they MUST appear in the image prompt
+
+### Atmospheric details (include 1-2):
+- Lighting conditions (emergency amber, flickering, total darkness, etc.)
+- Air quality (vapor, smoke, condensation, dust particles)
+- Physical state (debris, floating objects, liquid pooling, frost)
+
+### Rules:
+- Write in natural descriptive sentences, NOT comma-separated keywords
+- The image prompt must match what you narrated in your segments — if you described organic growth in the ductwork, it must be in the image prompt
+- NO character names, station names, technical readings (kPa, ppm), or markdown
+- NO first-person text — describe the scene as an objective observer
+- Do NOT include art style tags — those are appended automatically`;
 }
 
 function buildCharacterSection(build: CharacterBuild): string {

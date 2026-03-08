@@ -64,7 +64,7 @@ Grounded sci-fi with personality. The Martian meets Project Hail Mary. The stati
 - crewRoster: 3-5 crew members (engineers, scientists, technicians) with name, role, and fate
 - toneKeywords: 3-5 words/phrases capturing the station's mood (e.g., "claustrophobic", "jury-rigged", "fading hope")
 - visualStyleSeed: A short visual style phrase (10-20 words) describing the station's aesthetic for AI image generation. Focus on lighting, color palette, architectural style, and atmosphere (e.g., "Soviet-era brutalist industrial, amber emergency lighting, corroded steel panels", "Sleek corporate white corridors stained with coolant, flickering fluorescent strips")
-- briefingVideoPrompt: A cinematic video prompt (40-80 words) for an 8-second mission briefing video, optimized for Google Veo 3.1 text-to-video. This video plays when the player opens the Mission Objectives screen — it must visually convey the SPECIFIC mission and its stakes, not just a generic station shot. Structure: camera direction first (use film terms: dolly, tracking, crane, handheld), then visual details that show what went wrong and what the player must fix, then audio cues (ambient sounds, mechanical noises, alarms). The visuals should create tension about the mission ahead. Example for a comms relay repair mission: "A handheld tracking shot pushes through a darkened communications hub. Severed data cables spark against flooded deck plates, casting flickering light across rows of dead relay terminals. A cracked monitor loops a distress signal waveform. The drip of coolant, crackling electrical arcs, and a distant repeating SOS tone. Retro 1970s sci-fi aesthetic, muted amber palette, heavy film grain."`;
+- briefingVideoPrompt: A CCTV security camera video prompt (30-60 words) for a 5-second surveillance footage clip, optimized for Seedance text-to-video. This video plays when the player opens the Mission Objectives screen — it must visually convey the SPECIFIC mission and its stakes through security camera footage. CRITICAL: the scene must be nearly STATIC — a frozen moment captured by a security camera. No moving objects, no flickering, no phasing, no spinning, no dynamic action. Only subtle ambient details like dripping liquid, drifting smoke, or a blinking light are allowed. Structure: fixed camera position first (overhead, wall-mounted, corner-mounted), then STILL visual details showing the aftermath of what went wrong (damage, debris, warning signs), then CCTV artifacts (timestamp overlay, scan lines, low-resolution grain, slight static). No audio cues. Example for a comms relay repair mission: "Fixed overhead security camera, wide angle. A darkened communications hub with severed data cables hanging over flooded deck plates. Dead relay terminals line the walls. A cracked monitor displays a distress signal waveform. CCTV timestamp overlay, scan lines, low-resolution grain."`;
 
     const roomSummary = topology.rooms.map(r => `  ${r.id} (${r.archetype})`).join('\n');
 
@@ -118,7 +118,7 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
     }
 
     if (!output.briefingVideoPrompt.trim()) {
-        errors.push('briefingVideoPrompt is empty — provide a 40-80 word Veo 3.1 video prompt');
+        errors.push('briefingVideoPrompt is empty — provide a 30-60 word video prompt');
     }
 
     if (errors.length > 0) {

@@ -1,7 +1,7 @@
 import type { TTSClient, TTSRequest, TTSResult } from './tts-client.js';
+import { TTS_MODEL_ID } from '../model-catalog.js';
 
 const INWORLD_API_BASE = 'https://api.inworld.ai/tts/v1';
-const INWORLD_MODEL = 'inworld-tts-1.5-max';
 const INWORLD_SAMPLE_RATE = 48000;
 const INWORLD_BITS_PER_SAMPLE = 16;
 const INWORLD_CHANNELS = 1;
@@ -46,7 +46,7 @@ export class InworldTTSClient implements TTSClient {
       body: JSON.stringify({
         text: request.text,
         voice_id: request.voiceId,
-        model_id: INWORLD_MODEL,
+        model_id: TTS_MODEL_ID,
         audio_config: {
           audio_encoding: 'LINEAR16',
           sample_rate_hertz: INWORLD_SAMPLE_RATE,

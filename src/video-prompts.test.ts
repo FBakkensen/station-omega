@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildBriefingVideoPrompt } from './video-prompts.js';
 import type { GeneratedStation } from './types.js';
 
-const AI_VIDEO_PROMPT = 'A handheld tracking shot pushes through the failing reactor core of Tachyon Drift. Overloaded coolant pipes gush steam across buckled deck plates, casting amber emergency light across dead control panels. A cracked monitor blinks cascade failure warnings. The groan of stressed hull metal, hissing coolant leaks, and a repeating evacuation klaxon. Retro 1970s sci-fi aesthetic, muted palette, heavy film grain.';
+const AI_VIDEO_PROMPT = 'Fixed wall-mounted security camera, high angle. The failing reactor core of Tachyon Drift with overloaded coolant pipes above buckled deck plates. Dead control panels line the walls. A cracked monitor displays cascade failure warnings. CCTV timestamp overlay, scan lines, low-resolution grain.';
 
 function makeStation(overrides?: Partial<GeneratedStation>): GeneratedStation {
   return {
@@ -33,55 +33,52 @@ function makeStation(overrides?: Partial<GeneratedStation>): GeneratedStation {
 }
 
 describe('buildBriefingVideoPrompt', () => {
-  it('[Z] returns fallback prompt when briefingVideoPrompt is absent', () => {
-    const station = makeStation({ briefingVideoPrompt: undefined });
+  it('[Z] returns the prompt even when it is a zero-length edge case', () => {
+    const station = makeStation({ briefingVideoPrompt: '' });
     const prompt = buildBriefingVideoPrompt(station);
-    expect(prompt).toContain('Tachyon Drift');
-    expect(prompt).toContain('slow dolly forward');
-    expect(prompt.length).toBeGreaterThan(0);
+    expect(prompt).toBe('');
   });
 
-  it('[O] returns exactly one AI-generated prompt verbatim when briefingVideoPrompt is present', () => {
+  it('[O] returns exactly one AI-generated prompt verbatim', () => {
     const prompt = buildBriefingVideoPrompt(makeStation());
     expect(prompt).toBe(AI_VIDEO_PROMPT);
   });
 
-  it('[M] fallback includes multiple Veo direction layers: camera, audio, and style', () => {
+  it('[M] preserves all CCTV layers in the prompt: camera position, visuals, and artifacts', () => {
+    const prompt = buildBriefingVideoPrompt(makeStation());
+    expect(prompt).toContain('Fixed wall-mounted security camera');
+    expect(prompt).toContain('Dead control panels');
+    expect(prompt).toContain('scan lines');
+  });
+
+  it('[B] returns prompt at minimum length boundary without truncation', () => {
+    const shortPrompt = 'Fixed camera.';
+    const station = makeStation({ briefingVideoPrompt: shortPrompt });
+    const prompt = buildBriefingVideoPrompt(station);
+    expect(prompt).toBe(shortPrompt);
+    expect(prompt).toHaveLength(shortPrompt.length);
+  });
+
+  it('[I] prompt follows CCTV structure: camera position, then visuals, then artifacts', () => {
+    const prompt = buildBriefingVideoPrompt(makeStation());
+    if (prompt === undefined) throw new Error('expected prompt');
+    const cameraIdx = prompt.indexOf('Fixed wall-mounted security camera');
+    const visualIdx = prompt.indexOf('Dead control panels');
+    const artifactIdx = prompt.indexOf('CCTV timestamp overlay');
+    expect(cameraIdx).toBeLessThan(visualIdx);
+    expect(visualIdx).toBeLessThan(artifactIdx);
+  });
+
+  it('[E] returns undefined when briefingVideoPrompt is missing', () => {
     const station = makeStation({ briefingVideoPrompt: undefined });
     const prompt = buildBriefingVideoPrompt(station);
-    expect(prompt).toContain('slow dolly forward');
-    expect(prompt).toContain('metallic groaning');
-    expect(prompt).toContain('film grain');
+    expect(prompt).toBeUndefined();
   });
 
-  it('[B] fallback handles absent visualStyleSeed at boundary gracefully', () => {
-    const station = makeStation({ briefingVideoPrompt: undefined, visualStyleSeed: undefined });
-    const prompt = buildBriefingVideoPrompt(station);
-    expect(prompt).not.toContain('undefined');
-    expect(prompt).toContain('Tachyon Drift');
-  });
-
-  it('[I] fallback follows Veo structure: camera, then audio, then style', () => {
-    const station = makeStation({ briefingVideoPrompt: undefined });
-    const prompt = buildBriefingVideoPrompt(station);
-    const cameraIdx = prompt.indexOf('slow dolly forward');
-    const audioIdx = prompt.indexOf('metallic groaning');
-    const styleIdx = prompt.indexOf('Retro 1970s sci-fi');
-    expect(cameraIdx).toBeLessThan(audioIdx);
-    expect(audioIdx).toBeLessThan(styleIdx);
-  });
-
-  it('[E] handles empty briefingVideoPrompt without throwing error', () => {
-    const station = makeStation({ briefingVideoPrompt: '' });
-    const prompt = buildBriefingVideoPrompt(station);
-    expect(prompt).toContain('slow dolly forward');
-    expect(prompt).toContain('Tachyon Drift');
-  });
-
-  it('[S] produces a simple mission-focused prompt with station name and cinematic direction', () => {
+  it('[S] produces a mission-focused prompt with station name and CCTV style', () => {
     const prompt = buildBriefingVideoPrompt(makeStation());
     expect(prompt).toContain('Tachyon Drift');
-    expect(prompt).toContain('evacuation klaxon');
-    expect(prompt).toContain('film grain');
+    expect(prompt).toContain('cascade failure warnings');
+    expect(prompt).toContain('scan lines');
   });
 });

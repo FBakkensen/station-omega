@@ -61,6 +61,7 @@ export const generate = internalAction({
 
       // Generate image
       const { FalImageClient } = await import("../../src/io/fal-image-client.js");
+      const { IMAGE_MODEL_ID } = await import("../../src/model-catalog.js");
       const client = new FalImageClient(apiKey);
       const result = await client.generateImage({
         prompt,
@@ -90,7 +91,7 @@ export const generate = internalAction({
           operation: "image_generation" as const,
           stationId,
           gameId,
-          modelId: "flux/schnell",
+          modelId: IMAGE_MODEL_ID,
           prompt,
           status: "success" as const,
           durationMs: Date.now() - startMs,

@@ -53,6 +53,7 @@ export const generate = internalAction({
 
       // Generate video
       const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
+      const { VIDEO_MODEL_ID } = await import("../../src/model-catalog.js");
       const client = new FalVideoClient(apiKey);
       const result = await client.generateVideo({ prompt });
 
@@ -76,7 +77,7 @@ export const generate = internalAction({
           provider: "fal" as const,
           operation: "video_generation" as const,
           stationId,
-          modelId: "veo3.1/fast",
+          modelId: VIDEO_MODEL_ID,
           prompt,
           status: "success" as const,
           durationMs: Date.now() - startMs,

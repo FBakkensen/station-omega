@@ -26,6 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Creative layer test | `bun run test:creative` |
 | Game master test | `bun run test:gm` |
 | Playwright | `bun run pw -- <command>` |
+| AI logs | `bun run ai-logs <cmd>` (recent, game \<id\> --turn=N, detail \<logId\>, errors, stats) |
 
 ## Architecture
 

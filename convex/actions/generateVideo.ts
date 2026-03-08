@@ -20,6 +20,7 @@ export const generate = internalAction({
   handler: async (ctx, args) => {
     const { stationId, cacheKey, category, prompt } = args;
     console.info("[generateVideo] Starting", { stationId, cacheKey, category });
+    const startMs = Date.now();
 
     try {
       // Check cache first
@@ -29,6 +30,17 @@ export const generate = internalAction({
       });
       if (existing) {
         console.info("[generateVideo] Cache hit, skipping generation", { cacheKey });
+        try {
+          await ctx.runMutation(internal.aiLogs.log, {
+            provider: "fal" as const,
+            operation: "video_generation" as const,
+            stationId,
+            prompt,
+            status: "cache_hit" as const,
+            durationMs: Date.now() - startMs,
+            metadata: { cacheKey, category },
+          });
+        } catch { /* non-fatal */ }
         return null;
       }
 
@@ -58,10 +70,35 @@ export const generate = internalAction({
       });
 
       console.info("[generateVideo] Video generated and cached", { cacheKey, storageId });
+
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "fal" as const,
+          operation: "video_generation" as const,
+          stationId,
+          modelId: "veo3.1/fast",
+          prompt,
+          status: "success" as const,
+          durationMs: Date.now() - startMs,
+          metadata: { cacheKey, category, storageId },
+        });
+      } catch { /* non-fatal */ }
     } catch (err) {
       // Video generation failures are non-fatal — log and move on
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error("[generateVideo] Failed (non-fatal)", { cacheKey, error: message });
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "fal" as const,
+          operation: "video_generation" as const,
+          stationId,
+          prompt,
+          status: "error" as const,
+          error: message,
+          durationMs: Date.now() - startMs,
+          metadata: { cacheKey, category },
+        });
+      } catch { /* non-fatal */ }
     }
 
     return null;

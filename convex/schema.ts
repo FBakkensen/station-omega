@@ -189,6 +189,39 @@ export default defineSchema({
    * Room/NPC images are scoped per game (narrative-informed).
    * Briefing images are scoped per station (shared across games).
    */
+  /**
+   * Structured AI call logs — prompts, responses, timing, status.
+   * Auto-pruned by daily cron after 30 days.
+   */
+  aiLogs: defineTable({
+    provider: v.union(v.literal("openrouter"), v.literal("fal"), v.literal("inworld")),
+    operation: v.union(
+      v.literal("station_generation"),
+      v.literal("game_turn"),
+      v.literal("image_generation"),
+      v.literal("video_generation"),
+      v.literal("tts"),
+    ),
+    stationId: v.optional(v.id("stations")),
+    gameId: v.optional(v.id("games")),
+    turnNumber: v.optional(v.number()),
+    modelId: v.optional(v.string()),
+    /** Full prompt / input text. */
+    prompt: v.optional(v.string()),
+    /** Full response text/JSON, or storageId reference for binary outputs. */
+    response: v.optional(v.string()),
+    status: v.union(v.literal("success"), v.literal("error"), v.literal("cache_hit")),
+    error: v.optional(v.string()),
+    durationMs: v.number(),
+    /** Provider-specific extras (token counts, image size, voice config, storageId, etc.). */
+    metadata: v.optional(v.any()),
+  })
+    .index("by_station", ["stationId"])
+    .index("by_game_turn", ["gameId", "turnNumber"])
+    .index("by_provider", ["provider"])
+    .index("by_operation", ["operation"])
+    .index("by_status", ["status"]),
+
   stationImages: defineTable({
     stationId: v.id("stations"),
     /** Game ID for per-game scoping. Undefined for station-scoped images (briefings). */

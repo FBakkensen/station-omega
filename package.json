@@ -14,6 +14,7 @@
     "lint:web": "bun run --cwd web lint",
     "deadcode": "knip",
     "build:web": "bun run --cwd web build",
+    "ai-logs": "bun scripts/ai-logs.ts",
     "pw": "playwright-cli",
     "pw:snapshot": "bash ./scripts/pw-snapshot.sh",
     "pw:install": "playwright-cli install",

@@ -2,12 +2,14 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "entry": [
     "convex/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ],
   "project": [
     "convex/**/*.ts",
     "src/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ],
   "rules": {
     "exports": "off",

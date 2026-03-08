@@ -28,6 +28,8 @@ export const generate = internalAction({
     const { progressId, difficulty, characterClass, modelId } = args;
     console.info("[generateStation] Starting generation", { progressId, difficulty, characterClass, modelId });
     const progressUpdatePromises: Promise<unknown>[] = [];
+    const genStartMs = Date.now();
+    let effectiveModelId = "unknown";
 
     try {
       // Dynamic import of the generation pipeline (ESM from src/)
@@ -39,7 +41,7 @@ export const generate = internalAction({
       const { serializeStation } = await import("../lib/serialization.js");
       console.debug("[generateStation] Modules imported");
 
-      const effectiveModelId = modelId && isValidGenerationModelId(modelId) ? modelId : GENERATION_MODEL_ID;
+      effectiveModelId = modelId && isValidGenerationModelId(modelId) ? modelId : GENERATION_MODEL_ID;
       console.info("[generateStation] Using model", { modelId: effectiveModelId });
 
       const aiClient = new OpenRouterAITextClient({
@@ -75,12 +77,20 @@ export const generate = internalAction({
         progressUpdatePromises.push(updatePromise);
       };
 
+      // Accumulate per-layer AI prompts and responses for structured logging
+      type LayerLogEntry = { label: string; content: string; timestamp: number };
+      const layerLogs: LayerLogEntry[] = [];
+      const debugLog = (label: string, content: string) => {
+        layerLogs.push({ label, content, timestamp: Date.now() });
+      };
+
       console.info("[generateStation] Running generation pipeline...");
       console.time("[generateStation] Generation pipeline");
       // Run the generation pipeline
       const { skeleton, creative } = await generateStation(
         { difficulty, characterClass, aiClient, modelId: effectiveModelId },
         onProgress,
+        debugLog,
       );
       console.timeEnd("[generateStation] Generation pipeline");
       console.debug("[generateStation] Assembling station...");
@@ -102,6 +112,53 @@ export const generate = internalAction({
       });
       console.info("[generateStation] Station saved", { stationId });
 
+      // Persist per-layer AI logs (prompt + response pairs)
+      try {
+        // Extract LAYER-PROMPT / LAYER-RESPONSE pairs for each layer
+        const layerPairs: Array<{ layerName: string; prompt: string; response: string; startMs: number; endMs: number }> = [];
+        let currentPrompt: { label: string; content: string; timestamp: number } | null = null;
+        for (const entry of layerLogs) {
+          if (entry.label === "LAYER-PROMPT") {
+            currentPrompt = entry;
+          } else if (entry.label === "LAYER-RESPONSE" && currentPrompt) {
+            // Extract layer name from content, e.g. "topology [attempt 1]\n..."
+            const layerName = entry.content.split(" [")[0] ?? "unknown";
+            layerPairs.push({
+              layerName,
+              prompt: currentPrompt.content,
+              response: entry.content,
+              startMs: currentPrompt.timestamp,
+              endMs: entry.timestamp,
+            });
+            currentPrompt = null;
+          }
+        }
+
+        // Write one log entry per layer (parallel — order doesn't matter)
+        await Promise.allSettled(
+          layerPairs.map((pair) =>
+            ctx.runMutation(internal.aiLogs.log, {
+              provider: "openrouter" as const,
+              operation: "station_generation" as const,
+              stationId,
+              modelId: effectiveModelId,
+              prompt: pair.prompt,
+              response: pair.response,
+              status: "success" as const,
+              durationMs: pair.endMs - pair.startMs,
+              metadata: {
+                difficulty,
+                characterClass,
+                stationName: station.stationName,
+                layer: pair.layerName,
+              },
+            }),
+          ),
+        );
+      } catch (logErr) {
+        console.warn("[generateStation] Failed to write AI layer logs", logErr);
+      }
+
       // Step 6: Generate briefing video (non-fatal)
       if (process.env.FAL_API_KEY) {
         await ctx.runMutation(internal.generationProgress.update, {
@@ -115,6 +172,7 @@ export const generate = internalAction({
           const { buildBriefingVideoPrompt } = await import("../../src/video-prompts.js");
           const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
           const videoPrompt = buildBriefingVideoPrompt(station);
+          const videoStartMs = Date.now();
           const client = new FalVideoClient(process.env.FAL_API_KEY);
           const result = await client.generateVideo({ prompt: videoPrompt });
 
@@ -129,6 +187,19 @@ export const generate = internalAction({
             category: "briefing_video" as const,
           });
           console.info("[generateStation] Briefing video generated and cached");
+
+          try {
+            await ctx.runMutation(internal.aiLogs.log, {
+              provider: "fal" as const,
+              operation: "video_generation" as const,
+              stationId,
+              modelId: "veo3.1/fast",
+              prompt: videoPrompt,
+              status: "success" as const,
+              durationMs: Date.now() - videoStartMs,
+              metadata: { cacheKey: "briefing_video", storageId },
+            });
+          } catch { /* non-fatal */ }
         } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
           console.error("[generateStation] Video generation failed (non-fatal)", { error: message });
@@ -148,6 +219,17 @@ export const generate = internalAction({
       const message = error instanceof Error ? error.message : "Unknown error";
       const stack = error instanceof Error ? error.stack : "";
       console.error("[generateStation] ERROR:", message, "\nStack:", stack);
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "openrouter" as const,
+          operation: "station_generation" as const,
+          modelId: effectiveModelId,
+          status: "error" as const,
+          error: message,
+          durationMs: Date.now() - genStartMs,
+          metadata: { difficulty, characterClass },
+        });
+      } catch { /* logging must not mask the real error */ }
       await ctx.runMutation(internal.generationProgress.update, {
         id: progressId,
         status: "error",

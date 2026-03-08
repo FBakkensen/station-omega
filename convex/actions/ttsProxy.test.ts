@@ -21,6 +21,12 @@ vi.mock('../../src/io/inworld-tts-client.js', () => ({
   },
 }));
 
+vi.mock('../_generated/api', () => ({
+  internal: {
+    aiLogs: { log: Symbol('aiLogs.log') },
+  },
+}));
+
 import { generateTTS } from './ttsProxy';
 
 type TTSArgs = {
@@ -46,6 +52,29 @@ function makeArgs(overrides?: Partial<TTSArgs>): TTSArgs {
   };
 }
 
+type StoredBlob = { blob: Blob };
+
+function createCtx() {
+  const stored: StoredBlob[] = [];
+  const logCalls: Array<Record<string, unknown>> = [];
+  return {
+    ctx: {
+      storage: {
+        store: vi.fn((blob: Blob) => {
+          stored.push({ blob });
+          return Promise.resolve(`storage_${String(stored.length)}`);
+        }),
+      },
+      runMutation: vi.fn((_ref: unknown, args: Record<string, unknown>) => {
+        logCalls.push(args);
+        return Promise.resolve();
+      }),
+    },
+    stored,
+    logCalls,
+  };
+}
+
 describe('ttsProxy action contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,19 +92,22 @@ describe('ttsProxy action contracts', () => {
 
   it('[Z] returns configuration error when zero API key is present', async () => {
     delete process.env.INWORLD_API_KEY;
+    const { ctx } = createCtx();
 
-    await expect(handler({}, makeArgs())).resolves.toEqual({
+    await expect(handler(ctx, makeArgs())).resolves.toEqual({
       ok: false,
       error: 'TTS not configured',
       status: 503,
     });
     expect(proxyMocks.generateSpeech).not.toHaveBeenCalled();
+    expect(ctx.storage.store).not.toHaveBeenCalled();
   });
 
   it('[O] forwards one request and returns one successful wav payload', async () => {
+    const { ctx } = createCtx();
     const args = makeArgs();
 
-    const result = await handler({}, args);
+    const result = await handler(ctx, args);
     expect(result).toEqual({
       ok: true,
       wavBase64: 'UklGRiQAAABXQVZF',
@@ -85,12 +117,13 @@ describe('ttsProxy action contracts', () => {
   });
 
   it('[M] handles many sequential requests with independent argument payloads', async () => {
+    const { ctx } = createCtx();
     proxyMocks.generateSpeech
       .mockResolvedValueOnce({ ok: true, wavBase64: 'wav-1' })
       .mockResolvedValueOnce({ ok: true, wavBase64: 'wav-2' });
 
-    const first = await handler({}, makeArgs({ text: 'First', voiceId: 'Alex' }));
-    const second = await handler({}, makeArgs({ text: 'Second', voiceId: 'Ronald' }));
+    const first = await handler(ctx, makeArgs({ text: 'First', voiceId: 'Alex' }));
+    const second = await handler(ctx, makeArgs({ text: 'Second', voiceId: 'Ronald' }));
 
     expect(first).toEqual({ ok: true, wavBase64: 'wav-1' });
     expect(second).toEqual({ ok: true, wavBase64: 'wav-2' });
@@ -102,9 +135,10 @@ describe('ttsProxy action contracts', () => {
   });
 
   it('[B] preserves boundary numeric inputs for speaking rate and temperature', async () => {
+    const { ctx } = createCtx();
     const args = makeArgs({ temperature: 0, speakingRate: 2.5 });
 
-    await handler({}, args);
+    await handler(ctx, args);
     expect(proxyMocks.generateSpeech).toHaveBeenCalledWith(
       expect.objectContaining({
         temperature: 0,
@@ -114,42 +148,67 @@ describe('ttsProxy action contracts', () => {
     );
   });
 
-  it('[I] preserves request interface fields passed to the downstream TTS client', async () => {
-    const args = makeArgs({
-      text: 'Atmosphere alarm acknowledged.',
-      voiceId: 'Luna',
-      temperature: 1.1,
-      speakingRate: 1.15,
-    });
+  it('[I] persists audio to storage and logs with storageId in metadata', async () => {
+    const { ctx, stored, logCalls } = createCtx();
+    const args = makeArgs({ text: 'Atmosphere check.' });
 
-    await handler({}, args);
-    const forwarded = proxyMocks.generateSpeech.mock.calls[0]?.[0] as TTSArgs | undefined;
-    expect(forwarded).toEqual({
-      text: 'Atmosphere alarm acknowledged.',
-      voiceId: 'Luna',
-      temperature: 1.1,
-      speakingRate: 1.15,
+    await handler(ctx, args);
+
+    // Audio stored to _storage
+    expect(ctx.storage.store).toHaveBeenCalledTimes(1);
+    expect(stored).toHaveLength(1);
+
+    // AI log written with storageId reference
+    expect(ctx.runMutation).toHaveBeenCalledTimes(1);
+    expect(logCalls[0]).toMatchObject({
+      provider: 'inworld',
+      operation: 'tts',
+      prompt: 'Atmosphere check.',
+      status: 'success',
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      metadata: expect.objectContaining({
+        voiceId: 'Elizabeth',
+        storageId: 'storage_1',
+        textLength: 17,
+      }),
     });
   });
 
-  it('[E] surfaces explicit downstream error payloads unchanged', async () => {
+  it('[E] logs error status and surfaces downstream error payloads unchanged', async () => {
+    const { ctx, logCalls } = createCtx();
     proxyMocks.generateSpeech.mockResolvedValue({
       ok: false,
       error: 'Inworld API error: rate limited',
       status: 502,
     });
 
-    await expect(handler({}, makeArgs())).resolves.toEqual({
+    const result = await handler(ctx, makeArgs());
+
+    expect(result).toEqual({
       ok: false,
       error: 'Inworld API error: rate limited',
       status: 502,
     });
+
+    // No audio stored on error
+    expect(ctx.storage.store).not.toHaveBeenCalled();
+
+    // Error logged
+    expect(logCalls[0]).toMatchObject({
+      provider: 'inworld',
+      operation: 'tts',
+      status: 'error',
+      error: 'Inworld API error: rate limited',
+    });
   });
 
-  it('[S] follows standard configured flow: construct client then invoke generateSpeech once', async () => {
-    await handler({}, makeArgs());
+  it('[S] follows standard configured flow: construct client, generate, store, log', async () => {
+    const { ctx } = createCtx();
+    await handler(ctx, makeArgs());
 
     expect(proxyMocks.constructorApiKeys).toEqual(['inworld-key-test']);
     expect(proxyMocks.generateSpeech).toHaveBeenCalledTimes(1);
+    expect(ctx.storage.store).toHaveBeenCalledTimes(1);
+    expect(ctx.runMutation).toHaveBeenCalledTimes(1);
   });
 });

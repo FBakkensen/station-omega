@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import type { Id } from "../_generated/dataModel";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
 import { buildRoomImagePrompt, buildNPCImagePrompt, STYLE_SUFFIX } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
@@ -35,6 +36,9 @@ export const processAITurn = internalAction({
   handler: async (ctx, args) => {
     const { gameId, playerInput, turnNumber } = args;
     console.info("[processAITurn] Turn started", { gameId, turnNumber, input: playerInput });
+    const turnStartMs = Date.now();
+    let effectiveModelId = "unknown";
+    let stationIdForLog: string | undefined;
 
     try {
       // ── Load game data from Convex ───────────────────────────────────
@@ -49,6 +53,7 @@ export const processAITurn = internalAction({
         id: game.stationId,
       });
       if (!station) throw new Error("Station not found");
+      stationIdForLog = game.stationId;
 
       const messagesDocs = await ctx.runQuery(internal.messages.listInternal, {
         gameId,
@@ -167,7 +172,7 @@ export const processAITurn = internalAction({
       const MAX_TOOL_STEPS = 11;
 
       // Defense-in-depth: normalize invalid modelId to default
-      let effectiveModelId = GAME_MASTER_MODEL_ID;
+      effectiveModelId = GAME_MASTER_MODEL_ID;
       if (args.modelId) {
         if (isValidGameMasterModelId(args.modelId)) {
           effectiveModelId = args.modelId;
@@ -291,6 +296,29 @@ export const processAITurn = internalAction({
         }),
       });
 
+      // ── Log AI call ─────────────────────────────────────────────────
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "openrouter" as const,
+          operation: "game_turn" as const,
+          gameId,
+          stationId: game.stationId,
+          turnNumber,
+          modelId: effectiveModelId,
+          prompt: systemPrompt + "\n\n" + messages.map((m) => `[${m.role}] ${m.content}`).join("\n"),
+          response: rawJson,
+          status: "success" as const,
+          durationMs: Date.now() - turnStartMs,
+          metadata: {
+            segmentCount: segmentIndex - (turnNumber > 1 ? 1 : 0),
+            rawJsonLength: rawJson.length,
+            playerInput,
+          },
+        });
+      } catch (logErr) {
+        console.warn("[processAITurn] Failed to write AI log", logErr);
+      }
+
       // Save choices if any
       if (choiceBuffer.length > 0) {
         const lastChoices = choiceBuffer[choiceBuffer.length - 1];
@@ -362,6 +390,19 @@ export const processAITurn = internalAction({
       const message =
         err instanceof Error ? err.message : "Unknown error during turn";
       console.error("[processAITurn] AI error", { gameId, turnNumber, error: message });
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "openrouter" as const,
+          operation: "game_turn" as const,
+          gameId,
+          stationId: stationIdForLog as Id<"stations"> | undefined,
+          turnNumber,
+          modelId: effectiveModelId,
+          status: "error" as const,
+          error: message,
+          durationMs: Date.now() - turnStartMs,
+        });
+      } catch { /* logging must not mask the real error */ }
       await ctx.runMutation(internal.turnSegments.save, {
         gameId,
         turnNumber,

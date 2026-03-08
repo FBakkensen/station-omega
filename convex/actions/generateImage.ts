@@ -26,6 +26,7 @@ export const generate = internalAction({
   handler: async (ctx, args) => {
     const { stationId, gameId, cacheKey, category, prompt } = args;
     console.info("[generateImage] Starting", { stationId, cacheKey, category });
+    const startMs = Date.now();
 
     try {
       // Check cache first
@@ -36,6 +37,18 @@ export const generate = internalAction({
       });
       if (existing) {
         console.info("[generateImage] Cache hit, skipping generation", { cacheKey });
+        try {
+          await ctx.runMutation(internal.aiLogs.log, {
+            provider: "fal" as const,
+            operation: "image_generation" as const,
+            stationId,
+            gameId,
+            prompt,
+            status: "cache_hit" as const,
+            durationMs: Date.now() - startMs,
+            metadata: { cacheKey, category },
+          });
+        } catch { /* non-fatal */ }
         return null;
       }
 
@@ -70,10 +83,37 @@ export const generate = internalAction({
       });
 
       console.info("[generateImage] Image generated and cached", { cacheKey, storageId });
+
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "fal" as const,
+          operation: "image_generation" as const,
+          stationId,
+          gameId,
+          modelId: "flux/schnell",
+          prompt,
+          status: "success" as const,
+          durationMs: Date.now() - startMs,
+          metadata: { cacheKey, category, storageId, width: 512, height: 512 },
+        });
+      } catch { /* non-fatal */ }
     } catch (err) {
       // Image generation failures are non-fatal — log and move on
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error("[generateImage] Failed (non-fatal)", { cacheKey, error: message });
+      try {
+        await ctx.runMutation(internal.aiLogs.log, {
+          provider: "fal" as const,
+          operation: "image_generation" as const,
+          stationId,
+          gameId,
+          prompt,
+          status: "error" as const,
+          error: message,
+          durationMs: Date.now() - startMs,
+          metadata: { cacheKey, category },
+        });
+      } catch { /* non-fatal */ }
     }
 
     return null;

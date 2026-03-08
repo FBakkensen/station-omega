@@ -392,6 +392,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
             onChoice={handleChoice}
             isStreaming={isStreaming}
             allFinalized={twAllFinalized}
+            stationImages={stationImages}
           />
         </ErrorBoundary>
 

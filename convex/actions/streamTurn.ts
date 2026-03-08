@@ -5,7 +5,7 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
-import { buildRoomImagePrompt, buildNPCImagePrompt, STYLE_SUFFIX } from "../../src/image-prompts.js";
+import { buildRoomImagePrompt, buildNPCImagePrompt, buildItemImagePrompt, STYLE_SUFFIX } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
@@ -184,6 +184,7 @@ export const processAITurn = internalAction({
       // Track room before AI execution for image generation triggers
       const previousRoom = state.currentRoom;
       const seenNpcIds = new Set<string>();
+      const seenItemIds = new Set<string>();
 
       console.time("[processAITurn] AI streaming");
       const result = aiClient.streamStructuredObject({
@@ -226,6 +227,15 @@ export const processAITurn = internalAction({
               seenNpcIds.add(seg.npcId);
             }
 
+            // Track item IDs from entity refs for image generation
+            if (seg.entityRefs) {
+              for (const ref of seg.entityRefs) {
+                if (ref.type === 'item' && ref.id) {
+                  seenItemIds.add(ref.id);
+                }
+              }
+            }
+
             await ctx.runMutation(internal.turnSegments.save, {
               gameId,
               turnNumber,
@@ -235,6 +245,9 @@ export const processAITurn = internalAction({
                 text: seg.text,
                 npcId: seg.npcId,
                 crewName: seg.crewName,
+                ...(seg.entityRefs
+                  ? { entityRefs: seg.entityRefs.slice(0, 3) }
+                  : {}),
               },
             });
             segmentIndex++;
@@ -372,6 +385,22 @@ export const processAITurn = internalAction({
             gameId,
             cacheKey,
             category: "npc_portrait" as const,
+            prompt,
+          }));
+        }
+      }
+
+      // Item image generation for newly referenced items
+      for (const itemId of seenItemIds) {
+        const item = stationObj.items.get(itemId);
+        if (item) {
+          const cacheKey = `item:${itemId}`;
+          const prompt = buildItemImagePrompt(item, stationObj.visualStyleSeed);
+          imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey,
+            category: "item_image" as const,
             prompt,
           }));
         }

@@ -5,11 +5,17 @@
 
 export type SegmentType = 'narration' | 'dialogue' | 'thought' | 'station_pa' | 'crew_echo' | 'diagnostic_readout' | 'player_action';
 
+export interface EntityRef {
+  type: 'room' | 'npc' | 'item';
+  id: string;
+}
+
 export interface GameSegment {
   type: SegmentType;
   text: string;
   npcId: string | null;
   crewName: string | null;
+  entityRefs?: EntityRef[] | null;
 }
 
 export interface DisplaySegment extends GameSegment {

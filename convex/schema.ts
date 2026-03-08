@@ -79,6 +79,10 @@ export default defineSchema({
       text: v.string(),
       npcId: v.union(v.string(), v.null()),
       crewName: v.union(v.string(), v.null()),
+      entityRefs: v.optional(v.array(v.object({
+        type: v.union(v.literal("room"), v.literal("npc"), v.literal("item")),
+        id: v.string(),
+      }))),
     }),
   }).index("by_game_turn", ["gameId", "turnNumber"]),
 
@@ -238,6 +242,7 @@ export default defineSchema({
       v.literal("npc_portrait"),
       v.literal("briefing"),
       v.literal("briefing_video"),
+      v.literal("item_image"),
     ),
   })
     .index("by_station_cache", ["stationId", "cacheKey"])

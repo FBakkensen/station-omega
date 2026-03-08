@@ -83,7 +83,7 @@ export function useStreamingTurn({
     if (!rawSegments) return [];
     return rawSegments.map(
       (
-        doc: { segmentIndex: number; segment: { type: string; text: string; npcId: string | null; crewName: string | null } },
+        doc: { segmentIndex: number; segment: { type: string; text: string; npcId: string | null; crewName: string | null; entityRefs?: Array<{ type: string; id: string }> } },
         i: number,
       ) =>
         resolveSegment(
@@ -92,6 +92,7 @@ export function useStreamingTurn({
             text: doc.segment.text,
             npcId: doc.segment.npcId,
             crewName: doc.segment.crewName,
+            entityRefs: doc.segment.entityRefs as DisplaySegment['entityRefs'],
           },
           i,
           stationData,

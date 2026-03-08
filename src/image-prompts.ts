@@ -141,3 +141,24 @@ export function buildBriefingImagePrompt(
 
   return parts.join(' ');
 }
+
+export function buildItemImagePrompt(
+  item: { name: string; description: string; category: string },
+  visualStyleSeed?: string,
+): string {
+  const parts: string[] = [];
+
+  if (visualStyleSeed) {
+    parts.push(`${visualStyleSeed}.`);
+  }
+
+  parts.push(`Close-up view of a ${item.category} item: ${item.name}.`);
+
+  const desc = truncateAtSentence(item.description, 120);
+  if (desc) parts.push(desc);
+
+  parts.push('Resting on a worn metal surface inside a space station.');
+  parts.push(STYLE_SUFFIX);
+
+  return parts.join(' ');
+}

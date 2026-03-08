@@ -134,25 +134,27 @@ export const generate = internalAction({
           }
         }
 
-        // Write one log entry per layer
-        for (const pair of layerPairs) {
-          await ctx.runMutation(internal.aiLogs.log, {
-            provider: "openrouter" as const,
-            operation: "station_generation" as const,
-            stationId,
-            modelId: effectiveModelId,
-            prompt: pair.prompt,
-            response: pair.response,
-            status: "success" as const,
-            durationMs: pair.endMs - pair.startMs,
-            metadata: {
-              difficulty,
-              characterClass,
-              stationName: station.stationName,
-              layer: pair.layerName,
-            },
-          });
-        }
+        // Write one log entry per layer (parallel — order doesn't matter)
+        await Promise.allSettled(
+          layerPairs.map((pair) =>
+            ctx.runMutation(internal.aiLogs.log, {
+              provider: "openrouter" as const,
+              operation: "station_generation" as const,
+              stationId,
+              modelId: effectiveModelId,
+              prompt: pair.prompt,
+              response: pair.response,
+              status: "success" as const,
+              durationMs: pair.endMs - pair.startMs,
+              metadata: {
+                difficulty,
+                characterClass,
+                stationName: station.stationName,
+                layer: pair.layerName,
+              },
+            }),
+          ),
+        );
       } catch (logErr) {
         console.warn("[generateStation] Failed to write AI layer logs", logErr);
       }

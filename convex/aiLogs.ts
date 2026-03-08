@@ -41,7 +41,7 @@ export const prune = internalMutation({
     const old = await ctx.db
       .query("aiLogs")
       .order("asc")
-      .take(500);
+      .take(4000);
     let deleted = 0;
     for (const doc of old) {
       if (doc._creationTime < cutoff) {
@@ -133,12 +133,12 @@ export const byGame = query({
             q.eq("gameId", args.gameId).eq("turnNumber", turnNumber),
           )
           .order("desc")
-          .collect()
+          .take(500)
       : await ctx.db
           .query("aiLogs")
           .withIndex("by_game_turn", (q) => q.eq("gameId", args.gameId))
           .order("desc")
-          .collect();
+          .take(500);
     return docs.map(summarize);
   },
 });
@@ -152,7 +152,7 @@ export const byStation = query({
       .query("aiLogs")
       .withIndex("by_station", (q) => q.eq("stationId", args.stationId))
       .order("desc")
-      .collect();
+      .take(500);
     return docs.map(summarize);
   },
 });
@@ -185,7 +185,7 @@ export const stats = query({
   args: {},
   returns: v.any(),
   handler: async (ctx) => {
-    const all = await ctx.db.query("aiLogs").collect();
+    const all = await ctx.db.query("aiLogs").take(10000);
     const byProvider: Record<string, number> = {};
     const byOperation: Record<string, number> = {};
     let errorCount = 0;

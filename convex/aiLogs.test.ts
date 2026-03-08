@@ -90,6 +90,7 @@ function createAiLogsHarness(initialDocs: AiLogDoc[] = []) {
       get: vi.fn((id: string) => Promise.resolve(docs.get(id) ?? null)),
       query: vi.fn((_table: string) => ({
         order: (dir: "asc" | "desc") => buildQueryChain(null, {}).order(dir),
+        take: (n: number) => buildQueryChain(null, {}).take(n),
         collect: () => buildQueryChain(null, {}).collect(),
         withIndex: (indexName: string, callback: (q: Record<string, unknown>) => unknown) => {
           const captured: Record<string, unknown> = {};

@@ -4,12 +4,13 @@ import { OpenRouterAITextClient } from './io/openrouter-ai-client.js';
 export {
   GENERATION_MODELS,
   GENERATION_MODEL_ID,
+  GENERATION_MODEL_TIERS,
   GAME_MASTER_MODELS,
   GAME_MASTER_MODEL_ID,
   isValidGenerationModelId,
   isValidGameMasterModelId,
 } from './model-catalog.js';
-export type { ModelOption } from './model-catalog.js';
+export type { ModelOption, GenerationModelTiers } from './model-catalog.js';
 
 /** Shared default OpenRouter-backed AI client used by scripts and actions. */
 let _defaultAITextClient: OpenRouterAITextClient | undefined;

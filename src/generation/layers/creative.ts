@@ -23,9 +23,12 @@ import type {
 } from '../../types.js';
 import { identitySeedLayer } from './creative-identity.js';
 import { createSingleRoomLayer } from './creative-rooms.js';
+import type { RoomProseResult } from './creative-rooms.js';
+import { roomMechanicalBatchLayer } from './creative-rooms-mechanical.js';
 import { itemsCreativeLayer } from './creative-items.js';
 import { npcsCreativeLayer } from './creative-npcs.js';
 import { arrivalCreativeLayer } from './creative-arrival.js';
+import type { GenerationModelTiers } from '../../model-catalog.js';
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +95,11 @@ export const VALID_LOG_TYPES = new Set([
     'engineering_report', 'calibration_record', 'failure_analysis',
 ]);
 
+/** Fallback room name from archetype + room index (e.g., "Utility 1"). */
+export function roomFallbackName(archetype: string, roomId: string): string {
+    return `${archetype.charAt(0).toUpperCase()}${archetype.slice(1)} ${roomId.split('_')[1] ?? ''}`.trim();
+}
+
 export function findCrewMatch(author: string, crewNames: Set<string>): string | null {
     if (crewNames.has(author)) return author;
     const lower = author.toLowerCase();
@@ -109,14 +117,16 @@ export function findCrewMatch(author: string, crewNames: Set<string>): string | 
 /**
  * Runs creative content generation as parallel sub-layers:
  * 1. Identity seed (sequential) — station name, crew roster, tone
- * 2. Rooms + Items + NPCs + Arrival (parallel via Promise.allSettled)
+ * 2a. Room mechanical batch (cheap model, single call) — names, sensory, notes
+ * 2b. Room prose (N Opus calls) + Items + NPCs + Arrival (parallel)
+ * 3. Merge mechanical + prose into final RoomCreative[]
  *
  * Only failed sub-layers retry, preserving successful results.
  */
 export async function runCreativeSublayers(
     context: LayerContext,
     aiClient: AITextClient,
-    modelId: string,
+    modelTiers: GenerationModelTiers,
     onProgress?: (msg: string) => void,
     providerOptions?: AIProviderOptions,
     debugLog?: (label: string, content: string) => void,
@@ -129,7 +139,7 @@ export async function runCreativeSublayers(
         identitySeedLayer,
         context,
         aiClient,
-        modelId,
+        modelTiers.premium,
         onProgress,
         providerOptions,
         debugLog,
@@ -137,31 +147,51 @@ export async function runCreativeSublayers(
     context['identitySeed'] = identity;
     debugLog?.('GENERATION', `Identity seed complete: "${identity.stationName}", crew: ${identity.crewRoster.map(c => c.name).join(', ')}`);
 
-    // ─── Phase 2: Parallel Sub-Layers ────────────────────────────────────────
+    // ─── Phase 2a: Room Mechanical Batch (cheap model, single call) ─────────
     const topology = context['topology'] as ValidatedTopology;
+    const roomCount = topology.rooms.length;
+
+    onProgress?.('Generating room details...');
+    debugLog?.('GENERATION', 'Starting Creative Phase 2a: Room Mechanical Batch');
+
+    const mechanicalResults = await runLayer(
+        roomMechanicalBatchLayer,
+        context,
+        aiClient,
+        modelTiers.cheap,
+        undefined,
+        providerOptions,
+        debugLog,
+    );
+
+    // Store in context so prose layers can reference room names
+    context['roomMechanical'] = mechanicalResults;
+
+    debugLog?.('GENERATION', `Room mechanical batch complete: ${String(mechanicalResults.length)} rooms`);
+
+    // ─── Phase 2b: Parallel Sub-Layers ───────────────────────────────────────
     const objectivesNPCs = context['objectivesNPCs'] as ValidatedObjectivesNPCs;
     const hasNPCs = objectivesNPCs.npcs.length > 0;
 
     const maxConcurrent = 4;
     const limiter = new ConcurrencyLimiter(maxConcurrent);
 
-    const roomCount = topology.rooms.length;
-    const sublayerNames = [`${String(roomCount)} rooms`, 'items', ...(hasNPCs ? ['NPCs'] : []), 'arrival'];
+    const sublayerNames = [`${String(roomCount)} room prose`, 'items', ...(hasNPCs ? ['NPCs'] : []), 'arrival'];
     onProgress?.(`Generating ${sublayerNames.join(', ')}...`);
-    debugLog?.('GENERATION', `Starting Creative Phase 2: ${sublayerNames.join(', ')} (max ${String(maxConcurrent)} concurrent)`);
+    debugLog?.('GENERATION', `Starting Creative Phase 2b: ${sublayerNames.join(', ')} (max ${String(maxConcurrent)} concurrent)`);
 
     type SublayerResult = {
         label: string;
         promise: Promise<{ label: string; value: unknown }>;
     };
 
-    // Per-room parallel calls — each room is an independent sub-layer, bounded by limiter
+    // Per-room prose calls — each room is an independent sub-layer, bounded by limiter
     const sublayers: SublayerResult[] = topology.rooms.map((room, i) => {
         const roomLayer = createSingleRoomLayer(room.id, i);
         return {
             label: `room:${room.id}`,
             promise: limiter.run(() =>
-                runLayer(roomLayer, context, aiClient, modelId, undefined, providerOptions, debugLog),
+                runLayer(roomLayer, context, aiClient, modelTiers.premium, undefined, providerOptions, debugLog),
             )
                 .then(value => ({ label: `room:${room.id}`, value })),
         };
@@ -171,14 +201,14 @@ export async function runCreativeSublayers(
     sublayers.push({
         label: 'items',
         promise: limiter.run(() =>
-            runLayer(itemsCreativeLayer, context, aiClient, modelId, onProgress, providerOptions, debugLog),
+            runLayer(itemsCreativeLayer, context, aiClient, modelTiers.mid, onProgress, providerOptions, debugLog),
         )
             .then(value => ({ label: 'items', value })),
     });
     sublayers.push({
         label: 'arrival',
         promise: limiter.run(() =>
-            runLayer(arrivalCreativeLayer, context, aiClient, modelId, onProgress, providerOptions, debugLog),
+            runLayer(arrivalCreativeLayer, context, aiClient, modelTiers.premium, onProgress, providerOptions, debugLog),
         )
             .then(value => ({ label: 'arrival', value })),
     });
@@ -187,7 +217,7 @@ export async function runCreativeSublayers(
         sublayers.push({
             label: 'NPCs',
             promise: limiter.run(() =>
-                runLayer(npcsCreativeLayer, context, aiClient, modelId, onProgress, providerOptions, debugLog),
+                runLayer(npcsCreativeLayer, context, aiClient, modelTiers.premium, onProgress, providerOptions, debugLog),
             )
                 .then(value => ({ label: 'NPCs', value })),
         });
@@ -197,7 +227,7 @@ export async function runCreativeSublayers(
 
     // Collect successes and failures
     const failures: string[] = [];
-    const roomResults: RoomCreative[] = [];
+    const roomProseResults: RoomProseResult[] = [];
     let items: ItemCreative[] | undefined;
     let npcCreative: NPCCreative[] | undefined;
     let arrival: { arrivalScenario: ArrivalScenario; startingItem: StartingItemCreative } | undefined;
@@ -205,7 +235,7 @@ export async function runCreativeSublayers(
     for (const result of results) {
         if (result.status === 'fulfilled') {
             const { label, value } = result.value;
-            if (label.startsWith('room:')) roomResults.push(value as RoomCreative);
+            if (label.startsWith('room:')) roomProseResults.push(value as RoomProseResult);
             else if (label === 'items') items = value as ItemCreative[];
             else if (label === 'NPCs') npcCreative = value as NPCCreative[];
             else if (label === 'arrival') arrival = value as { arrivalScenario: ArrivalScenario; startingItem: StartingItemCreative };
@@ -218,9 +248,9 @@ export async function runCreativeSublayers(
     }
 
     if (failures.length > 0) {
-        const successCount = roomResults.length;
+        const successCount = roomProseResults.length;
         const successLabels = [
-            successCount > 0 ? `${String(successCount)}/${String(roomCount)} rooms` : null,
+            successCount > 0 ? `${String(successCount)}/${String(roomCount)} room prose` : null,
             items ? 'items' : null,
             npcCreative ? 'NPCs' : null,
             arrival ? 'arrival' : null,
@@ -229,14 +259,34 @@ export async function runCreativeSublayers(
         throw new LayerGenerationError('Creative (parallel)', failures.length, failures.map(f => [f]));
     }
 
-    // All sub-layers succeeded — assemble CreativeContent
-    if (!items || !arrival || roomResults.length !== roomCount) {
-        throw new Error(`Creative sub-layer results incomplete: ${String(roomResults.length)}/${String(roomCount)} rooms, items=${String(!!items)}, arrival=${String(!!arrival)}`);
+    // All sub-layers succeeded — merge mechanical + prose into RoomCreative[]
+    if (!items || !arrival || roomProseResults.length !== roomCount) {
+        throw new Error(`Creative sub-layer results incomplete: ${String(roomProseResults.length)}/${String(roomCount)} rooms, items=${String(!!items)}, arrival=${String(!!arrival)}`);
     }
 
-    // Sort rooms back to topology order
+    // Build lookups for merge
+    const mechanicalMap = new Map(mechanicalResults.map(m => [m.roomId, m]));
     const roomOrderMap = new Map(topology.rooms.map((r, i) => [r.id, i]));
-    roomResults.sort((a, b) => (roomOrderMap.get(a.roomId) ?? 0) - (roomOrderMap.get(b.roomId) ?? 0));
+    const topoRoomMap = new Map(topology.rooms.map(r => [r.id, r]));
+
+    // Merge mechanical + prose into RoomCreative[]
+    const mergedRooms: RoomCreative[] = roomProseResults.map(prose => {
+        const mech = mechanicalMap.get(prose.roomId);
+        const topoRoom = topoRoomMap.get(prose.roomId);
+        const name = mech?.name ?? (topoRoom ? roomFallbackName(topoRoom.archetype, topoRoom.id) : prose.roomId);
+
+        return {
+            roomId: prose.roomId,
+            name,
+            descriptionSeed: prose.descriptionSeed,
+            sensory: mech?.sensory ?? { sounds: [], smells: [], visuals: [], tactile: '' },
+            crewLogs: prose.crewLogs,
+            engineeringNotes: mech?.engineeringNotes ?? '',
+        };
+    });
+
+    // Sort rooms back to topology order
+    mergedRooms.sort((a, b) => (roomOrderMap.get(a.roomId) ?? 0) - (roomOrderMap.get(b.roomId) ?? 0));
 
     onProgress?.('Finalizing station narrative...');
     debugLog?.('GENERATION', 'All creative sub-layers complete, assembling CreativeContent');
@@ -250,7 +300,7 @@ export async function runCreativeSublayers(
             role: c.role,
             fate: c.fate,
         })),
-        rooms: roomResults,
+        rooms: mergedRooms,
         items,
         arrivalScenario: arrival.arrivalScenario,
         startingItem: arrival.startingItem,

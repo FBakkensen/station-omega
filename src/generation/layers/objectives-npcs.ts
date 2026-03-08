@@ -119,7 +119,7 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
     const roomsSummary = topology.rooms.map(r => {
         const failures = systemsItems.roomFailures.find(rf => rf.roomId === r.id);
         const failureStr = failures
-            ? failures.failures.map(f => `${f.systemId}(${f.failureMode})`).join(', ')
+            ? failures.failures.map(f => `${f.systemId}(${f.failureMode}, needs: ${f.requiredMaterials.join(', ')})`).join('; ')
             : 'none';
         return `  ${r.id} (${r.archetype}) — failures: [${failureStr}]`;
     }).join('\n');

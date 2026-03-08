@@ -8,8 +8,26 @@ export const GENERATION_MODELS: readonly ModelOption[] = [
   { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
 ];
 
-/** Default model used for station generation. */
-export const GENERATION_MODEL_ID = GENERATION_MODELS[0].id;
+// ─── Generation Model Tiers ──────────────────────────────────────────────────
+
+export interface GenerationModelTiers {
+    /** Core narrative: identity, objectives, room prose, arrival, NPCs */
+    premium: string;
+    /** Structured creative: item names/descriptions */
+    mid: string;
+    /** Mechanical content: room names, sensory details, engineering notes */
+    cheap: string;
+}
+
+/** Change any tier's model in this one place. */
+export const GENERATION_MODEL_TIERS: GenerationModelTiers = {
+    premium: 'anthropic/claude-opus-4.6',
+    mid: 'anthropic/claude-sonnet-4.6',
+    cheap: 'google/gemini-3.1-flash-lite-preview',
+};
+
+/** Default model used for station generation (alias to premium tier). */
+export const GENERATION_MODEL_ID = GENERATION_MODEL_TIERS.premium;
 
 /** Available game master models (extensible — add new entries here). */
 export const GAME_MASTER_MODELS: readonly ModelOption[] = [
@@ -19,9 +37,10 @@ export const GAME_MASTER_MODELS: readonly ModelOption[] = [
 /** Default model used for the main game master (tool calling + narrative). */
 export const GAME_MASTER_MODEL_ID = GAME_MASTER_MODELS[0].id;
 
-/** Check whether a model ID is in the generation allowlist. */
+/** Check whether a model ID is in the generation allowlist (premium tier only). */
 export function isValidGenerationModelId(modelId: string): boolean {
-  return GENERATION_MODELS.some(m => m.id === modelId);
+  return GENERATION_MODELS.some(m => m.id === modelId) ||
+    modelId === GENERATION_MODEL_TIERS.premium;
 }
 
 /** Check whether a model ID is in the game master allowlist. */

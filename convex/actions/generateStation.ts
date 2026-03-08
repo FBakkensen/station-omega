@@ -36,12 +36,15 @@ export const generate = internalAction({
       console.debug("[generateStation] Importing modules...");
       const { generateStation } = await import("../../src/generation/index.js");
       const { OpenRouterAITextClient } = await import("../../src/io/openrouter-ai-client.js");
-      const { GENERATION_MODEL_ID, isValidGenerationModelId } = await import("../../src/model-catalog.js");
+      const { GENERATION_MODEL_TIERS, isValidGenerationModelId } = await import("../../src/model-catalog.js");
       const { assembleStation } = await import("../../src/assembly.js");
       const { serializeStation } = await import("../lib/serialization.js");
       console.debug("[generateStation] Modules imported");
 
-      effectiveModelId = modelId && isValidGenerationModelId(modelId) ? modelId : GENERATION_MODEL_ID;
+      const effectiveTiers = modelId && isValidGenerationModelId(modelId)
+        ? { ...GENERATION_MODEL_TIERS, premium: modelId }
+        : GENERATION_MODEL_TIERS;
+      effectiveModelId = effectiveTiers.premium;
       console.info("[generateStation] Using model", { modelId: effectiveModelId });
 
       const aiClient = new OpenRouterAITextClient({
@@ -88,7 +91,7 @@ export const generate = internalAction({
       console.time("[generateStation] Generation pipeline");
       // Run the generation pipeline
       const { skeleton, creative } = await generateStation(
-        { difficulty, characterClass, aiClient, modelId: effectiveModelId },
+        { difficulty, characterClass, aiClient, modelTiers: effectiveTiers },
         onProgress,
         debugLog,
       );

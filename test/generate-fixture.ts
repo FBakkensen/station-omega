@@ -9,7 +9,7 @@
 
 import { join } from 'node:path';
 import { generateStation } from '../src/generation/index.js';
-import { GENERATION_MODEL_ID, getDefaultAITextClient } from '../src/models.js';
+import { GENERATION_MODEL_TIERS, getDefaultAITextClient } from '../src/models.js';
 import { assembleStation } from '../src/assembly.js';
 import { ensureFixturesDir, writeResult } from './model-config.js';
 import type { GeneratedStation } from '../src/types.js';
@@ -49,7 +49,7 @@ async function main() {
             difficulty: 'normal',
             characterClass: 'engineer',
             aiClient: getDefaultAITextClient(),
-            modelId: GENERATION_MODEL_ID,
+            modelTiers: GENERATION_MODEL_TIERS,
         },
         (msg) => { console.log(`  ${msg}`); },
     );

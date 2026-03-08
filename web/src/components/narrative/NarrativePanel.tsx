@@ -3,6 +3,7 @@ import type { DisplaySegment, Choice } from '../../engine/types';
 import { SegmentCard } from './SegmentCard';
 import { ChoiceCard } from './ChoiceCard';
 import type { TypewriterCard } from '../../hooks/useTypewriter';
+import type { StationImage } from '../../hooks/useStationImages';
 
 interface NarrativePanelProps {
   segments: DisplaySegment[];
@@ -12,6 +13,7 @@ interface NarrativePanelProps {
   onChoice: (choiceId: string) => void;
   isStreaming: boolean;
   allFinalized: boolean;
+  stationImages: Map<string, StationImage>;
 }
 
 export function NarrativePanel({
@@ -22,6 +24,7 @@ export function NarrativePanel({
   onChoice,
   isStreaming,
   allFinalized,
+  stationImages,
 }: NarrativePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -89,6 +92,8 @@ export function NarrativePanel({
                     spans={card.spans}
                     revealedChars={card.revealedChars}
                     finalized={card.finalized}
+                    entityRefs={seg.entityRefs}
+                    stationImages={stationImages}
                   />
                 );
               })}

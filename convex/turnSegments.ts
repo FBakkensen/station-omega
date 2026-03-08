@@ -14,6 +14,10 @@ const segmentValidator = v.object({
   text: v.string(),
   npcId: v.union(v.string(), v.null()),
   crewName: v.union(v.string(), v.null()),
+  entityRefs: v.optional(v.array(v.object({
+    type: v.union(v.literal("room"), v.literal("npc"), v.literal("item")),
+    id: v.string(),
+  }))),
 });
 
 /** Get all segments for a specific turn. */

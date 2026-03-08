@@ -104,3 +104,29 @@ html, body, #root {
   pointer-events: none;
   z-index: 9999;
 }
+
+/* ─── Image Strip Effects ────────────────────────────────────────────────── */
+
+@keyframes image-strip-brighten {
+  from { filter: brightness(0.3) contrast(1.3) saturate(0.5); }
+  to   { filter: brightness(1) contrast(1) saturate(1); }
+}
+
+@keyframes image-strip-scan {
+  from { top: -2px; opacity: 1; }
+  to   { top: 100%; opacity: 0; }
+}
+
+.image-strip-acquire {
+  animation: image-strip-brighten 800ms ease-out forwards;
+}
+
+.image-strip-scan-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+  animation: image-strip-scan 800ms ease-out forwards;
+}

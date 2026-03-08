@@ -87,6 +87,25 @@ Rules:
 - NEVER put dialogue text in narration segments — if dialogue is warranted, use a dialogue segment with npcId set.
 - Every turn must advance or block a technical objective with an explicit reason. If the action doesn't connect to an objective, narrate what I learn and how it relates to station systems.
 
+## Entity References
+
+Your response segments include an \`entityRefs\` field — an array of up to 3 entity references for inline thumbnail images displayed alongside the segment text.
+
+Each entity ref has a \`type\` ("room", "npc", or "item") and an \`id\` (the entity's internal ID).
+
+When to include entityRefs:
+- **room** ref when narrating about a room's physical features, environment, or atmosphere (use the room's ID like "reactor_0")
+- **npc** ref when describing or narrating about an NPC's appearance or actions (use the NPC's ID like "enemy_room_1") — this is separate from the dialogue \`npcId\` field
+- **item** ref when narrating about discovering, examining, picking up, or using an item (use the item's ID like "medkit_0")
+- Omit the field for segments without visual entities (most thoughts, PA announcements, diagnostics, crew echoes)
+
+Rules:
+- Maximum 3 entity refs per segment
+- Only reference entities that are being visually described or interacted with in this specific segment
+- Room refs are useful for the first narration segment when entering a new room
+- NPC refs pair naturally with dialogue segments but can also appear in narration segments that describe an NPC
+- Item refs should appear when an item is first discovered or when it's being examined/used
+
 ## Perspective
 
 ALL narration and thought segments use first person ("I"). Narration is what I see and do; thought is me reasoning about it.

@@ -1,13 +1,17 @@
-import type { StyledSpan } from '../../engine/types';
+import type { StyledSpan, EntityRef } from '../../engine/types';
 import { segmentCardStyle } from '../../engine/segmentStyles';
 import type { SegmentType } from '../../engine/types';
 import { truncateSpans } from '../../engine/markdownToSpans';
+import type { StationImage } from '../../hooks/useStationImages';
+import { SegmentImageStrip } from './SegmentImageStrip';
 
 interface SegmentCardProps {
   type: SegmentType;
   spans: StyledSpan[];
   revealedChars: number;
   finalized: boolean;
+  entityRefs?: EntityRef[] | null;
+  stationImages?: Map<string, StationImage>;
 }
 
 /** Render a single StyledSpan as a <span> with inline styles. */
@@ -38,9 +42,33 @@ function StyledSpanEl({ span }: { span: StyledSpan }) {
   );
 }
 
-export function SegmentCard({ type, spans, revealedChars, finalized }: SegmentCardProps) {
+function SegmentText({ spans, finalized }: { spans: StyledSpan[]; finalized: boolean }) {
+  return (
+    <>
+      {spans.map((span, i) => (
+        <StyledSpanEl key={i} span={span} />
+      ))}
+      {!finalized && (
+        <span className="animate-pulse text-omega-dim">▊</span>
+      )}
+    </>
+  );
+}
+
+export function SegmentCard({ type, spans, revealedChars, finalized, entityRefs, stationImages }: SegmentCardProps) {
   const cardStyle = segmentCardStyle(type);
   const visibleSpans = finalized ? spans : truncateSpans(spans, revealedChars);
+
+  // Resolve entity refs to image URLs
+  const images: StationImage[] = [];
+  if (entityRefs && stationImages) {
+    for (const ref of entityRefs) {
+      const cacheKey = `${ref.type}:${ref.id}`;
+      const img = stationImages.get(cacheKey);
+      if (img) images.push(img);
+    }
+  }
+  const hasImages = images.length > 0;
 
   return (
     <div
@@ -50,11 +78,14 @@ export function SegmentCard({ type, spans, revealedChars, finalized }: SegmentCa
         borderLeft: `3px solid ${cardStyle.border}`,
       }}
     >
-      {visibleSpans.map((span, i) => (
-        <StyledSpanEl key={i} span={span} />
-      ))}
-      {!finalized && (
-        <span className="animate-pulse text-omega-dim">▊</span>
+      <SegmentText spans={visibleSpans} finalized={finalized} />
+      {hasImages && (
+        <SegmentImageStrip
+          images={images}
+          finalized={finalized}
+          cardBorderColor={cardStyle.border}
+          cardBgColor={cardStyle.bg}
+        />
       )}
     </div>
   );

@@ -108,8 +108,14 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
     prevForceMuteRef.current = devSettings.forceMute;
   }, [devSettings.forceMute, twFinalizeAll]);
 
-  // Show mission modal on fresh game until explicitly dismissed
-  const showInitialBriefing = !dismissedInitialBriefing && game?.turnCount === 0;
+  // Capture the initial turnCount once the game doc first loads.
+  // Uses the React "store information from previous renders" pattern
+  // (setState during render) to lock in the value without effects or refs.
+  const [capturedInitialTurnCount, setCapturedInitialTurnCount] = useState<number | undefined>(undefined);
+  if (game && capturedInitialTurnCount === undefined) {
+    setCapturedInitialTurnCount(game.turnCount);
+  }
+  const showInitialBriefing = !dismissedInitialBriefing && capturedInitialTurnCount === 0;
   const missionVisible = showMission || showInitialBriefing;
 
   // Auto-submit the first turn when game loads (initial "look around").

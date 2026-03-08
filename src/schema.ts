@@ -12,7 +12,7 @@ export const GameSegmentSchema = z.object({
     entityRefs: z.array(z.object({
       type: z.enum(['room', 'npc', 'item']),
       id: z.string(),
-    })).max(3).nullish().describe('Up to 3 entity references for inline thumbnail images, or null'),
+    })).max(3).optional().describe('Up to 3 entity references for inline thumbnail images, or omitted'),
 });
 
 export const GameResponseSchema = z.object({

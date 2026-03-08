@@ -15,7 +15,7 @@ export interface GameSegment {
   text: string;
   npcId: string | null;
   crewName: string | null;
-  entityRefs?: EntityRef[] | null;
+  entityRefs?: EntityRef[];
 }
 
 export interface DisplaySegment extends GameSegment {

@@ -97,7 +97,7 @@ When to include entityRefs:
 - **room** ref when narrating about a room's physical features, environment, or atmosphere (use the room's ID like "reactor_0")
 - **npc** ref when describing or narrating about an NPC's appearance or actions (use the NPC's ID like "enemy_room_1") — this is separate from the dialogue \`npcId\` field
 - **item** ref when narrating about discovering, examining, picking up, or using an item (use the item's ID like "medkit_0")
-- Set to \`null\` for segments without visual entities (most thoughts, PA announcements, diagnostics, crew echoes)
+- Omit the field for segments without visual entities (most thoughts, PA announcements, diagnostics, crew echoes)
 
 Rules:
 - Maximum 3 entity refs per segment

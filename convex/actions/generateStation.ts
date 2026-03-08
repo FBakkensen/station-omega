@@ -170,8 +170,13 @@ export const generate = internalAction({
 
         try {
           const { buildBriefingVideoPrompt } = await import("../../src/video-prompts.js");
-          const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
           const videoPrompt = buildBriefingVideoPrompt(station);
+          if (!videoPrompt) {
+            console.warn("[generateStation] No briefingVideoPrompt on station, skipping video generation");
+            throw new Error("No briefingVideoPrompt");
+          }
+          const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
+          const { VIDEO_MODEL_ID } = await import("../../src/model-catalog.js");
           const videoStartMs = Date.now();
           const client = new FalVideoClient(process.env.FAL_API_KEY);
           const result = await client.generateVideo({ prompt: videoPrompt });
@@ -193,7 +198,7 @@ export const generate = internalAction({
               provider: "fal" as const,
               operation: "video_generation" as const,
               stationId,
-              modelId: "veo3.1/fast",
+              modelId: VIDEO_MODEL_ID,
               prompt: videoPrompt,
               status: "success" as const,
               durationMs: Date.now() - videoStartMs,

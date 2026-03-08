@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FalVideoClient } from './fal-video-client.js';
+import { VIDEO_MODEL_ID } from '../model-catalog.js';
 
 const noopSleep = () => Promise.resolve();
 
-const QUEUE_BASE = 'https://queue.fal.run/fal-ai/veo3.1/fast';
+const QUEUE_BASE = `https://queue.fal.run/${VIDEO_MODEL_ID}`;
 
 function submitBody(id: string) {
   return {
@@ -99,15 +100,14 @@ describe('FalVideoClient', () => {
     await client.generateVideo({ prompt: 'test prompt' });
 
     // Submit URL
-    expect(mockFetch.mock.calls[0][0]).toBe('https://queue.fal.run/fal-ai/veo3.1/fast');
+    expect(mockFetch.mock.calls[0][0]).toBe(QUEUE_BASE);
     // Submit body
     const submitInit = mockFetch.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(submitInit.body as string)).toEqual({
       prompt: 'test prompt',
-      duration: '8s',
+      duration: '5',
       aspect_ratio: '16:9',
-      resolution: '720p',
-      generate_audio: true,
+      resolution: '480p',
     });
     // Poll URL (uses status_url from submit response, not constructed from base)
     expect(mockFetch.mock.calls[1][0]).toBe(

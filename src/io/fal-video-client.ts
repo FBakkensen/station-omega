@@ -1,6 +1,7 @@
 import type { VideoClient, VideoGenerationRequest, VideoGenerationResult } from './video-client.js';
+import { VIDEO_MODEL_ID } from '../model-catalog.js';
 
-const FAL_QUEUE_BASE = 'https://queue.fal.run/fal-ai/veo3.1/fast';
+const FAL_QUEUE_BASE = `https://queue.fal.run/${VIDEO_MODEL_ID}`;
 
 const POLL_INITIAL_MS = 5_000;
 const POLL_MAX_MS = 15_000;
@@ -43,10 +44,9 @@ export class FalVideoClient implements VideoClient {
       headers: postHeaders,
       body: JSON.stringify({
         prompt: request.prompt,
-        duration: '8s',
+        duration: '5',
         aspect_ratio: '16:9',
-        resolution: '720p',
-        generate_audio: true,
+        resolution: '480p',
       }),
     });
 

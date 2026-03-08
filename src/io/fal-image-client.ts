@@ -1,6 +1,7 @@
 import type { ImageClient, ImageGenerationRequest, ImageGenerationResult } from './image-client.js';
+import { IMAGE_MODEL_ID } from '../model-catalog.js';
 
-const FAL_API_BASE = 'https://fal.run/fal-ai/flux/schnell';
+const FAL_API_BASE = `https://fal.run/${IMAGE_MODEL_ID}`;
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 

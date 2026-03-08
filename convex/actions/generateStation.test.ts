@@ -28,6 +28,8 @@ vi.mock('../../src/model-catalog.js', () => ({
     { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
   ],
   isValidGenerationModelId: vi.fn((id: string) => ['z-ai/glm-5', 'anthropic/claude-opus-4.6'].includes(id)),
+  VIDEO_MODEL_ID: 'fal-ai/bytedance/seedance/v1/pro/fast/text-to-video',
+  IMAGE_MODEL_ID: 'fal-ai/flux/schnell',
 }));
 
 vi.mock('../../src/assembly.js', () => ({

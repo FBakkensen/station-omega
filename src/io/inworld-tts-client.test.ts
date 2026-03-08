@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { InworldTTSClient } from './inworld-tts-client.js';
+import { TTS_MODEL_ID } from '../model-catalog.js';
 
 type FetchResponseLike = {
   ok: boolean;
@@ -160,7 +161,7 @@ describe('InworldTTSClient streaming contracts', () => {
     expect(JSON.parse(requestInit.body)).toEqual({
       text: 'Interface test',
       voice_id: 'Wendy',
-      model_id: 'inworld-tts-1.5-max',
+      model_id: TTS_MODEL_ID,
       audio_config: {
         audio_encoding: 'LINEAR16',
         sample_rate_hertz: 48000,

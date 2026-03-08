@@ -28,3 +28,12 @@ export function isValidGenerationModelId(modelId: string): boolean {
 export function isValidGameMasterModelId(modelId: string): boolean {
   return GAME_MASTER_MODELS.some(m => m.id === modelId);
 }
+
+// ─── TTS ─────────────────────────────────────────────────────────────────────
+export const TTS_MODEL_ID = 'inworld-tts-1.5-max';
+
+// ─── Image Generation ────────────────────────────────────────────────────────
+export const IMAGE_MODEL_ID = 'fal-ai/flux/schnell';
+
+// ─── Video Generation ────────────────────────────────────────────────────────
+export const VIDEO_MODEL_ID = 'fal-ai/bytedance/seedance/v1/pro/fast/text-to-video';

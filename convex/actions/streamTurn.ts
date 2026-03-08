@@ -4,7 +4,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
-import { buildRoomImagePrompt, buildNPCImagePrompt, extractNarrativeVisuals } from "../../src/image-prompts.js";
+import { buildRoomImagePrompt, buildNPCImagePrompt, STYLE_SUFFIX } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
@@ -179,7 +179,6 @@ export const processAITurn = internalAction({
       // Track room before AI execution for image generation triggers
       const previousRoom = state.currentRoom;
       const seenNpcIds = new Set<string>();
-      const collectedSegments: Array<{ type: string; text: string }> = [];
 
       console.time("[processAITurn] AI streaming");
       const result = aiClient.streamStructuredObject({
@@ -222,9 +221,6 @@ export const processAITurn = internalAction({
               seenNpcIds.add(seg.npcId);
             }
 
-            // Accumulate segments for narrative-aware image prompts
-            collectedSegments.push({ type: seg.type, text: seg.text });
-
             await ctx.runMutation(internal.turnSegments.save, {
               gameId,
               turnNumber,
@@ -241,6 +237,7 @@ export const processAITurn = internalAction({
         }
         // Tool calls/results handled internally (tools mutate gameCtx)
       }
+      const parsedOutput = await result.output;
       console.timeEnd("[processAITurn] AI streaming");
       console.debug("[processAITurn] Segments extracted", {
         segmentCount: segmentIndex - (turnNumber > 1 ? 1 : 0),
@@ -313,8 +310,18 @@ export const processAITurn = internalAction({
         const room = stationObj.rooms.get(state.currentRoom);
         if (room) {
           const cacheKey = `room:${state.currentRoom}`;
-          const narrativeContext = extractNarrativeVisuals(collectedSegments);
-          const prompt = buildRoomImagePrompt(room, stationObj, state.activeEvents, narrativeContext);
+          // Prefer AI-generated prompt; append STYLE_SUFFIX for CLIP encoder
+          // Fall back to mechanical assembly if AI returned null
+          const aiImagePrompt = typeof parsedOutput.imagePrompt === 'string'
+            ? parsedOutput.imagePrompt + ' ' + STYLE_SUFFIX
+            : null;
+          const prompt = aiImagePrompt || buildRoomImagePrompt(room, stationObj, state.activeEvents);
+          console.info("[processAITurn] Image prompt", {
+            source: aiImagePrompt ? "ai" : "fallback",
+            aiRaw: parsedOutput.imagePrompt,
+            promptLength: prompt.split(/\s+/).length,
+            prompt: prompt.slice(0, 200),
+          });
           imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,

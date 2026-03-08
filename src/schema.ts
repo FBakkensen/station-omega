@@ -13,6 +13,9 @@ export const GameSegmentSchema = z.object({
 
 export const GameResponseSchema = z.object({
     segments: z.array(GameSegmentSchema),
+    imagePrompt: z.string().nullable().describe(
+      'Flux Schnell image prompt for the current room scene (40-80 words), or null if room did not change'
+    ),
 });
 
 export type GameSegment = z.infer<typeof GameSegmentSchema>;

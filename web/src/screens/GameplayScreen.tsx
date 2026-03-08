@@ -135,9 +135,6 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   // effect ordering issues.
   const dismissBriefing = useCallback(() => {
     if (showInitialBriefing && segments.length > 0) {
-      console.log('[dismissBriefing] Playing %d deferred segments, isStreaming=%s, tts=%s',
-        segments.length, isStreaming, ttsEnabledRef.current);
-
       if (ttsEnabledRef.current) {
         ttsRef.current.beginStream();
         ttsHighWaterRef.current = -1;
@@ -161,7 +158,6 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       hasObservedPostMountLiveStreamRef.current = true;
       hasSeenInitialStreamingStateRef.current = true;
     } else if (showInitialBriefing) {
-      console.log('[dismissBriefing] Zero segments — normal flow handles later');
       hasSeenInitialStreamingStateRef.current = true;
     }
 
@@ -180,7 +176,6 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (showInitialBriefing) {
-      console.log('[streamLifecycle] Skipping — briefing visible, isStreaming=%s', isStreaming);
       prevStreamingRef.current = isStreaming;
       return;
     }
@@ -213,7 +208,6 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
     // Suppress while the initial mission briefing is visible — segments accumulate
     // in Convex but aren't pushed to typewriter/TTS until the user dismisses the modal.
     if (showInitialBriefing) {
-      console.log('[segmentPush] Suppressed — briefing visible, %d segments buffered', segments.length);
       return;
     }
 

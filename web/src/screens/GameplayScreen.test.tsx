@@ -165,6 +165,82 @@ function makeStationDoc() {
   };
 }
 
+/** Shared setup for fresh-game (turnCount=0) test blocks with mission modal tracking. */
+function setupFreshGameMocks() {
+  vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  vi.stubEnv('VITE_CONVEX_URL', 'https://station-omega-test.cloud');
+
+  const seenSegments = new Set<number>();
+  mocks.typewriterPushCalls.length = 0;
+
+  mocks.twPushSegmentMock.mockImplementation((segment: DisplaySegment, immediate?: boolean) => {
+    const isImmediate = immediate === true;
+    mocks.typewriterPushCalls.push({
+      segmentIndex: segment.segmentIndex,
+      immediate: isImmediate,
+    });
+    if (seenSegments.has(segment.segmentIndex)) return -1;
+    seenSegments.add(segment.segmentIndex);
+    return isImmediate ? -1 : 24;
+  });
+
+  mocks.useTypewriterMock.mockReturnValue({
+    cards: new Map(),
+    pushSegment: mocks.twPushSegmentMock,
+    onRevealChunk: mocks.twOnRevealChunkMock,
+    finalizeAll: mocks.twFinalizeAllMock,
+    finalizeSegment: vi.fn(),
+    skipCurrent: mocks.twSkipCurrentMock,
+    allFinalized: true,
+  });
+
+  mocks.useTTSMock.mockReturnValue({
+    pushSegment: mocks.ttsPushSegmentMock,
+    beginStream: mocks.ttsBeginStreamMock,
+    flushStream: mocks.ttsFlushStreamMock,
+    stop: mocks.ttsStopMock,
+  });
+
+  mocks.usePreferencesMock.mockReturnValue({
+    soundEnabled: true,
+    setSoundEnabled: vi.fn(),
+  });
+
+  mocks.useDevSettingsMock.mockReturnValue({
+    enabled: false,
+    forceMute: false,
+    typewriterCharsPerSec: 20,
+  });
+
+  mocks.lastMissionModalOnClose = null;
+
+  const gameDoc = { ...makeGameDoc(), turnCount: 0 };
+  const stationDoc = makeStationDoc();
+  let useQueryCallCount = 0;
+  mocks.useQueryMock.mockImplementation(() => {
+    useQueryCallCount++;
+    const idx = ((useQueryCallCount - 1) % 3);
+    if (idx === 0) return gameDoc;
+    if (idx === 1) return stationDoc;
+    return undefined;
+  });
+
+  const streamingFixture: StreamingFixture = {
+    segments: [],
+    latestTurnStartIndex: 0,
+    isStreaming: false,
+    submitTurn: vi.fn(),
+    choices: null,
+    choiceTitle: null,
+    error: null,
+    clearError: vi.fn(),
+  };
+  mocks.useStreamingTurnMock.mockImplementation(() => streamingFixture);
+
+  return { gameDoc, streamingFixture };
+}
+
 describe('GameplayScreen reload hydration behavior', () => {
   let streamingFixture: StreamingFixture;
 
@@ -425,76 +501,7 @@ describe('GameplayScreen initial briefing gate', () => {
   let streamingFixture: StreamingFixture;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-    vi.stubEnv('VITE_CONVEX_URL', 'https://station-omega-test.cloud');
-
-    const seenSegments = new Set<number>();
-    mocks.typewriterPushCalls.length = 0;
-
-    mocks.twPushSegmentMock.mockImplementation((segment: DisplaySegment, immediate?: boolean) => {
-      const isImmediate = immediate === true;
-      mocks.typewriterPushCalls.push({
-        segmentIndex: segment.segmentIndex,
-        immediate: isImmediate,
-      });
-      if (seenSegments.has(segment.segmentIndex)) return -1;
-      seenSegments.add(segment.segmentIndex);
-      return isImmediate ? -1 : 24;
-    });
-
-    mocks.useTypewriterMock.mockReturnValue({
-      cards: new Map(),
-      pushSegment: mocks.twPushSegmentMock,
-      onRevealChunk: mocks.twOnRevealChunkMock,
-      finalizeAll: mocks.twFinalizeAllMock,
-      finalizeSegment: vi.fn(),
-      skipCurrent: mocks.twSkipCurrentMock,
-      allFinalized: true,
-    });
-
-    mocks.useTTSMock.mockReturnValue({
-      pushSegment: mocks.ttsPushSegmentMock,
-      beginStream: mocks.ttsBeginStreamMock,
-      flushStream: mocks.ttsFlushStreamMock,
-      stop: mocks.ttsStopMock,
-    });
-
-    mocks.usePreferencesMock.mockReturnValue({
-      soundEnabled: true,
-      setSoundEnabled: vi.fn(),
-    });
-
-    mocks.useDevSettingsMock.mockReturnValue({
-      enabled: false,
-      forceMute: false,
-      typewriterCharsPerSec: 20,
-    });
-
-    // Fresh game with turnCount: 0
-    const gameDoc = { ...makeGameDoc(), turnCount: 0 };
-    const stationDoc = makeStationDoc();
-    // Return game/station based on call order: 1st=game, 2nd=station, 3rd+=undefined
-    let useQueryCallCount = 0;
-    mocks.useQueryMock.mockImplementation(() => {
-      useQueryCallCount++;
-      const idx = ((useQueryCallCount - 1) % 3);
-      if (idx === 0) return gameDoc;
-      if (idx === 1) return stationDoc;
-      return undefined;
-    });
-
-    streamingFixture = {
-      segments: [],
-      latestTurnStartIndex: 0,
-      isStreaming: false,
-      submitTurn: vi.fn(),
-      choices: null,
-      choiceTitle: null,
-      error: null,
-      clearError: vi.fn(),
-    };
-    mocks.useStreamingTurnMock.mockImplementation(() => streamingFixture);
+    ({ streamingFixture } = setupFreshGameMocks());
   });
 
   it('[Z] suppresses typewriter/TTS while initial briefing is visible — zero presentation before dismissal', () => {
@@ -673,79 +680,9 @@ describe('GameplayScreen initial briefing gate', () => {
 describe('GameplayScreen mission modal close behavior', () => {
   let streamingFixture: StreamingFixture;
   let gameDoc: ReturnType<typeof makeGameDoc>;
-  let stationDoc: ReturnType<typeof makeStationDoc>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-    vi.stubEnv('VITE_CONVEX_URL', 'https://station-omega-test.cloud');
-
-    const seenSegments = new Set<number>();
-    mocks.typewriterPushCalls.length = 0;
-
-    mocks.twPushSegmentMock.mockImplementation((segment: DisplaySegment, immediate?: boolean) => {
-      const isImmediate = immediate === true;
-      mocks.typewriterPushCalls.push({
-        segmentIndex: segment.segmentIndex,
-        immediate: isImmediate,
-      });
-      if (seenSegments.has(segment.segmentIndex)) return -1;
-      seenSegments.add(segment.segmentIndex);
-      return isImmediate ? -1 : 24;
-    });
-
-    mocks.useTypewriterMock.mockReturnValue({
-      cards: new Map(),
-      pushSegment: mocks.twPushSegmentMock,
-      onRevealChunk: mocks.twOnRevealChunkMock,
-      finalizeAll: mocks.twFinalizeAllMock,
-      finalizeSegment: vi.fn(),
-      skipCurrent: mocks.twSkipCurrentMock,
-      allFinalized: true,
-    });
-
-    mocks.useTTSMock.mockReturnValue({
-      pushSegment: mocks.ttsPushSegmentMock,
-      beginStream: mocks.ttsBeginStreamMock,
-      flushStream: mocks.ttsFlushStreamMock,
-      stop: mocks.ttsStopMock,
-    });
-
-    mocks.usePreferencesMock.mockReturnValue({
-      soundEnabled: true,
-      setSoundEnabled: vi.fn(),
-    });
-
-    mocks.useDevSettingsMock.mockReturnValue({
-      enabled: false,
-      forceMute: false,
-      typewriterCharsPerSec: 20,
-    });
-
-    mocks.lastMissionModalOnClose = null;
-
-    gameDoc = { ...makeGameDoc(), turnCount: 0 };
-    stationDoc = makeStationDoc();
-    let useQueryCallCount = 0;
-    mocks.useQueryMock.mockImplementation(() => {
-      useQueryCallCount++;
-      const idx = ((useQueryCallCount - 1) % 3);
-      if (idx === 0) return gameDoc;
-      if (idx === 1) return stationDoc;
-      return undefined;
-    });
-
-    streamingFixture = {
-      segments: [],
-      latestTurnStartIndex: 0,
-      isStreaming: false,
-      submitTurn: vi.fn(),
-      choices: null,
-      choiceTitle: null,
-      error: null,
-      clearError: vi.fn(),
-    };
-    mocks.useStreamingTurnMock.mockImplementation(() => streamingFixture);
+    ({ streamingFixture, gameDoc } = setupFreshGameMocks());
   });
 
   it('[Z] mission modal stays open when turnCount changes from 0 to 1 and user has not dismissed', () => {
@@ -1008,79 +945,9 @@ describe('GameplayScreen mission modal close behavior', () => {
 
 describe('GameplayScreen deferred initial turn playback', () => {
   let streamingFixture: StreamingFixture;
-  let gameDoc: ReturnType<typeof makeGameDoc>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-    vi.stubEnv('VITE_CONVEX_URL', 'https://station-omega-test.cloud');
-
-    const seenSegments = new Set<number>();
-    mocks.typewriterPushCalls.length = 0;
-
-    mocks.twPushSegmentMock.mockImplementation((segment: DisplaySegment, immediate?: boolean) => {
-      const isImmediate = immediate === true;
-      mocks.typewriterPushCalls.push({
-        segmentIndex: segment.segmentIndex,
-        immediate: isImmediate,
-      });
-      if (seenSegments.has(segment.segmentIndex)) return -1;
-      seenSegments.add(segment.segmentIndex);
-      return isImmediate ? -1 : 24;
-    });
-
-    mocks.useTypewriterMock.mockReturnValue({
-      cards: new Map(),
-      pushSegment: mocks.twPushSegmentMock,
-      onRevealChunk: mocks.twOnRevealChunkMock,
-      finalizeAll: mocks.twFinalizeAllMock,
-      finalizeSegment: vi.fn(),
-      skipCurrent: mocks.twSkipCurrentMock,
-      allFinalized: true,
-    });
-
-    mocks.useTTSMock.mockReturnValue({
-      pushSegment: mocks.ttsPushSegmentMock,
-      beginStream: mocks.ttsBeginStreamMock,
-      flushStream: mocks.ttsFlushStreamMock,
-      stop: mocks.ttsStopMock,
-    });
-
-    mocks.usePreferencesMock.mockReturnValue({
-      soundEnabled: true,
-      setSoundEnabled: vi.fn(),
-    });
-
-    mocks.useDevSettingsMock.mockReturnValue({
-      enabled: false,
-      forceMute: false,
-      typewriterCharsPerSec: 20,
-    });
-
-    mocks.lastMissionModalOnClose = null;
-
-    gameDoc = { ...makeGameDoc(), turnCount: 0 };
-    const stationDoc = makeStationDoc();
-    let useQueryCallCount = 0;
-    mocks.useQueryMock.mockImplementation(() => {
-      useQueryCallCount++;
-      const idx = ((useQueryCallCount - 1) % 3);
-      if (idx === 0) return gameDoc;
-      if (idx === 1) return stationDoc;
-      return undefined;
-    });
-
-    streamingFixture = {
-      segments: [],
-      latestTurnStartIndex: 0,
-      isStreaming: false,
-      submitTurn: vi.fn(),
-      choices: null,
-      choiceTitle: null,
-      error: null,
-      clearError: vi.fn(),
-    };
-    mocks.useStreamingTurnMock.mockImplementation(() => streamingFixture);
+    ({ streamingFixture } = setupFreshGameMocks());
   });
 
   it('[Z] dismiss with zero segments — no TTS calls, later segments play normally', () => {

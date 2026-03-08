@@ -36,9 +36,11 @@ export function useDevSettings(): DevSettings {
     const search = typeof window !== 'undefined' ? window.location.search : '';
     const params = new URLSearchParams(search);
 
-    const explicitToggle = parseBooleanParam(params.get('devfast'));
+    const explicitToggle = parseBooleanParam(params.get('devfast'))
+      ?? parseBooleanParam(params.get('fastmode'));
     const enabled = explicitToggle ?? import.meta.env.DEV;
-    const explicitRate = parseRate(params.get('devfastRate'));
+    const explicitRate = parseRate(params.get('devfastRate'))
+      ?? parseRate(params.get('fastmodeRate'));
 
     return {
       enabled,

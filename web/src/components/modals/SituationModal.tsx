@@ -1,11 +1,15 @@
 import type { GameStatusData } from '../sidebar/Sidebar';
+import { formatCost } from '../../utils/format';
+import type { CostSummary } from '../../utils/format';
 
 interface SituationModalProps {
   status: GameStatusData | null;
+  costSummary?: CostSummary | null;
   onClose: () => void;
 }
 
-export function SituationModal({ status, onClose }: SituationModalProps) {
+export function SituationModal({ status, costSummary, onClose }: SituationModalProps) {
+
   if (!status) {
     return (
       <div
@@ -129,7 +133,7 @@ export function SituationModal({ status, onClose }: SituationModalProps) {
           </div>
 
           {/* Hazards Section */}
-          <div>
+          <div className="border-b border-omega-border pb-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-omega-dim text-xs uppercase tracking-wider">Hazards</span>
               <span className="text-omega-text text-sm">
@@ -149,6 +153,53 @@ export function SituationModal({ status, onClose }: SituationModalProps) {
               </div>
             )}
           </div>
+
+          {/* AI Usage Section */}
+          {costSummary?.totalCostUsd != null && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-omega-dim text-xs uppercase tracking-wider">AI Usage</span>
+                <span className="text-omega-text text-sm">
+                  {formatCost(costSummary.totalCostUsd)}
+                </span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-omega-dim">Generation ({String(costSummary.generation.count)} layers)</span>
+                  <span className="text-omega-text">{formatCost(costSummary.generation.costUsd)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-omega-dim">Turns ({String(costSummary.turns.count)})</span>
+                  <span className="text-omega-text">{formatCost(costSummary.turns.costUsd)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-omega-dim">
+                    Images ({String(costSummary.images.count)} gen
+                    {costSummary.images.cacheHits > 0
+                      ? ` + ${String(costSummary.images.cacheHits)} cached`
+                      : ''})
+                  </span>
+                  <span className="text-omega-text">{formatCost(costSummary.images.costUsd)}</span>
+                </div>
+                {costSummary.video.count > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-omega-dim">Video ({String(costSummary.video.count)})</span>
+                    <span className="text-omega-text">{formatCost(costSummary.video.costUsd)}</span>
+                  </div>
+                )}
+                {costSummary.tts.count > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-omega-dim">TTS ({String(costSummary.tts.count)} calls)</span>
+                    <span className="text-omega-text">{formatCost(costSummary.tts.costUsd)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-sm border-t border-omega-border pt-1 mt-1">
+                  <span className="text-omega-dim">Total</span>
+                  <span className="text-omega-title">{formatCost(costSummary.totalCostUsd)}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

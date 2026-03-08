@@ -50,9 +50,15 @@ export function isValidGameMasterModelId(modelId: string): boolean {
 
 // ─── TTS ─────────────────────────────────────────────────────────────────────
 export const TTS_MODEL_ID = 'inworld-tts-1.5-max';
+/** Inworld TTS-1.5 Max: $10/M characters. */
+export const TTS_COST_PER_CHAR = 10 / 1_000_000;
 
 // ─── Image Generation ────────────────────────────────────────────────────────
 export const IMAGE_MODEL_ID = 'fal-ai/flux/schnell';
+/** FAL Flux Schnell: $0.003 per megapixel (512×512 rounds to 1MP). */
+export const IMAGE_COST_USD = 0.003;
 
 // ─── Video Generation ────────────────────────────────────────────────────────
 export const VIDEO_MODEL_ID = 'fal-ai/bytedance/seedance/v1/pro/fast/text-to-video';
+/** FAL SeedDance Pro Fast: ~$0.048 per video (480p, 5s). */
+export const VIDEO_COST_USD = 0.048;

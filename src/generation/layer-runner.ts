@@ -8,7 +8,7 @@
 
 import type { ZodType } from 'zod';
 import type { ValidationResult } from './validate.js';
-import type { AIProviderOptions, AITextClient } from '../io/ai-text-client.js';
+import type { AIProviderOptions, AITextClient, UsageData } from '../io/ai-text-client.js';
 
 export interface LayerContext {
     difficulty: 'normal' | 'hard' | 'nightmare';
@@ -146,7 +146,7 @@ async function streamWithProviderRetry<T>(opts: {
     label: string;
     onProgress?: (msg: string) => void;
     debugLog?: (label: string, content: string) => void;
-}): Promise<T> {
+}): Promise<{ output: T; usage: UsageData }> {
     for (let apiRetry = 0; apiRetry < MAX_API_RETRIES; apiRetry++) {
         const abort = new AbortController();
         const timer = setTimeout(() => { abort.abort(); }, opts.timeoutMs);
@@ -185,7 +185,8 @@ async function streamWithProviderRetry<T>(opts: {
                 opts.debugLog?.('STREAM-ERROR', `${opts.label} non-fatal stream error: ${formatError(streamError)}`);
             }
 
-            return await result.output;
+            const [output, usage] = await Promise.all([result.output, result.usage]);
+            return { output, usage };
         } catch (err: unknown) {
             // 502 in exception (e.g. APICallError or NoObjectGeneratedError wrapping a 502)
             if (is502Error(err) && apiRetry < MAX_API_RETRIES - 1) {
@@ -213,6 +214,19 @@ export async function runLayer<TSchema, TValidated>(
     providerOptions?: AIProviderOptions,
     debugLog?: (label: string, content: string) => void,
 ): Promise<TValidated> {
+    const { value } = await runLayerWithUsage(config, context, aiClient, modelId, onProgress, providerOptions, debugLog);
+    return value;
+}
+
+export async function runLayerWithUsage<TSchema, TValidated>(
+    config: LayerConfig<TSchema, TValidated>,
+    context: LayerContext,
+    aiClient: AITextClient,
+    modelId: string,
+    onProgress?: (msg: string) => void,
+    providerOptions?: AIProviderOptions,
+    debugLog?: (label: string, content: string) => void,
+): Promise<{ value: TValidated; usage: UsageData }> {
     const allErrors: string[][] = [];
     const maxAttempts = config.maxRetries + 1;
 
@@ -229,7 +243,7 @@ export async function runLayer<TSchema, TValidated>(
         }
 
         try {
-            const parsed = await streamWithProviderRetry({
+            const { output: parsed, usage } = await streamWithProviderRetry({
                 aiClient,
                 modelId,
                 system,
@@ -257,7 +271,8 @@ export async function runLayer<TSchema, TValidated>(
                 if (config.summarize) {
                     debugLog?.('GENERATION-OUTPUT', `${config.name} summary:\n${config.summarize(validation.value)}`);
                 }
-                return validation.value;
+                debugLog?.('LAYER-USAGE', `${config.name}\n${JSON.stringify(usage)}`);
+                return { value: validation.value, usage };
             }
 
             const attemptErrors = validation.errors ?? ['Unknown validation error'];

@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { VIDEO_COST_USD } from "../../src/model-catalog.js";
 
 /**
  * Generate and cache an AI briefing video for a station.
@@ -81,7 +82,7 @@ export const generate = internalAction({
           prompt,
           status: "success" as const,
           durationMs: Date.now() - startMs,
-          metadata: { cacheKey, category, storageId },
+          metadata: { cacheKey, category, storageId, costUsd: VIDEO_COST_USD },
         });
       } catch { /* non-fatal */ }
     } catch (err) {

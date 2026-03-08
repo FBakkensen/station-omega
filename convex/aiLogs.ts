@@ -180,6 +180,91 @@ export const detail = query({
   },
 });
 
+/** Per-game cost summary across all AI services. */
+export const gameCostSummary = query({
+  args: {
+    gameId: v.id("games"),
+    stationId: v.id("stations"),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    // Fetch game-specific logs (turns, images, TTS)
+    const gameLogs = await ctx.db
+      .query("aiLogs")
+      .withIndex("by_game_turn", (q) => q.eq("gameId", args.gameId))
+      .take(2000);
+
+    // Fetch station generation logs
+    const stationLogs = await ctx.db
+      .query("aiLogs")
+      .withIndex("by_station", (q) => q.eq("stationId", args.stationId))
+      .take(500);
+
+    // Filter station logs to generation-only
+    const genLogs = stationLogs.filter(
+      (l) => l.operation === "station_generation" || l.operation === "video_generation"
+    );
+
+    const summary = {
+      generation: { count: 0, costUsd: 0 },
+      turns: { count: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 },
+      images: { count: 0, costUsd: 0, cacheHits: 0 },
+      video: { count: 0, costUsd: 0 },
+      tts: { count: 0, costUsd: 0, totalChars: 0 },
+      totalCostUsd: 0,
+    };
+
+    for (const log of genLogs) {
+      const meta = log.metadata as Record<string, unknown> | undefined;
+      const cost = (meta?.costUsd as number | undefined) ?? 0;
+      if (log.operation === "station_generation") {
+        summary.generation.count++;
+        summary.generation.costUsd += cost;
+      } else {
+        summary.video.count++;
+        summary.video.costUsd += cost;
+      }
+    }
+
+    for (const log of gameLogs) {
+      const meta = log.metadata as Record<string, unknown> | undefined;
+      const cost = (meta?.costUsd as number | undefined) ?? 0;
+      switch (log.operation) {
+        case "game_turn":
+          summary.turns.count++;
+          summary.turns.costUsd += cost;
+          if (meta?.usage && typeof meta.usage === "object") {
+            const usage = meta.usage as Record<string, unknown>;
+            summary.turns.inputTokens += (usage.inputTokens as number | undefined) ?? 0;
+            summary.turns.outputTokens += (usage.outputTokens as number | undefined) ?? 0;
+          }
+          break;
+        case "image_generation":
+          if (log.status === "cache_hit") summary.images.cacheHits++;
+          else summary.images.count++;
+          summary.images.costUsd += cost;
+          break;
+        case "tts":
+          summary.tts.count++;
+          summary.tts.costUsd += cost;
+          if (meta?.textLength && typeof meta.textLength === "number") {
+            summary.tts.totalChars += meta.textLength;
+          }
+          break;
+      }
+    }
+
+    summary.totalCostUsd =
+      summary.generation.costUsd +
+      summary.turns.costUsd +
+      summary.images.costUsd +
+      summary.video.costUsd +
+      summary.tts.costUsd;
+
+    return summary;
+  },
+});
+
 /** Aggregate stats: counts by provider/operation, error rate. */
 export const stats = query({
   args: {},

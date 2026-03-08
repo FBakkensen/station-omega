@@ -256,6 +256,7 @@ export const processAITurn = internalAction({
         // Tool calls/results handled internally (tools mutate gameCtx)
       }
       const parsedOutput = await result.output;
+      const usage = await result.usage;
       console.timeEnd("[processAITurn] AI streaming");
       console.debug("[processAITurn] Segments extracted", {
         segmentCount: segmentIndex - (turnNumber > 1 ? 1 : 0),
@@ -326,6 +327,8 @@ export const processAITurn = internalAction({
             segmentCount: segmentIndex - (turnNumber > 1 ? 1 : 0),
             rawJsonLength: rawJson.length,
             playerInput,
+            usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
+            costUsd: usage.costUsd,
           },
         });
       } catch (logErr) {

@@ -74,6 +74,7 @@ export class StrictAIMockQueue {
         return {
           fullStream: this.toAsyncIterable(item.fullStreamEvents),
           output: Promise.resolve(parsed),
+          usage: Promise.resolve({}),
         };
       },
     };

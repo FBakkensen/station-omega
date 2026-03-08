@@ -659,3 +659,321 @@ describe('GameplayScreen initial briefing gate', () => {
     expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('GameplayScreen mission modal close behavior', () => {
+  let streamingFixture: StreamingFixture;
+  let gameDoc: ReturnType<typeof makeGameDoc>;
+  let stationDoc: ReturnType<typeof makeStationDoc>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.stubEnv('VITE_CONVEX_URL', 'https://station-omega-test.cloud');
+
+    const seenSegments = new Set<number>();
+    mocks.typewriterPushCalls.length = 0;
+
+    mocks.twPushSegmentMock.mockImplementation((segment: DisplaySegment, immediate?: boolean) => {
+      const isImmediate = immediate === true;
+      mocks.typewriterPushCalls.push({
+        segmentIndex: segment.segmentIndex,
+        immediate: isImmediate,
+      });
+      if (seenSegments.has(segment.segmentIndex)) return -1;
+      seenSegments.add(segment.segmentIndex);
+      return isImmediate ? -1 : 24;
+    });
+
+    mocks.useTypewriterMock.mockReturnValue({
+      cards: new Map(),
+      pushSegment: mocks.twPushSegmentMock,
+      onRevealChunk: mocks.twOnRevealChunkMock,
+      finalizeAll: mocks.twFinalizeAllMock,
+      finalizeSegment: vi.fn(),
+      skipCurrent: mocks.twSkipCurrentMock,
+      allFinalized: true,
+    });
+
+    mocks.useTTSMock.mockReturnValue({
+      pushSegment: mocks.ttsPushSegmentMock,
+      beginStream: mocks.ttsBeginStreamMock,
+      flushStream: mocks.ttsFlushStreamMock,
+      stop: mocks.ttsStopMock,
+    });
+
+    mocks.usePreferencesMock.mockReturnValue({
+      soundEnabled: true,
+      setSoundEnabled: vi.fn(),
+    });
+
+    mocks.useDevSettingsMock.mockReturnValue({
+      enabled: false,
+      forceMute: false,
+      typewriterCharsPerSec: 20,
+    });
+
+    mocks.lastMissionModalOnClose = null;
+
+    gameDoc = { ...makeGameDoc(), turnCount: 0 };
+    stationDoc = makeStationDoc();
+    let useQueryCallCount = 0;
+    mocks.useQueryMock.mockImplementation(() => {
+      useQueryCallCount++;
+      const idx = ((useQueryCallCount - 1) % 3);
+      if (idx === 0) return gameDoc;
+      if (idx === 1) return stationDoc;
+      return undefined;
+    });
+
+    streamingFixture = {
+      segments: [],
+      latestTurnStartIndex: 0,
+      isStreaming: false,
+      submitTurn: vi.fn(),
+      choices: null,
+      choiceTitle: null,
+      error: null,
+      clearError: vi.fn(),
+    };
+    mocks.useStreamingTurnMock.mockImplementation(() => streamingFixture);
+  });
+
+  it('[Z] mission modal stays open when turnCount changes from 0 to 1 and user has not dismissed', () => {
+    // Render with fresh game (turnCount=0) — mission modal should be visible
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Mission modal is rendered (onClose callback was captured)
+    expect(mocks.lastMissionModalOnClose).not.toBeNull();
+
+    // Simulate first turn completing: turnCount goes from 0 to 1
+    gameDoc.turnCount = 1;
+    streamingFixture.isStreaming = false;
+    streamingFixture.segments = [makeDisplaySegment(0, 'You arrive at the station.')];
+
+    mocks.lastMissionModalOnClose = null; // reset so we can detect if modal re-renders
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // BUG: The modal closes because showInitialBriefing depends on turnCount === 0
+    // EXPECTED: The modal should still be open — user hasn't dismissed it yet
+    expect(mocks.lastMissionModalOnClose).not.toBeNull();
+  });
+
+  it('[O] single explicit dismissal is the only transition that closes the initial briefing modal', () => {
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Modal is initially visible
+    expect(mocks.lastMissionModalOnClose).not.toBeNull();
+
+    // Simulate turn completing — turnCount goes from 0 to 1
+    gameDoc.turnCount = 1;
+    streamingFixture.isStreaming = false;
+    streamingFixture.segments = [makeDisplaySegment(0, 'You arrive.')];
+
+    // Reset the captured onClose to detect if MissionModal re-renders
+    mocks.lastMissionModalOnClose = null;
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // BUG: Modal should still be visible after turnCount changes
+    // (lastMissionModalOnClose is set when MissionModal renders)
+    expect(mocks.lastMissionModalOnClose).not.toBeNull();
+  });
+
+  it('[M] segments are held back until user dismisses mission modal even after multiple turnCount changes', () => {
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Segments arrive while briefing is up
+    streamingFixture.segments = [
+      makeDisplaySegment(0, 'First segment'),
+      makeDisplaySegment(1, 'Second segment'),
+    ];
+    streamingFixture.isStreaming = true;
+    gameDoc.turnCount = 1;
+
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Segments should NOT have been pushed — briefing still visible
+    expect(mocks.twPushSegmentMock).not.toHaveBeenCalled();
+  });
+
+  it('[B] when user dismisses modal before first turn finishes, segments play as soon as they arrive', () => {
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // User dismisses the briefing immediately (before any segments arrive)
+    act(() => { mocks.lastMissionModalOnClose?.(); });
+
+    // Now segments arrive
+    streamingFixture.segments = [makeDisplaySegment(0, 'You look around.')];
+    streamingFixture.isStreaming = true;
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Segments should be pushed immediately — no briefing gate
+    expect(mocks.twPushSegmentMock).toHaveBeenCalled();
+  });
+
+  it('[I] non-initial turn does not auto-close mission modal — showMission state is user-controlled', () => {
+    // Start with turnCount > 0 so this is NOT an initial briefing
+    gameDoc.turnCount = 2;
+
+    // Render — no initial briefing, no auto-submit
+    render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // MissionModal should NOT be rendered (showMission defaults to false, no initial briefing)
+    expect(mocks.lastMissionModalOnClose).toBeNull();
+
+    // Verify no auto-submission on non-initial game
+    expect(streamingFixture.submitTurn).not.toHaveBeenCalled();
+
+    // Segments should flow normally on non-initial turns (no briefing gate)
+    // This is verified by the reload hydration tests above
+  });
+
+  it('[E] non-initial turn tolerates missing briefing gate and streams segments normally', () => {
+    // Start with turnCount > 0 (not initial)
+    gameDoc.turnCount = 2;
+
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Segments arrive
+    streamingFixture.isStreaming = true;
+    streamingFixture.segments = [
+      makeDisplaySegment(0, 'prior turn'),
+      makeDisplaySegment(1, 'new segment in background'),
+    ];
+    streamingFixture.latestTurnStartIndex = 1;
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Segments should be pushed — no briefing gate on non-initial turns
+    expect(mocks.twPushSegmentMock).toHaveBeenCalled();
+  });
+
+  it('[S] initial turn: full lifecycle — modal stays, user dismisses, segments flow', () => {
+    const view = render(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Step 1: Turn auto-submitted
+    expect(streamingFixture.submitTurn).toHaveBeenCalledTimes(1);
+
+    // Step 2: Turn generation completes, turnCount goes to 1
+    gameDoc.turnCount = 1;
+    streamingFixture.isStreaming = false;
+    streamingFixture.segments = [
+      makeDisplaySegment(0, 'The airlock hisses open.'),
+      makeDisplaySegment(1, 'Emergency lighting bathes everything in red.'),
+    ];
+    view.rerender(
+      <GameplayScreen
+        gameId="j9733s5p0przppv68h942xqd6n81nxmb"
+        stationId="k179vww2j4ets2zbf4nacbg8sx81n06m"
+        onGameOver={vi.fn()}
+        onRunSummary={vi.fn()}
+        onQuit={vi.fn()}
+      />,
+    );
+
+    // Step 3: Modal STILL open, segments NOT yet pushed
+    expect(mocks.lastMissionModalOnClose).not.toBeNull();
+    expect(mocks.twPushSegmentMock).not.toHaveBeenCalled();
+
+    // Step 4: User dismisses the mission modal
+    act(() => { mocks.lastMissionModalOnClose?.(); });
+
+    // Step 5: Segments now flow to typewriter
+    expect(mocks.twPushSegmentMock).toHaveBeenCalled();
+    expect(mocks.typewriterPushCalls.length).toBeGreaterThanOrEqual(2);
+  });
+});

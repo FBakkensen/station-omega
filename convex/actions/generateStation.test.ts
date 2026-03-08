@@ -23,6 +23,11 @@ vi.mock('../../src/io/openrouter-ai-client.js', () => ({
 
 vi.mock('../../src/model-catalog.js', () => ({
   GENERATION_MODEL_ID: 'z-ai/glm-5',
+  GENERATION_MODEL_TIERS: {
+    premium: 'z-ai/glm-5',
+    mid: 'z-ai/glm-5-mini',
+    cheap: 'z-ai/glm-5-lite',
+  },
   GENERATION_MODELS: [
     { id: 'z-ai/glm-5', label: 'GLM-5' },
     { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },

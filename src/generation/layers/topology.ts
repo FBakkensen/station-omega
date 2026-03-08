@@ -24,7 +24,7 @@ const RoomArchetypeEnum = z.enum([
 ]);
 
 const TopologyStyleEnum = z.enum([
-    'linear', 'hub_and_spoke', 'ring', 'branching_tree', 'cluster', 'dual_path',
+    'linear', 'hub_and_spoke', 'ring', 'branching_tree', 'cluster', 'dual_path', 'small_world',
 ]);
 
 const TopologyRoomSchema = z.object({
@@ -64,7 +64,7 @@ export interface ValidatedTopology {
 
 // ─── Room Count Bounds by Difficulty ─────────────────────────────────────────
 
-const ROOM_COUNTS: Record<Difficulty, [number, number]> = {
+export const ROOM_COUNTS: Record<Difficulty, [number, number]> = {
     normal: [8, 12],
     hard: [10, 14],
     nightmare: [12, 16],

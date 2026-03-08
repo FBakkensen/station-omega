@@ -155,6 +155,7 @@ describe('objectivesNPCsLayer validation', () => {
     expect(prompt.user).toContain('Room mismatch in step_1');
     expect(prompt.user).toContain('Entry: room_0');
     expect(prompt.user).toContain('ordered dependency chain');
+    expect(prompt.user).toContain('needs: insulated_wire');
   });
 
   it('[E] reports invalid room and required item references', () => {

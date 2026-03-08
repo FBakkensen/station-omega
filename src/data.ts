@@ -260,3 +260,72 @@ export function computeActionMinutes(
 
     return Math.round(minutes);
 }
+
+// ─── Scenario Pool for Procedural Topology ──────────────────────────────────
+
+export interface ScenarioEntry {
+    theme: string;
+    centralTension: string;
+}
+
+export const SCENARIO_POOL: readonly ScenarioEntry[] = [
+    // Infrastructure collapse
+    { theme: 'Cascading hull breach', centralTension: 'Micro-fractures are spreading through the superstructure, and each new breach accelerates the next' },
+    { theme: 'Structural delamination', centralTension: 'Thermal cycling has weakened load-bearing composites and entire sections are peeling apart' },
+    { theme: 'Pressure bulkhead failure', centralTension: 'Emergency bulkheads are jamming open, leaving no way to isolate depressurized sections' },
+    { theme: 'Deck collapse chain', centralTension: 'A failed support strut triggered sequential floor collapses moving inward from the outer ring' },
+    { theme: 'Welding seam fatigue', centralTension: 'Original construction welds are cracking under stress, threatening explosive decompression' },
+    { theme: 'Docking pylon shear', centralTension: 'The main docking arm has partially torn free, dragging the station into a slow spin' },
+    { theme: 'Ventilation network rupture', centralTension: 'Blast damage severed primary air ducts and atmosphere is bleeding between zones uncontrolled' },
+    { theme: 'Gravity plating cascade', centralTension: 'Gravity generators are failing in sequence, creating dangerous tidal zones between decks' },
+
+    // Environmental hazard
+    { theme: 'Radiation storm exposure', centralTension: 'A coronal mass ejection stripped the outer shielding and radiation levels are climbing station-wide' },
+    { theme: 'Atmosphere contamination', centralTension: 'A chemical spill in the lab is producing toxic vapor that the scrubbers cannot neutralize' },
+    { theme: 'Cryogenic coolant leak', centralTension: 'Ruptured cryo-lines are flash-freezing corridors and the cold front is advancing' },
+    { theme: 'Thermal runaway', centralTension: 'Heat exchangers have failed and internal temperatures are rising toward equipment tolerance limits' },
+    { theme: 'Corrosive gas infiltration', centralTension: 'An acidic compound is seeping through the air supply, corroding electronics and lungs alike' },
+    { theme: 'Particulate fog event', centralTension: 'A shattered mineral processing unit has filled multiple decks with abrasive micro-dust' },
+    { theme: 'Electromagnetic interference storm', centralTension: 'Intense EM pulses are frying unshielded circuits and scrambling sensor readings' },
+    { theme: 'Oxygen depletion crisis', centralTension: 'CO2 scrubbers are offline and breathable air reserves are dropping toward lethal thresholds' },
+
+    // Power crisis
+    { theme: 'Reactor scram lockout', centralTension: 'The reactor shut down automatically and the restart sequence is locked behind damaged control systems' },
+    { theme: 'Power grid cascade failure', centralTension: 'Overloaded relays are tripping in sequence, leaving sections dark one by one' },
+    { theme: 'Fuel cell depletion', centralTension: 'Backup fuel cells are draining faster than expected and reserves cannot support life support' },
+    { theme: 'Solar array misalignment', centralTension: 'Attitude thrusters fired unexpectedly, pointing the solar arrays away from the star' },
+    { theme: 'EMP surge aftermath', centralTension: 'An electromagnetic pulse fried the main bus and only isolated battery banks remain operational' },
+    { theme: 'Superconductor quench', centralTension: 'The main power conduit lost superconductivity and is now a resistive bottleneck hemorrhaging energy as heat' },
+    { theme: 'Generator phase desync', centralTension: 'Multiple generators fell out of phase synchronization, producing destructive interference in the power grid' },
+    { theme: 'Battery thermal runaway', centralTension: 'Lithium storage banks are overheating in chain reaction and venting toxic electrolyte fumes' },
+
+    // Biological threat
+    { theme: 'Biolab containment breach', centralTension: 'Experimental organisms escaped quarantine and are colonizing the life support system' },
+    { theme: 'Fungal infestation', centralTension: 'An aggressive mycological growth is consuming organic ship components and spreading through moisture channels' },
+    { theme: 'Pathogen outbreak', centralTension: 'A fast-mutating pathogen has infected the crew and the medical bay quarantine seals are compromised' },
+    { theme: 'Algae bloom in water supply', centralTension: 'Engineered algae overwhelmed the water recycler and are producing neurotoxic byproducts' },
+    { theme: 'Insect swarm emergence', centralTension: 'Dormant insect eggs in cargo have hatched en masse and the swarm is chewing through wiring insulation' },
+    { theme: 'Prion contamination alert', centralTension: 'Trace prion agents detected in the food synthesis system and exposure cannot be easily reversed' },
+    { theme: 'Symbiotic organism rejection', centralTension: 'The station bio-hull is rejecting its engineered symbiotes, losing self-repair capability during a crisis' },
+    { theme: 'Spore dispersal event', centralTension: 'A ruptured specimen container released alien spores that are germinating in warm, humid sections' },
+
+    // External forces
+    { theme: 'Gravitational anomaly', centralTension: 'An uncharted mass concentration is producing tidal forces that are warping the station frame' },
+    { theme: 'Debris field collision', centralTension: 'The station drifted into an uncharted debris belt and impacts are escalating in frequency' },
+    { theme: 'Solar flare bombardment', centralTension: 'Repeated solar flares are overwhelming radiation shielding and degrading exposed systems' },
+    { theme: 'Rogue asteroid approach', centralTension: 'A large asteroid is on a near-miss trajectory and the station must maneuver with damaged thrusters' },
+    { theme: 'Magnetic field reversal', centralTension: 'The local stellar magnetic field inverted, scrambling navigation systems and inducing currents in the hull' },
+    { theme: 'Tidal lock drift', centralTension: 'Orbital mechanics are pulling the station toward a tidally locked position with extreme thermal gradients' },
+    { theme: 'Cosmic ray burst', centralTension: 'An extragalactic cosmic ray burst is causing bit-flips in computer memory and random system malfunctions' },
+    { theme: 'Plasma wake turbulence', centralTension: 'A passing stellar body left a plasma wake and the station is buffeted by charged particle surges' },
+
+    // Communication / isolation
+    { theme: 'Total signal blackout', centralTension: 'All communication arrays are offline and the crew cannot determine if rescue is coming' },
+    { theme: 'Navigation computer corruption', centralTension: 'The nav computer is outputting contradictory positions and the station true location is unknown' },
+    { theme: 'Relay satellite destruction', centralTension: 'The network of relay satellites was destroyed by debris, severing all contact with civilization' },
+    { theme: 'Subspace interference field', centralTension: 'A natural subspace distortion is blocking all FTL communication and sensor readings beyond short range' },
+    { theme: 'Time dilation anomaly', centralTension: 'A localized time dilation effect is causing sections of the station to experience time at different rates' },
+    { theme: 'Ghost signal jamming', centralTension: 'An unknown repeating signal is drowning out all communication frequencies with structured noise' },
+    { theme: 'Sensor array blindness', centralTension: 'All external sensors are returning null data, leaving the crew unable to detect approaching threats' },
+    { theme: 'Beacon malfunction loop', centralTension: 'The distress beacon is broadcasting false all-clear signals, actively turning away potential rescuers' },
+];

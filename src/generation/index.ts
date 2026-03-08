@@ -24,16 +24,17 @@ import { runLayer } from './layer-runner.js';
 import type { LayerContext } from './layer-runner.js';
 import type { AIProviderOptions, AITextClient } from '../io/ai-text-client.js';
 import { createGenerationLogger } from '../generation-log.js';
-import { topologyLayer } from './layers/topology.js';
+import { generateTopologyProcedural } from './layers/topology-procedural.js';
 import { generateSystemsItemsProcedural } from './layers/systems-items-procedural.js';
 import { objectivesNPCsLayer } from './layers/objectives-npcs.js';
 import { runCreativeSublayers } from './layers/creative.js';
+import type { GenerationModelTiers } from '../model-catalog.js';
 
 interface GenerationConfig {
     difficulty: Difficulty;
     characterClass: CharacterClassId;
     aiClient: AITextClient;
-    modelId: string;
+    modelTiers: GenerationModelTiers;
     providerOptions?: AIProviderOptions;
 }
 
@@ -60,19 +61,15 @@ export async function generateStation(
         debugLog?.(label, content);
     };
 
-    // ─── Layer 1: Topology ───────────────────────────────────────────────────
+    // ─── Layer 1: Topology (procedural) ────────────────────────────────────
     onProgress?.('Designing station layout...');
-    combinedLog('GENERATION', 'Starting Layer 1: Topology');
+    combinedLog('GENERATION', 'Starting Layer 1: Topology (procedural)');
 
     const po = config.providerOptions;
 
-    const topology = await runLayer(
-        topologyLayer,
-        context,
-        config.aiClient,
-        config.modelId,
-        onProgress,
-        po,
+    const topology = generateTopologyProcedural(
+        config.difficulty,
+        config.characterClass,
         combinedLog,
     );
     context['topology'] = topology;
@@ -94,7 +91,7 @@ export async function generateStation(
         objectivesNPCsLayer,
         context,
         config.aiClient,
-        config.modelId,
+        config.modelTiers.premium,
         onProgress,
         po,
         combinedLog,
@@ -108,7 +105,7 @@ export async function generateStation(
     const creative = await runCreativeSublayers(
         context,
         config.aiClient,
-        config.modelId,
+        config.modelTiers,
         onProgress,
         po,
         combinedLog,

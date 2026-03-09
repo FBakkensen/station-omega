@@ -25,7 +25,7 @@ function parseRate(raw: string | null): number | null {
   return Math.max(MIN_FAST_CHARS_PER_SEC, Math.min(MAX_FAST_CHARS_PER_SEC, rounded));
 }
 
-export interface DevSettings {
+interface DevSettings {
   enabled: boolean;
   forceMute: boolean;
   typewriterCharsPerSec: number;

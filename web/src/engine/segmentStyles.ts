@@ -12,7 +12,7 @@ export const IMAGE_CATEGORY_LABELS: Record<string, string> = {
 };
 
 /** Card visual config for a segment type. */
-export interface CardStyle {
+interface CardStyle {
   bg: string;
   border: string;
 }
@@ -96,7 +96,3 @@ export function countSpanChars(spans: StyledSpan[]): number {
   return total;
 }
 
-/** Count visible characters in header spans for a segment. */
-export function getHeaderCharCount(seg: DisplaySegment): number {
-  return countSpanChars(buildHeaderSpans(seg));
-}

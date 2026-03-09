@@ -2,7 +2,7 @@ import { useReducer, useCallback, useEffect } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 
 /** All screens in the game flow. */
-export type Screen =
+type Screen =
   | { id: 'title' }
   | { id: 'character_select' }
   | { id: 'station_picker' }
@@ -121,7 +121,7 @@ function reducer(_state: Screen, action: Action): Screen {
   return next;
 }
 
-export interface ScreenManager {
+interface ScreenManager {
   screen: Screen;
   goToTitle: () => void;
   goToCharacterSelect: () => void;

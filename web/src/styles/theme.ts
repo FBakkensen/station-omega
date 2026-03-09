@@ -71,4 +71,3 @@ export const GRADE_COLORS: Record<string, string> = {
   F: COLORS.gradeF,
 };
 
-export type SegmentType = keyof typeof SEGMENT_COLORS;

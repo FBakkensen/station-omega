@@ -1,21 +1,9 @@
 import { SEGMENT_TYPES } from "../../src/schema";
+import type { ChoiceSet } from "../../src/tools.js";
 
 export interface ConversationMessage {
   role: "system" | "user" | "assistant";
   content: string;
-}
-
-export interface ChoiceOption {
-  label: string;
-  description: string;
-  risk?: "low" | "medium" | "high" | "critical";
-  timeCost?: string;
-  consequence?: string;
-}
-
-export interface ChoiceSetInput {
-  title: string;
-  choices: ChoiceOption[];
 }
 
 export function buildTurnMessages(
@@ -30,7 +18,7 @@ export function buildTurnMessages(
   ];
 }
 
-export function mapChoicesForPersistence(choiceSet: ChoiceSetInput): Array<{
+export function mapChoicesForPersistence(choiceSet: ChoiceSet): Array<{
   id: string;
   label: string;
   description: string;

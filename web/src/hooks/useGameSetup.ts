@@ -3,7 +3,7 @@ import { useState, useCallback } from 'react';
 export type CharacterClassId = 'engineer' | 'scientist' | 'medic' | 'commander';
 export type Difficulty = 'normal' | 'hard' | 'nightmare';
 
-export interface GameSetup {
+interface GameSetup {
   selectedClass: CharacterClassId | null;
   selectedDifficulty: Difficulty;
   selectClass: (classId: CharacterClassId) => void;

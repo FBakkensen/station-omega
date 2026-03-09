@@ -1,4 +1,4 @@
-export interface TTSProxyRequest {
+interface TTSProxyRequest {
   text: string;
   voiceId: string;
   temperature: number;

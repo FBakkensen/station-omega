@@ -135,7 +135,7 @@ interface GeneratedAudio {
 
 // ─── Hook ────────────────────────────────────────────────────────────────
 
-export interface UseTTSResult {
+interface UseTTSResult {
   pushSegment: (seg: DisplaySegment, bodyChars: number) => void;
   beginStream: () => void;
   flushStream: () => void;

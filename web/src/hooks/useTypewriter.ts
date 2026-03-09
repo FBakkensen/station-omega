@@ -33,7 +33,7 @@ export interface TypewriterCard {
   finalized: boolean;
 }
 
-export interface UseTypewriterResult {
+interface UseTypewriterResult {
   /** Map of segmentIndex -> reveal state for rendering. */
   cards: Map<number, TypewriterCard>;
   /** Push a new segment to start revealing. If immediate=true, card is created already finalized.

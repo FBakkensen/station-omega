@@ -155,51 +155,73 @@ export function SituationModal({ status, costSummary, onClose }: SituationModalP
           </div>
 
           {/* AI Usage Section */}
-          {costSummary?.totalCostUsd != null && (
+          {costSummary?.totalCostUsd != null && (() => {
+            const combinedCost = costSummary.stationCostUsd + costSummary.totalCostUsd;
+            return (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-omega-dim text-xs uppercase tracking-wider">AI Usage</span>
-                <span className="text-omega-text text-sm">
-                  {formatCost(costSummary.totalCostUsd)}
-                </span>
+                <span className="text-omega-title text-sm">{formatCost(combinedCost)}</span>
               </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-omega-dim">Generation ({String(costSummary.generation.count)} layers)</span>
-                  <span className="text-omega-text">{formatCost(costSummary.generation.costUsd)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-omega-dim">Turns ({String(costSummary.turns.count)})</span>
-                  <span className="text-omega-text">{formatCost(costSummary.turns.costUsd)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-omega-dim">
-                    Images ({String(costSummary.images.count)} gen
-                    {costSummary.images.cacheHits > 0
-                      ? ` + ${String(costSummary.images.cacheHits)} cached`
-                      : ''})
-                  </span>
-                  <span className="text-omega-text">{formatCost(costSummary.images.costUsd)}</span>
-                </div>
-                {costSummary.video.count > 0 && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-omega-dim">Video ({String(costSummary.video.count)})</span>
-                    <span className="text-omega-text">{formatCost(costSummary.video.costUsd)}</span>
+              <div className="border-l-2 border-omega-border pl-3 space-y-1">
+                {/* Station (shared) costs */}
+                {(costSummary.generation.count > 0 || costSummary.video.count > 0) && (
+                  <div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-omega-dim text-xs uppercase tracking-wider">Station (shared)</span>
+                      <span className="text-omega-text text-sm">{formatCost(costSummary.stationCostUsd)}</span>
+                    </div>
+                    <div className="pl-3 space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-omega-dim">Generation ({String(costSummary.generation.count)} layers)</span>
+                        <span className="text-omega-text">{formatCost(costSummary.generation.costUsd)}</span>
+                      </div>
+                      {costSummary.video.count > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-omega-dim">Video ({String(costSummary.video.count)})</span>
+                          <span className="text-omega-text">{formatCost(costSummary.video.costUsd)}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-                {costSummary.tts.count > 0 && (
+                {/* This Game costs */}
+                <div className="mt-3">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-omega-dim">TTS ({String(costSummary.tts.count)} calls)</span>
-                    <span className="text-omega-text">{formatCost(costSummary.tts.costUsd)}</span>
+                    <span className="text-omega-dim text-xs uppercase tracking-wider">This Game</span>
+                    <span className="text-omega-text text-sm">{formatCost(costSummary.totalCostUsd)}</span>
                   </div>
-                )}
+                  <div className="pl-3 space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-omega-dim">Turns ({String(costSummary.turns.count)})</span>
+                      <span className="text-omega-text">{formatCost(costSummary.turns.costUsd)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-omega-dim">
+                        Images ({String(costSummary.images.count)} gen
+                        {costSummary.images.cacheHits > 0
+                          ? ` + ${String(costSummary.images.cacheHits)} cached`
+                          : ''})
+                      </span>
+                      <span className="text-omega-text">{formatCost(costSummary.images.costUsd)}</span>
+                    </div>
+                    {costSummary.tts.count > 0 && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-omega-dim">TTS ({String(costSummary.tts.count)} calls)</span>
+                        <span className="text-omega-text">{formatCost(costSummary.tts.costUsd)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* Combined total */}
                 <div className="flex items-center justify-between text-sm border-t border-omega-border pt-1 mt-1">
-                  <span className="text-omega-dim">Total</span>
-                  <span className="text-omega-title">{formatCost(costSummary.totalCostUsd)}</span>
+                  <span className="text-omega-dim">Combined Total</span>
+                  <span className="text-omega-title">{formatCost(combinedCost)}</span>
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>

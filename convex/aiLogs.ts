@@ -200,9 +200,11 @@ export const gameCostSummary = query({
       .withIndex("by_station", (q) => q.eq("stationId", args.stationId))
       .take(500);
 
-    // Filter station logs to generation-only
+    // Filter station logs to generation + video only (images are counted via gameLogs)
     const genLogs = stationLogs.filter(
-      (l) => l.operation === "station_generation" || l.operation === "video_generation"
+      (l) =>
+        l.operation === "station_generation" ||
+        l.operation === "video_generation"
     );
 
     const summary = {
@@ -212,6 +214,7 @@ export const gameCostSummary = query({
       video: { count: 0, costUsd: 0 },
       tts: { count: 0, costUsd: 0, totalChars: 0 },
       totalCostUsd: 0,
+      stationCostUsd: 0,
     };
 
     for (const log of genLogs) {
@@ -220,7 +223,7 @@ export const gameCostSummary = query({
       if (log.operation === "station_generation") {
         summary.generation.count++;
         summary.generation.costUsd += cost;
-      } else {
+      } else if (log.operation === "video_generation") {
         summary.video.count++;
         summary.video.costUsd += cost;
       }
@@ -254,11 +257,12 @@ export const gameCostSummary = query({
       }
     }
 
-    summary.totalCostUsd =
+    summary.stationCostUsd =
       summary.generation.costUsd +
+      summary.video.costUsd;
+    summary.totalCostUsd =
       summary.turns.costUsd +
       summary.images.costUsd +
-      summary.video.costUsd +
       summary.tts.costUsd;
 
     return summary;

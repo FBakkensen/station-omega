@@ -6,10 +6,12 @@ export interface CostSummary {
   video: { count: number; costUsd: number };
   tts: { count: number; costUsd: number; totalChars: number };
   totalCostUsd: number;
+  stationCostUsd: number;
 }
 
 /** Format a USD cost for display, showing '<$0.001' for tiny amounts. */
 export function formatCost(usd: number): string {
+  if (usd === 0) return '$0.000';
   if (usd < 0.001) return '<$0.001';
   return `$${usd.toFixed(3)}`;
 }

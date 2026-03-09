@@ -1,7 +1,7 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { Output, stepCountIs, streamText } from 'ai';
 import type { OpenRouterProvider } from '@openrouter/ai-sdk-provider';
-import type { AITextClient, AITextObjectStream, StreamStructuredObjectRequest } from './ai-text-client.js';
+import type { AITextClient, AITextObjectStream, StreamStructuredObjectRequest, UsageData } from './ai-text-client.js';
 
 export interface OpenRouterAITextClientConfig {
   apiKey: string;
@@ -58,9 +58,25 @@ export class OpenRouterAITextClient implements AITextClient {
     }
 
     const result = streamText(streamOptions);
+
+    // Usage promise — must only be awaited AFTER fullStream is fully consumed
+    const usage: Promise<UsageData> = (async () => {
+      const totalUsage = await result.totalUsage;
+      const providerMeta = await result.providerMetadata;
+      const openrouterUsage = providerMeta?.openrouter as Record<string, unknown> | undefined;
+      const usageObj = openrouterUsage?.['usage'] as Record<string, unknown> | undefined;
+      const costUsd = typeof usageObj?.['cost'] === 'number' ? usageObj['cost'] : undefined;
+      return {
+        inputTokens: totalUsage.inputTokens,
+        outputTokens: totalUsage.outputTokens,
+        costUsd,
+      };
+    })();
+
     return {
       fullStream: result.fullStream,
       output: Promise.resolve(result.output) as Promise<TSchema>,
+      usage,
     };
   }
 }

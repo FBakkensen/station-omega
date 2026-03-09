@@ -3,6 +3,12 @@ import type { ZodType } from 'zod';
 
 export type AIProviderOptions = unknown;
 
+export interface UsageData {
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+}
+
 export type AIStreamPart =
   | { type: 'text-delta'; text: string }
   | { type: 'tool-call'; toolName: string; input: unknown }
@@ -13,6 +19,7 @@ export type AIStreamPart =
 export interface AITextObjectStream<TSchema> {
   fullStream: AsyncIterable<AIStreamPart>;
   output: Promise<TSchema>;
+  usage: Promise<UsageData>;
 }
 
 export interface StreamStructuredObjectRequest<TSchema> {

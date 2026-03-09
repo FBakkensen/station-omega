@@ -153,6 +153,7 @@ export function useTTS(
   enabled: boolean,
   onRevealChunk: (segmentIndex: number, charBudget: number, durationSec: number) => void,
   onStreamComplete?: () => void,
+  gameId?: string | null,
 ): UseTTSResult {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -174,6 +175,9 @@ export function useTTS(
 
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+
+  const gameIdRef = useRef(gameId);
+  gameIdRef.current = gameId;
 
   // Lazy AudioContext init (needs user gesture)
   const getAudioContext = useCallback(() => {
@@ -202,6 +206,7 @@ export function useTTS(
           voiceId: chunk.voiceId,
           temperature: chunk.temperature,
           speakingRate: chunk.speakingRate,
+          ...(gameIdRef.current ? { gameId: gameIdRef.current } : {}),
         },
         controller.signal,
       );

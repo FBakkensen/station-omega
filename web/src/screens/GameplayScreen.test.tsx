@@ -220,7 +220,7 @@ function setupFreshGameMocks() {
   let useQueryCallCount = 0;
   mocks.useQueryMock.mockImplementation(() => {
     useQueryCallCount++;
-    const idx = ((useQueryCallCount - 1) % 3);
+    const idx = ((useQueryCallCount - 1) % 4);
     if (idx === 0) return gameDoc;
     if (idx === 1) return stationDoc;
     return undefined;
@@ -595,7 +595,7 @@ describe('GameplayScreen initial briefing gate', () => {
     let callCount = 0;
     mocks.useQueryMock.mockImplementation(() => {
       callCount++;
-      const idx = ((callCount - 1) % 3);
+      const idx = ((callCount - 1) % 4);
       if (idx === 0) return gameDoc;
       if (idx === 1) return stationDoc;
       return undefined;

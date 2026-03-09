@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 
 const http = httpRouter();
 
@@ -21,6 +22,7 @@ const ttsHandler = httpAction(async (ctx, request) => {
       voiceId: string;
       temperature: number;
       speakingRate: number;
+      gameId?: string;
     };
 
     const result = await ctx.runAction(internal.actions.ttsProxy.generateTTS, {
@@ -28,6 +30,7 @@ const ttsHandler = httpAction(async (ctx, request) => {
       voiceId: body.voiceId,
       temperature: body.temperature,
       speakingRate: body.speakingRate,
+      ...(body.gameId ? { gameId: body.gameId as Id<"games"> } : {}),
     });
 
     if (!result.ok) {

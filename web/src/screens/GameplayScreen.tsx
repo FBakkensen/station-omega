@@ -11,6 +11,7 @@ import { useTTS } from '../hooks/useTTS';
 import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
 import { SituationModal } from '../components/modals/SituationModal';
+import { formatCost, type CostSummary } from '../utils/format';
 import { usePreferences } from '../hooks/usePreferences';
 import { useDevSettings } from '../hooks/useDevSettings';
 import { useGameImages } from '../hooks/useStationImages';
@@ -82,7 +83,14 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
     skipCurrent: twSkipCurrent, allFinalized: twAllFinalized,
   } = typewriter;
 
-  const tts = useTTS(ttsProxyUrl, ttsEnabled, twOnRevealChunk, twFinalizeAll);
+  const tts = useTTS(ttsProxyUrl, ttsEnabled, twOnRevealChunk, twFinalizeAll, gameId);
+
+  const costSummary = useQuery(
+    api.aiLogs.gameCostSummary,
+    gameId && stationId
+      ? { gameId: gameId as Id<"games">, stationId: stationId as Id<"stations"> }
+      : "skip",
+  ) as CostSummary | undefined;
 
   // High-water mark: highest segmentIndex already pushed to TTS
   const ttsHighWaterRef = useRef(-1);
@@ -370,9 +378,14 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
               )}
             </>
           )}
+          {costSummary?.totalCostUsd != null && (
+            <span className="text-omega-dim text-xs ml-auto mr-2">
+              AI: {formatCost(costSummary.totalCostUsd)}
+            </span>
+          )}
           <button
             onClick={() => { setShowQuitConfirm(true); }}
-            className="ml-auto hover:text-omega-text transition-colors"
+            className={`hover:text-omega-text transition-colors${costSummary?.totalCostUsd != null ? '' : ' ml-auto'}`}
           >
             [F10] Quit
           </button>
@@ -443,6 +456,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       {showSituation && (
         <SituationModal
           status={status}
+          costSummary={costSummary}
           onClose={() => { setShowSituation(false); }}
         />
       )}

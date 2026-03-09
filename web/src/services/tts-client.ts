@@ -3,6 +3,7 @@ export interface TTSProxyRequest {
   voiceId: string;
   temperature: number;
   speakingRate: number;
+  gameId?: string;
 }
 
 export async function requestTTSAudio(

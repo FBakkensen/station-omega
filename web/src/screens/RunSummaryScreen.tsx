@@ -5,6 +5,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { computeScore } from '../engine/scoring';
 import type { RunScore, RunMetrics } from '../engine/scoring';
 import { GRADE_COLORS } from '../styles/theme';
+import { formatCost, type CostSummary } from '../utils/format';
 
 /** Loose shape of the game document from Convex (state is v.any()). */
 interface SummaryGameDoc {
@@ -55,6 +56,12 @@ export function RunSummaryScreen({ gameId, onTitle, onHistory }: RunSummaryScree
   const savedRef = useRef(false);
 
   const totalRooms = station?.data?.rooms ? Object.keys(station.data.rooms).length : 10;
+  const costSummary = useQuery(
+    api.aiLogs.gameCostSummary,
+    stationId
+      ? { gameId: gameId as Id<"games">, stationId }
+      : "skip",
+  ) as CostSummary | undefined;
 
   // Compute score from game metrics
   let score: RunScore | null = null;
@@ -135,6 +142,9 @@ export function RunSummaryScreen({ gameId, onTitle, onHistory }: RunSummaryScree
         <span>Turns: {String(game.turnCount)}</span>
         <span>Class: {game.characterClass}</span>
         <span>Difficulty: {game.difficulty}</span>
+        {costSummary?.totalCostUsd != null && (
+          <span>AI Cost: {formatCost(costSummary.totalCostUsd)}</span>
+        )}
       </div>
 
       <div className="flex gap-4 mt-4">

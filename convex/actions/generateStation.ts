@@ -117,8 +117,20 @@ export const generate = internalAction({
 
       // Persist per-layer AI logs (prompt + response pairs)
       try {
-        // Extract LAYER-PROMPT / LAYER-RESPONSE pairs for each layer
-        const layerPairs: Array<{ layerName: string; prompt: string; response: string; startMs: number; endMs: number }> = [];
+        // Extract LAYER-PROMPT / LAYER-RESPONSE / LAYER-USAGE entries for each layer
+        const layerUsageMap = new Map<string, { inputTokens?: number; outputTokens?: number; costUsd?: number }>();
+        for (const entry of layerLogs) {
+          if (entry.label === "LAYER-USAGE") {
+            // Content format: "layerName\n{...json...}"
+            const nlIdx = entry.content.indexOf("\n");
+            const layerName = nlIdx >= 0 ? entry.content.slice(0, nlIdx) : entry.content;
+            try {
+              layerUsageMap.set(layerName, JSON.parse(nlIdx >= 0 ? entry.content.slice(nlIdx + 1) : "{}") as Record<string, unknown>);
+            } catch { /* skip malformed usage */ }
+          }
+        }
+
+        const layerPairs: Array<{ layerName: string; prompt: string; response: string; startMs: number; endMs: number; usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number } }> = [];
         let currentPrompt: { label: string; content: string; timestamp: number } | null = null;
         for (const entry of layerLogs) {
           if (entry.label === "LAYER-PROMPT") {
@@ -132,6 +144,7 @@ export const generate = internalAction({
               response: entry.content,
               startMs: currentPrompt.timestamp,
               endMs: entry.timestamp,
+              usage: layerUsageMap.get(layerName),
             });
             currentPrompt = null;
           }
@@ -154,6 +167,7 @@ export const generate = internalAction({
                 characterClass,
                 stationName: station.stationName,
                 layer: pair.layerName,
+                ...(pair.usage ? { usage: pair.usage, costUsd: pair.usage.costUsd } : {}),
               },
             }),
           ),
@@ -179,7 +193,7 @@ export const generate = internalAction({
             throw new Error("No briefingVideoPrompt");
           }
           const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
-          const { VIDEO_MODEL_ID } = await import("../../src/model-catalog.js");
+          const { VIDEO_MODEL_ID, VIDEO_COST_USD } = await import("../../src/model-catalog.js");
           const videoStartMs = Date.now();
           const client = new FalVideoClient(process.env.FAL_API_KEY);
           const result = await client.generateVideo({ prompt: videoPrompt });
@@ -205,7 +219,7 @@ export const generate = internalAction({
               prompt: videoPrompt,
               status: "success" as const,
               durationMs: Date.now() - videoStartMs,
-              metadata: { cacheKey: "briefing_video", storageId },
+              metadata: { cacheKey: "briefing_video", storageId, costUsd: VIDEO_COST_USD },
             });
           } catch { /* non-fatal */ }
         } catch (err) {

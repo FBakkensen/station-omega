@@ -14,6 +14,7 @@ export const generateTTS = internalAction({
     voiceId: v.string(),
     temperature: v.number(),
     speakingRate: v.number(),
+    gameId: v.optional(v.id("games")),
   },
   returns: v.union(
     v.object({ ok: v.literal(true), wavBase64: v.string() }),
@@ -41,9 +42,13 @@ export const generateTTS = internalAction({
         storageId = await ctx.storage.store(blob);
       }
 
+      const { TTS_COST_PER_CHAR } = await import("../../src/model-catalog.js");
+      const costUsd = result.ok ? args.text.length * TTS_COST_PER_CHAR : 0;
+
       await ctx.runMutation(internal.aiLogs.log, {
         provider: "inworld" as const,
         operation: "tts" as const,
+        ...(args.gameId ? { gameId: args.gameId } : {}),
         prompt: args.text,
         status: result.ok ? ("success" as const) : ("error" as const),
         error: result.ok ? undefined : result.error,
@@ -53,6 +58,7 @@ export const generateTTS = internalAction({
           temperature: args.temperature,
           speakingRate: args.speakingRate,
           textLength: args.text.length,
+          costUsd,
           ...(storageId ? { storageId } : {}),
         },
       });

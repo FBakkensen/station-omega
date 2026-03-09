@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { IMAGE_COST_USD } from "../../src/model-catalog.js";
 
 /**
  * Generate and cache an AI image for a station.
@@ -96,7 +97,7 @@ export const generate = internalAction({
           prompt,
           status: "success" as const,
           durationMs: Date.now() - startMs,
-          metadata: { cacheKey, category, storageId, width: 512, height: 512 },
+          metadata: { cacheKey, category, storageId, width: 512, height: 512, costUsd: IMAGE_COST_USD },
         });
       } catch { /* non-fatal */ }
     } catch (err) {

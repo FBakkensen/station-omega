@@ -5,7 +5,7 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
-import { buildRoomImagePrompt, buildNPCImagePrompt, buildItemImagePrompt, STYLE_SUFFIX } from "../../src/image-prompts.js";
+import { buildRoomImagePrompt, buildNPCImagePrompt, buildItemImagePrompt } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
@@ -354,10 +354,10 @@ export const processAITurn = internalAction({
         const room = stationObj.rooms.get(state.currentRoom);
         if (room) {
           const cacheKey = `room:${state.currentRoom}`;
-          // Prefer AI-generated prompt; append STYLE_SUFFIX for CLIP encoder
+          // Prefer AI-generated prompt; append station visual style guide
           // Fall back to mechanical assembly if AI returned null
           const aiImagePrompt = typeof parsedOutput.imagePrompt === 'string'
-            ? parsedOutput.imagePrompt + ' ' + STYLE_SUFFIX
+            ? parsedOutput.imagePrompt + ' ' + (stationObj.visualStyleGuide ?? '')
             : null;
           const prompt = aiImagePrompt || buildRoomImagePrompt(room, stationObj, state.activeEvents);
           console.info("[processAITurn] Image prompt", {
@@ -379,10 +379,10 @@ export const processAITurn = internalAction({
       // NPC portrait generation for new dialogue encounters
       for (const npcId of seenNpcIds) {
         const npc = stationObj.npcs.get(npcId);
-        const room = npc ? stationObj.rooms.get(npc.roomId) : undefined;
-        if (npc && room) {
-          const cacheKey = `npc:${npcId}`;
-          const prompt = buildNPCImagePrompt(npc, room, stationObj.visualStyleSeed);
+        if (npc) {
+          const npcRoom = stationObj.rooms.get(npc.roomId);
+          const cacheKey = `npc:${npcId}:room:${npc.roomId}`;
+          const prompt = buildNPCImagePrompt(npc, npcRoom, stationObj.visualStyleGuide);
           imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,
@@ -397,8 +397,16 @@ export const processAITurn = internalAction({
       for (const itemId of seenItemIds) {
         const item = stationObj.items.get(itemId);
         if (item) {
-          const cacheKey = `item:${itemId}`;
-          const prompt = buildItemImagePrompt(item, stationObj.visualStyleSeed);
+          let itemRoomId = state.currentRoom;
+          for (const [roomId, room] of stationObj.rooms) {
+            if (room.loot.includes(itemId)) {
+              itemRoomId = roomId;
+              break;
+            }
+          }
+          const itemRoom = stationObj.rooms.get(itemRoomId);
+          const cacheKey = `item:${itemId}:room:${itemRoomId}`;
+          const prompt = buildItemImagePrompt(item, itemRoom, stationObj.visualStyleGuide);
           imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,

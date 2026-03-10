@@ -1,7 +1,5 @@
 import type { Room, GeneratedStation, ActiveEvent, RoomArchetype, SystemFailure } from './types.js';
 
-export const STYLE_SUFFIX = 'Retro 1970s sci-fi concept art, muted color palette, analog instrumentation, moody atmospheric lighting, worn industrial surfaces, film grain texture. No text or labels.';
-
 const ARCHETYPE_SCALE: Record<RoomArchetype, string> = {
   reactor: 'vast industrial',
   cargo: 'cavernous',
@@ -87,27 +85,30 @@ export function buildRoomImagePrompt(
     if (visual) parts.push(visual);
   }
 
-  // 6. Visual style seed — first sentence only, capped (~15w)
-  if (station.visualStyleSeed) {
-    const style = truncateAtSentence(station.visualStyleSeed, 80);
-    if (style) parts.push(style);
+  // 6. Station visual style guide
+  if (station.visualStyleGuide) {
+    parts.push(station.visualStyleGuide);
   }
 
-  // 7. Style suffix (~25w)
-  parts.push(STYLE_SUFFIX);
+  return parts.join(' ');
+}
+
+function buildRoomEnvironmentPhrase(room: Room): string {
+  const parts: string[] = [];
+  parts.push(`Inside a ${archetypeScale(room.archetype)} ${room.archetype.replace(/_/g, ' ')} compartment aboard a space station.`);
+  if (room.sensory.visuals.length > 0) {
+    const visual = truncateAtSentence(room.sensory.visuals[0], 80);
+    if (visual) parts.push(visual);
+  }
   return parts.join(' ');
 }
 
 export function buildNPCImagePrompt(
   npc: { name: string; appearance: string; disposition: string },
-  room: { name: string; archetype: string },
-  visualStyleSeed?: string,
+  room?: Room,
+  visualStyleGuide?: string,
 ): string {
   const parts: string[] = [];
-
-  if (visualStyleSeed) {
-    parts.push(`${visualStyleSeed}.`);
-  }
 
   parts.push(`Portrait of ${npc.name}, ${npc.appearance}.`);
 
@@ -119,8 +120,12 @@ export function buildNPCImagePrompt(
   const expression = expressionMap[npc.disposition] ?? 'neutral expression';
   parts.push(`${expression}.`);
 
-  parts.push(`Inside ${room.name}, a ${room.archetype} compartment on a space station.`);
-  parts.push(STYLE_SUFFIX);
+  if (room) {
+    parts.push(buildRoomEnvironmentPhrase(room));
+    if (visualStyleGuide) parts.push(visualStyleGuide);
+  } else {
+    parts.push('Isolated on solid matte black background, dramatic studio portrait lighting, dark seamless backdrop.');
+  }
 
   return parts.join(' ');
 }
@@ -130,35 +135,35 @@ export function buildBriefingImagePrompt(
 ): string {
   const parts: string[] = [];
 
-  if (station.visualStyleSeed) {
-    parts.push(`${station.visualStyleSeed}.`);
-  }
-
   parts.push(`Exterior view of space station "${station.stationName}" in deep space.`);
   parts.push(`${station.briefing.split('.').slice(0, 2).join('.')}.`);
   parts.push('Dramatic lighting from a nearby star, visible damage and debris.');
-  parts.push(STYLE_SUFFIX);
+
+  if (station.visualStyleGuide) {
+    parts.push(station.visualStyleGuide);
+  }
 
   return parts.join(' ');
 }
 
 export function buildItemImagePrompt(
   item: { name: string; description: string; category: string },
-  visualStyleSeed?: string,
+  room?: Room,
+  visualStyleGuide?: string,
 ): string {
   const parts: string[] = [];
-
-  if (visualStyleSeed) {
-    parts.push(`${visualStyleSeed}.`);
-  }
 
   parts.push(`Close-up view of a ${item.category} item: ${item.name}.`);
 
   const desc = truncateAtSentence(item.description, 120);
   if (desc) parts.push(desc);
 
-  parts.push('Resting on a worn metal surface inside a space station.');
-  parts.push(STYLE_SUFFIX);
+  if (room) {
+    parts.push(buildRoomEnvironmentPhrase(room));
+    if (visualStyleGuide) parts.push(visualStyleGuide);
+  } else {
+    parts.push('Isolated on solid matte black background, studio product lighting, dark seamless backdrop.');
+  }
 
   return parts.join(' ');
 }

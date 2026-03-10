@@ -27,7 +27,7 @@ const IdentitySeedSchema = z.object({
         fate: z.string(),
     })),
     toneKeywords: z.array(z.string()),
-    visualStyleSeed: z.string(),
+    visualStyleGuide: z.string(),
     briefingVideoPrompt: z.string(),
 });
 
@@ -41,7 +41,7 @@ export interface ValidatedIdentitySeed {
     backstory: string;
     crewRoster: Array<{ name: string; role: string; fate: string }>;
     toneKeywords: string[];
-    visualStyleSeed: string;
+    visualStyleGuide: string;
     briefingVideoPrompt: string;
 }
 
@@ -63,8 +63,8 @@ Grounded sci-fi with personality. The Martian meets Project Hail Mary. The stati
 - backstory: 2-3 sentences about the station's history and what went wrong
 - crewRoster: 3-5 crew members (engineers, scientists, technicians) with name, role, and fate
 - toneKeywords: 3-5 words/phrases capturing the station's mood (e.g., "claustrophobic", "jury-rigged", "fading hope")
-- visualStyleSeed: A short visual style phrase (10-20 words) describing the station's aesthetic for AI image generation. Focus on lighting, color palette, architectural style, and atmosphere (e.g., "Soviet-era brutalist industrial, amber emergency lighting, corroded steel panels", "Sleek corporate white corridors stained with coolant, flickering fluorescent strips")
-- briefingVideoPrompt: A CCTV security camera video prompt (30-60 words) for a 5-second surveillance footage clip, optimized for Seedance text-to-video. This video plays when the player opens the Mission Objectives screen — it must visually convey the SPECIFIC mission and its stakes through security camera footage. CRITICAL: the scene must be nearly STATIC — a frozen moment captured by a security camera. No moving objects, no flickering, no phasing, no spinning, no dynamic action. Only subtle ambient details like dripping liquid, drifting smoke, or a blinking light are allowed. Structure: fixed camera position first (overhead, wall-mounted, corner-mounted), then STILL visual details showing the aftermath of what went wrong (damage, debris, warning signs), then CCTV artifacts (timestamp overlay, scan lines, low-resolution grain, slight static). No audio cues. Example for a comms relay repair mission: "Fixed overhead security camera, wide angle. A darkened communications hub with severed data cables hanging over flooded deck plates. Dead relay terminals line the walls. A cracked monitor displays a distress signal waveform. CCTV timestamp overlay, scan lines, low-resolution grain."`;
+- visualStyleGuide: A rich visual style guide (50-80 words) in natural sentences describing the station's visual identity for AI image generation. Must cover: (1) architectural era or design language, (2) 2-3 dominant colors, (3) lighting character, (4) surface textures and materials, (5) atmospheric quality, (6) art treatment. End with "No text or labels." Example: "Late-Soviet brutalist industrial architecture. Dominant colors: gunmetal grey, amber emergency lighting, rust-brown corrosion. Harsh overhead fluorescents with pools of shadow between fixtures. Corroded steel panels with exposed rivets, condensation-streaked bulkheads, rubber-gasket sealed hatches. Hazy atmosphere with visible particulate from failing air scrubbers. Rendered as weathered analog concept art with film grain texture. No text or labels."
+- briefingVideoPrompt: A CCTV security camera video prompt (30-60 words) for a 5-second surveillance footage clip, optimized for Seedance text-to-video. This video plays when the player opens the Mission Objectives screen — it must visually convey the SPECIFIC mission and its stakes through security camera footage. CRITICAL: the scene must be nearly STATIC — a frozen moment captured by a security camera. No moving objects, no flickering, no phasing, no spinning, no dynamic action. Only subtle ambient details like dripping liquid, drifting smoke, or a blinking light are allowed. Structure: fixed camera position first (overhead, wall-mounted, corner-mounted), then STILL visual details showing the aftermath of what went wrong (damage, debris, warning signs), then CCTV artifacts (timestamp overlay, scan lines, low-resolution grain, slight static). No audio cues. Example for a comms relay repair mission: "Fixed overhead security camera, wide angle. A darkened communications hub with severed data cables hanging over flooded deck plates. Dead relay terminals line the walls. A cracked monitor displays a distress signal waveform. CCTV timestamp overlay, scan lines, low-resolution grain." The visual aesthetic should match the visualStyleGuide.`;
 
     const roomSummary = topology.rooms.map(r => `  ${r.id} (${r.archetype})`).join('\n');
 
@@ -113,8 +113,9 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
         errors.push('backstory is empty — provide a 2-3 sentence station history');
     }
 
-    if (!output.visualStyleSeed.trim()) {
-        errors.push('visualStyleSeed is empty — provide a 10-20 word visual style phrase');
+    const styleWordCount = output.visualStyleGuide.trim().split(/\s+/).length;
+    if (styleWordCount < 30) {
+        errors.push(`visualStyleGuide has ${String(styleWordCount)} words — provide at least 30 words covering architecture, colors, lighting, textures, atmosphere, and art treatment`);
     }
 
     if (!output.briefingVideoPrompt.trim()) {
@@ -135,7 +136,7 @@ function validateIdentitySeed(output: IdentitySeedOutput, _context: LayerContext
             fate: c.fate,
         })),
         toneKeywords: output.toneKeywords,
-        visualStyleSeed: output.visualStyleSeed,
+        visualStyleGuide: output.visualStyleGuide,
         briefingVideoPrompt: output.briefingVideoPrompt,
     });
 }
@@ -156,7 +157,7 @@ export const identitySeedLayer: LayerConfig<IdentitySeedOutput, ValidatedIdentit
             `Station: "${v.stationName}"`,
             `Crew: ${crewNames.join(', ')}`,
             `Tone: ${v.toneKeywords.join(', ')}`,
-            `Visual: ${v.visualStyleSeed}`,
+            `Visual: ${v.visualStyleGuide.slice(0, 80)}…`,
             `Video: ${v.briefingVideoPrompt.slice(0, 60)}…`,
         ].join('\n');
     },

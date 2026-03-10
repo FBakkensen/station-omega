@@ -176,6 +176,54 @@ export const generate = internalAction({
         console.warn("[generateStation] Failed to write AI layer logs", logErr);
       }
 
+      // Step 5.5: Generate briefing image (non-fatal)
+      let briefingImageUrl: string | null = null;
+      if (process.env.FAL_API_KEY) {
+        try {
+          const { buildBriefingImagePrompt } = await import("../../src/image-prompts.js");
+          const { FalImageClient } = await import("../../src/io/fal-image-client.js");
+          const { IMAGE_MODEL_ID, IMAGE_COST_USD } = await import("../../src/model-catalog.js");
+          const imageStartMs = Date.now();
+          const briefingImagePrompt = buildBriefingImagePrompt(station);
+          const imageClient = new FalImageClient(process.env.FAL_API_KEY);
+          const imageResult = await imageClient.generateImage({
+            prompt: briefingImagePrompt,
+            width: 1024,
+            height: 576,
+          });
+
+          const imageBlob = new Blob([imageResult.imageBytes as BlobPart], { type: imageResult.mimeType });
+          const imageStorageId = await ctx.storage.store(imageBlob);
+
+          await ctx.runMutation(internal.stationImages.save, {
+            stationId,
+            cacheKey: "briefing",
+            storageId: imageStorageId,
+            prompt: briefingImagePrompt,
+            category: "briefing" as const,
+          });
+          console.info("[generateStation] Briefing image generated and cached");
+
+          briefingImageUrl = await ctx.storage.getUrl(imageStorageId);
+
+          try {
+            await ctx.runMutation(internal.aiLogs.log, {
+              provider: "fal" as const,
+              operation: "image_generation" as const,
+              stationId,
+              modelId: IMAGE_MODEL_ID,
+              prompt: briefingImagePrompt,
+              status: "success" as const,
+              durationMs: Date.now() - imageStartMs,
+              metadata: { cacheKey: "briefing", storageId: imageStorageId, costUsd: IMAGE_COST_USD },
+            });
+          } catch { /* non-fatal */ }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.error("[generateStation] Briefing image generation failed (non-fatal)", { error: message });
+        }
+      }
+
       // Step 6: Generate briefing video (non-fatal)
       if (process.env.FAL_API_KEY) {
         await ctx.runMutation(internal.generationProgress.update, {
@@ -193,10 +241,13 @@ export const generate = internalAction({
             throw new Error("No briefingVideoPrompt");
           }
           const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
-          const { VIDEO_MODEL_ID, VIDEO_COST_USD } = await import("../../src/model-catalog.js");
+          const { VIDEO_MODEL_ID, VIDEO_I2V_MODEL_ID, VIDEO_COST_USD, VIDEO_I2V_COST_USD } = await import("../../src/model-catalog.js");
           const videoStartMs = Date.now();
           const client = new FalVideoClient(process.env.FAL_API_KEY);
-          const result = await client.generateVideo({ prompt: videoPrompt });
+          const result = await client.generateVideo({
+            prompt: videoPrompt,
+            ...(briefingImageUrl ? { imageUrl: briefingImageUrl } : {}),
+          });
 
           const blob = new Blob([result.videoBytes as BlobPart], { type: result.mimeType });
           const storageId = await ctx.storage.store(blob);
@@ -215,11 +266,11 @@ export const generate = internalAction({
               provider: "fal" as const,
               operation: "video_generation" as const,
               stationId,
-              modelId: VIDEO_MODEL_ID,
+              modelId: briefingImageUrl ? VIDEO_I2V_MODEL_ID : VIDEO_MODEL_ID,
               prompt: videoPrompt,
               status: "success" as const,
               durationMs: Date.now() - videoStartMs,
-              metadata: { cacheKey: "briefing_video", storageId, costUsd: VIDEO_COST_USD },
+              metadata: { cacheKey: "briefing_video", storageId, costUsd: briefingImageUrl ? VIDEO_I2V_COST_USD : VIDEO_COST_USD },
             });
           } catch { /* non-fatal */ }
         } catch (err) {

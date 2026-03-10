@@ -1,5 +1,6 @@
 export interface VideoGenerationRequest {
   prompt: string;
+  imageUrl?: string;
 }
 
 export interface VideoGenerationResult {

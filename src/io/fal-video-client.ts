@@ -1,7 +1,5 @@
 import type { VideoClient, VideoGenerationRequest, VideoGenerationResult } from './video-client.js';
-import { VIDEO_MODEL_ID } from '../model-catalog.js';
-
-const FAL_QUEUE_BASE = `https://queue.fal.run/${VIDEO_MODEL_ID}`;
+import { VIDEO_MODEL_ID, VIDEO_I2V_MODEL_ID } from '../model-catalog.js';
 
 const POLL_INITIAL_MS = 5_000;
 const POLL_MAX_MS = 15_000;
@@ -38,16 +36,33 @@ export class FalVideoClient implements VideoClient {
     const authHeaders = { Authorization: `Key ${this.apiKey}` };
     const postHeaders = { ...authHeaders, 'Content-Type': 'application/json' };
 
+    // Choose endpoint and body based on mode
+    const isI2V = !!request.imageUrl;
+    const modelId = isI2V ? VIDEO_I2V_MODEL_ID : VIDEO_MODEL_ID;
+    const queueUrl = `https://queue.fal.run/${modelId}`;
+
+    const body = isI2V
+      ? {
+          image_url: request.imageUrl,
+          prompt: request.prompt,
+          duration: '5',
+          aspect_ratio: '16:9',
+          resolution: '480p',
+          camera_fixed: true,
+          seed: 42,
+        }
+      : {
+          prompt: request.prompt,
+          duration: '5',
+          aspect_ratio: '16:9',
+          resolution: '480p',
+        };
+
     // Submit to queue
-    const submitResponse = await this.fetchFn(FAL_QUEUE_BASE, {
+    const submitResponse = await this.fetchFn(queueUrl, {
       method: 'POST',
       headers: postHeaders,
-      body: JSON.stringify({
-        prompt: request.prompt,
-        duration: '5',
-        aspect_ratio: '16:9',
-        resolution: '480p',
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!submitResponse.ok) {

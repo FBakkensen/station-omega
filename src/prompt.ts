@@ -387,6 +387,7 @@ I am a **${build.name}** (${build.description}).
 **Station briefing**: ${station.briefing}
 
 **What happened here**: ${station.backstory}
+${station.visualStyleGuide ? `\n**Visual aesthetic**: ${station.visualStyleGuide}` : ''}
 
 ${buildOutputFormatRules()}
 

@@ -149,7 +149,7 @@ export function assembleStation(
         crewRoster: [...creative.crewRoster],
         arrivalScenario: creative.arrivalScenario,
         mapLayout,
-        visualStyleSeed: creative.visualStyleSeed,
+        visualStyleGuide: creative.visualStyleGuide,
         briefingVideoPrompt: creative.briefingVideoPrompt,
     };
 }

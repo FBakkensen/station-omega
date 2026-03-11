@@ -54,11 +54,22 @@ export const TTS_MODEL_ID = 'inworld-tts-1.5-max';
 export const TTS_COST_PER_CHAR = 10 / 1_000_000;
 
 // ─── Image Generation ────────────────────────────────────────────────────────
-export const IMAGE_MODEL_ID = 'fal-ai/flux/schnell';
-/** FAL Flux Schnell: $0.003 per megapixel (512×512 rounds to 1MP). */
-export const IMAGE_COST_USD = 0.003;
+export const IMAGE_MODEL_ID = 'fal-ai/flux-2/turbo';
+/** FAL Flux 2 Turbo: $0.008 per megapixel (512×512 rounds to 1MP). */
+export const IMAGE_COST_USD = 0.008;
 
 // ─── Video Generation ────────────────────────────────────────────────────────
 export const VIDEO_MODEL_ID = 'fal-ai/bytedance/seedance/v1/pro/fast/text-to-video';
 /** FAL SeedDance Pro Fast: ~$0.048 per video (480p, 5s). */
 export const VIDEO_COST_USD = 0.048;
+
+export const VIDEO_I2V_MODEL_ID = 'fal-ai/bytedance/seedance/v1/pro/image-to-video';
+/** FAL SeedDance Pro image-to-video: ~$0.12 per video (480p, 5s). */
+export const VIDEO_I2V_COST_USD = 0.12;
+
+/** Select video model ID and cost based on whether an image is provided for i2v. */
+export function videoModelConfig(hasImage: boolean): { modelId: string; costUsd: number } {
+  return hasImage
+    ? { modelId: VIDEO_I2V_MODEL_ID, costUsd: VIDEO_I2V_COST_USD }
+    : { modelId: VIDEO_MODEL_ID, costUsd: VIDEO_COST_USD };
+}

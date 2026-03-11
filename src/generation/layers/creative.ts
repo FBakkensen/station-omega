@@ -305,7 +305,7 @@ export async function runCreativeSublayers(
         arrivalScenario: arrival.arrivalScenario,
         startingItem: arrival.startingItem,
         npcCreative: npcCreative && npcCreative.length > 0 ? npcCreative : undefined,
-        visualStyleSeed: identity.visualStyleSeed,
+        visualStyleGuide: identity.visualStyleGuide,
         briefingVideoPrompt: identity.briefingVideoPrompt,
     };
 

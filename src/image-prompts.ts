@@ -1,7 +1,5 @@
 import type { Room, GeneratedStation, ActiveEvent, RoomArchetype, SystemFailure } from './types.js';
 
-export const STYLE_SUFFIX = 'Retro 1970s sci-fi concept art, muted color palette, analog instrumentation, moody atmospheric lighting, worn industrial surfaces, film grain texture. No text or labels.';
-
 const ARCHETYPE_SCALE: Record<RoomArchetype, string> = {
   reactor: 'vast industrial',
   cargo: 'cavernous',
@@ -48,6 +46,8 @@ function truncateAtSentence(text: string, maxLen: number): string {
   return '';
 }
 
+export const CINEMATIC_SUFFIX = 'Dramatic directional lighting with deep shadows. Dark atmospheric haze. Cinematic wide-angle, shallow depth of field.';
+
 export function buildRoomImagePrompt(
   room: Room,
   station: GeneratedStation,
@@ -55,8 +55,8 @@ export function buildRoomImagePrompt(
 ): string {
   const parts: string[] = [];
 
-  // 1. Subject + scale (~15w) — front-loaded for T5 attention window
-  parts.push(`Interior view of a ${archetypeScale(room.archetype)} ${room.archetype} compartment aboard a space station.`);
+  // 1. Subject + scale (~15w) — front-loaded for T5 attention window, dark framing
+  parts.push(`Dark interior of a ${archetypeScale(room.archetype)} ${room.archetype} compartment aboard a damaged space station.`);
 
   // 2. Exit architecture (~8w)
   if (room.connections.length > 0) {
@@ -87,40 +87,68 @@ export function buildRoomImagePrompt(
     if (visual) parts.push(visual);
   }
 
-  // 6. Visual style seed — first sentence only, capped (~15w)
-  if (station.visualStyleSeed) {
-    const style = truncateAtSentence(station.visualStyleSeed, 80);
-    if (style) parts.push(style);
+  // 6. Station visual style guide
+  if (station.visualStyleGuide) {
+    parts.push(station.visualStyleGuide);
   }
 
-  // 7. Style suffix (~25w)
-  parts.push(STYLE_SUFFIX);
+  // 7. Cinematic anchor — ensures dark/dramatic consistency across all room images
+  parts.push(CINEMATIC_SUFFIX);
+
   return parts.join(' ');
 }
 
+
+// ─── NPC Image: Void Portrait ────────────────────────────────────────────────
+
+const DISPOSITION_LIGHTING: Record<string, string> = {
+  neutral: 'Amber side-light, balanced chiaroscuro with half-face in deep shadow',
+  friendly: 'Warm golden front-fill, softer shadows revealing open expression',
+  fearful: 'Harsh red under-lighting, deep angular shadows obscuring half the face',
+};
+
+const DISPOSITION_PARTICLES: Record<string, string> = {
+  neutral: 'Fine particles drifting through the light.',
+  friendly: 'Soft haze catching the warmth of the light.',
+  fearful: 'Faint embers and scattered pinpoints of light.',
+};
+
+const DISPOSITION_BODY: Record<string, string> = {
+  neutral: 'guarded stance, arms at sides',
+  friendly: 'relaxed posture, slight lean forward',
+  fearful: 'tense shoulders, eyes darting',
+};
+
+const DISPOSITION_EXPRESSION: Record<string, string> = {
+  neutral: 'calm, watchful gaze',
+  friendly: 'warm, relieved expression',
+  fearful: 'nervous, wide-eyed stare',
+};
+
+const DEFAULT_NPC_LIGHTING = 'Cool white side-light, stark shadows';
+const DEFAULT_NPC_PARTICLES = 'Fine particles drifting through the light.';
+const DEFAULT_NPC_BODY = 'neutral stance';
+const DEFAULT_NPC_EXPRESSION = 'neutral expression';
+
 export function buildNPCImagePrompt(
   npc: { name: string; appearance: string; disposition: string },
-  room: { name: string; archetype: string },
-  visualStyleSeed?: string,
 ): string {
   const parts: string[] = [];
 
-  if (visualStyleSeed) {
-    parts.push(`${visualStyleSeed}.`);
-  }
+  const expression = DISPOSITION_EXPRESSION[npc.disposition] ?? DEFAULT_NPC_EXPRESSION;
+  const body = DISPOSITION_BODY[npc.disposition] ?? DEFAULT_NPC_BODY;
+  parts.push(`Dramatic close-up portrait of ${npc.name}, ${npc.appearance}.`);
+  parts.push(`${expression}, ${body}.`);
 
-  parts.push(`Portrait of ${npc.name}, ${npc.appearance}.`);
+  const lighting = DISPOSITION_LIGHTING[npc.disposition] ?? DEFAULT_NPC_LIGHTING;
+  parts.push(`${lighting}.`);
 
-  const expressionMap: Record<string, string> = {
-    neutral: 'calm, guarded expression',
-    friendly: 'warm, relieved expression',
-    fearful: 'nervous, wary expression',
-  };
-  const expression = expressionMap[npc.disposition] ?? 'neutral expression';
-  parts.push(`${expression}.`);
+  const particles = DISPOSITION_PARTICLES[npc.disposition] ?? DEFAULT_NPC_PARTICLES;
+  parts.push(particles);
 
-  parts.push(`Inside ${room.name}, a ${room.archetype} compartment on a space station.`);
-  parts.push(STYLE_SUFFIX);
+  parts.push('Dark background dissolving to black.');
+
+  parts.push('Cinematic portrait, Caravaggio lighting, shallow depth of field, 85mm lens.');
 
   return parts.join(' ');
 }
@@ -130,35 +158,60 @@ export function buildBriefingImagePrompt(
 ): string {
   const parts: string[] = [];
 
-  if (station.visualStyleSeed) {
-    parts.push(`${station.visualStyleSeed}.`);
+  parts.push(`Dark silhouette of space station "${station.stationName}" against deep space.`);
+  parts.push(`${station.briefing.split('.').slice(0, 2).join('.')}.`);
+  parts.push('Harsh directional star-light raking across damaged hull, deep shadows and visible debris.');
+
+  if (station.visualStyleGuide) {
+    parts.push(station.visualStyleGuide);
   }
 
-  parts.push(`Exterior view of space station "${station.stationName}" in deep space.`);
-  parts.push(`${station.briefing.split('.').slice(0, 2).join('.')}.`);
-  parts.push('Dramatic lighting from a nearby star, visible damage and debris.');
-  parts.push(STYLE_SUFFIX);
+  parts.push('Cinematic wide shot, film grain, shallow depth of field.');
 
   return parts.join(' ');
 }
 
+// ─── Item Image: Void-Isolated Hero Prop ─────────────────────────────────────
+
+const CATEGORY_LIGHT_COLOR: Record<string, string> = {
+  medical: 'Deep crimson directional light, sharp rim light defining edges',
+  tool: 'Warm amber directional light, hard rim light on worn metal',
+  material: 'Cool blue-white directional light, crisp rim light on raw surfaces',
+  component: 'Orange-amber directional light, warm rim light tracing circuitry',
+  chemical: 'Toxic green directional light, sickly rim light on sealed surfaces',
+  key: 'White-gold directional light cutting through haze, bright rim light',
+};
+
+const CATEGORY_GLOW: Record<string, string> = {
+  medical: 'faint bio-monitor glow and indicator LEDs',
+  tool: 'dull power indicator and heat-stressed edges',
+  component: 'faint circuit traces and status LEDs',
+  chemical: 'subtle chemical luminescence from within',
+  key: 'faint energy signature pulsing from the core',
+};
+
+const DEFAULT_ITEM_LIGHT = 'Cool white directional light, strong rim light defining edges';
+
 export function buildItemImagePrompt(
   item: { name: string; description: string; category: string },
-  visualStyleSeed?: string,
 ): string {
   const parts: string[] = [];
 
-  if (visualStyleSeed) {
-    parts.push(`${visualStyleSeed}.`);
-  }
+  // Subject-first for T5 attention
+  parts.push(`${item.name}, weathered and battle-scarred.`);
 
-  parts.push(`Close-up view of a ${item.category} item: ${item.name}.`);
-
-  const desc = truncateAtSentence(item.description, 120);
+  const desc = truncateAtSentence(item.description, 100);
   if (desc) parts.push(desc);
 
-  parts.push('Resting on a worn metal surface inside a space station.');
-  parts.push(STYLE_SUFFIX);
+  const glow = CATEGORY_GLOW[item.category];
+  if (glow) parts.push(`${glow}.`);
+
+  const light = CATEGORY_LIGHT_COLOR[item.category] ?? DEFAULT_ITEM_LIGHT;
+  parts.push(`${light}. Dark void background.`);
+
+  parts.push('Extreme close-up, shallow depth of field, macro lens.');
+
+  parts.push('No text, labels, or UI elements.');
 
   return parts.join(' ');
 }

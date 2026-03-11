@@ -274,7 +274,7 @@ export interface CreativeContent {
     arrivalScenario: ArrivalScenario;
     startingItem: StartingItemCreative;
     npcCreative?: NPCCreative[];
-    visualStyleSeed?: string;
+    visualStyleGuide?: string;
     briefingVideoPrompt?: string;
 }
 
@@ -335,7 +335,7 @@ export interface GeneratedStation {
     crewRoster: CrewMember[];
     arrivalScenario: ArrivalScenario;
     mapLayout: MapLayout;
-    visualStyleSeed?: string;
+    visualStyleGuide?: string;
     briefingVideoPrompt?: string;
 }
 

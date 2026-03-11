@@ -55,21 +55,6 @@ export const prune = internalMutation({
 
 // ── Public queries (callable via `npx convex run`) ───────────────────
 
-/** Truncate a string for summary display. */
-function truncate(s: string | undefined, max: number): string | undefined {
-  if (!s) return s;
-  return s.length > max ? s.slice(0, max) + "…" : s;
-}
-
-/** Summarize a log entry (truncated prompt/response for list views). */
-function summarize(doc: Record<string, unknown>) {
-  return {
-    ...doc,
-    prompt: truncate(doc.prompt as string | undefined, 200),
-    response: truncate(doc.response as string | undefined, 200),
-  };
-}
-
 /** Recent AI logs. Optional filters: provider, operation, status. */
 export const recent = query({
   args: {
@@ -113,7 +98,7 @@ export const recent = query({
         .order("desc")
         .take(take);
     }
-    return docs.map(summarize);
+    return docs;
   },
 });
 
@@ -139,7 +124,7 @@ export const byGame = query({
           .withIndex("by_game_turn", (q) => q.eq("gameId", args.gameId))
           .order("desc")
           .take(500);
-    return docs.map(summarize);
+    return docs;
   },
 });
 
@@ -153,7 +138,7 @@ export const byStation = query({
       .withIndex("by_station", (q) => q.eq("stationId", args.stationId))
       .order("desc")
       .take(500);
-    return docs.map(summarize);
+    return docs;
   },
 });
 
@@ -167,16 +152,7 @@ export const errors = query({
       .withIndex("by_status", (q) => q.eq("status", "error"))
       .order("desc")
       .take(args.limit ?? 20);
-    return docs.map(summarize);
-  },
-});
-
-/** Full detail for a single log entry (un-truncated prompt + response). */
-export const detail = query({
-  args: { id: v.id("aiLogs") },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    return docs;
   },
 });
 

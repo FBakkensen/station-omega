@@ -12,21 +12,27 @@ export class FalImageClient implements ImageClient {
   ) {}
 
   async generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
+    const body: Record<string, unknown> = {
+      prompt: request.prompt,
+      image_size: {
+        width: request.width,
+        height: request.height,
+      },
+      num_images: 1,
+      enable_safety_checker: false,
+    };
+
+    if (request.guidanceScale !== undefined) body.guidance_scale = request.guidanceScale;
+    if (request.seed !== undefined) body.seed = request.seed;
+    if (request.enablePromptExpansion !== undefined) body.enable_prompt_expansion = request.enablePromptExpansion;
+
     const response = await this.fetchFn(FAL_API_BASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Key ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        prompt: request.prompt,
-        image_size: {
-          width: request.width,
-          height: request.height,
-        },
-        num_images: 1,
-        enable_safety_checker: false,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -36,6 +42,7 @@ export class FalImageClient implements ImageClient {
 
     const result = await response.json() as {
       images: Array<{ url: string; content_type?: string }>;
+      seed?: number;
     };
 
     if (result.images.length === 0) {
@@ -51,7 +58,8 @@ export class FalImageClient implements ImageClient {
     const arrayBuffer = await imageResponse.arrayBuffer();
     return {
       imageBytes: new Uint8Array(arrayBuffer),
-      mimeType: result.images[0].content_type ?? 'image/jpeg',
+      mimeType: result.images[0].content_type ?? 'image/png',
+      seed: result.seed,
     };
   }
 }

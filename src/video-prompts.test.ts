@@ -26,7 +26,7 @@ function makeStation(overrides?: Partial<GeneratedStation>): GeneratedStation {
       initialActions: [],
     },
     mapLayout: { nodes: [], edges: [] },
-    visualStyleSeed: 'Brutalist industrial with amber lighting',
+    visualStyleGuide: 'Brutalist industrial with amber lighting',
     briefingVideoPrompt: AI_VIDEO_PROMPT,
     ...overrides,
   } as GeneratedStation;

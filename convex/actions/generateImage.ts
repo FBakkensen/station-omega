@@ -5,8 +5,16 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { IMAGE_COST_USD } from "../../src/model-catalog.js";
 
+const IMAGE_CATEGORY = v.union(
+  v.literal("room_scene"),
+  v.literal("npc_portrait"),
+  v.literal("briefing"),
+  v.literal("briefing_video"),
+  v.literal("item_image"),
+);
+
 /**
- * Generate and cache an AI image for a station.
+ * Generate and cache a single AI image for a station.
  * Fire-and-forget — called via ctx.scheduler.runAfter(0, ...) from streamTurn.
  * If the image already exists in the cache, this is a no-op.
  */
@@ -15,20 +23,14 @@ export const generate = internalAction({
     stationId: v.id("stations"),
     gameId: v.optional(v.id("games")),
     cacheKey: v.string(),
-    category: v.union(
-      v.literal("room_scene"),
-      v.literal("npc_portrait"),
-      v.literal("briefing"),
-      v.literal("briefing_video"),
-      v.literal("item_image"),
-    ),
+    category: IMAGE_CATEGORY,
     prompt: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     const { stationId, gameId, cacheKey, category, prompt } = args;
-    console.info("[generateImage] Starting", { stationId, cacheKey, category });
     const startMs = Date.now();
+    console.info("[generateImage] Starting", { stationId, cacheKey, category });
 
     try {
       // Check cache first
@@ -97,11 +99,13 @@ export const generate = internalAction({
           prompt,
           status: "success" as const,
           durationMs: Date.now() - startMs,
-          metadata: { cacheKey, category, storageId, width: 512, height: 512, costUsd: IMAGE_COST_USD },
+          metadata: {
+            cacheKey, category, storageId, width: 512, height: 512,
+            costUsd: IMAGE_COST_USD,
+          },
         });
       } catch { /* non-fatal */ }
     } catch (err) {
-      // Image generation failures are non-fatal — log and move on
       const message = err instanceof Error ? err.message : "Unknown error";
       console.error("[generateImage] Failed (non-fatal)", { cacheKey, error: message });
       try {
@@ -118,7 +122,6 @@ export const generate = internalAction({
         });
       } catch { /* non-fatal */ }
     }
-
     return null;
   },
 });

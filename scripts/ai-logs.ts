@@ -7,7 +7,6 @@
  *   bun run ai-logs game <gameId> [--turn=N]
  *   bun run ai-logs station <stationId>
  *   bun run ai-logs errors [--limit=N]
- *   bun run ai-logs detail <logId>
  *   bun run ai-logs stats
  *   bun run ai-logs cleanup
  */
@@ -22,7 +21,6 @@ Commands:
   game    <gameId> [--turn=N]
   station <stationId>
   errors  [--limit=N]
-  detail  <logId>
   stats
   cleanup
 
@@ -30,7 +28,6 @@ Examples:
   bun run ai-logs recent
   bun run ai-logs recent --provider=openrouter --limit=5
   bun run ai-logs game j575abc123 --turn=3
-  bun run ai-logs detail k97bxyz456
   bun run ai-logs errors --limit=10
   bun run ai-logs stats
   bun run ai-logs cleanup`;
@@ -112,14 +109,6 @@ switch (command) {
     run("aiLogs:errors", {
       limit: flags.limit ? Number(flags.limit) : undefined,
     });
-    break;
-
-  case "detail":
-    if (!positional[0]) {
-      console.error("Usage: ai-logs detail <logId>");
-      process.exit(1);
-    }
-    run("aiLogs:detail", { id: positional[0] });
     break;
 
   case "stats":

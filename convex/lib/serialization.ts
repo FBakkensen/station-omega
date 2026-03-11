@@ -30,7 +30,7 @@ export interface SerializedStation {
   crewRoster: GeneratedStation["crewRoster"];
   arrivalScenario: GeneratedStation["arrivalScenario"];
   mapLayout: SerializedMapLayout;
-  visualStyleSeed?: string;
+  visualStyleGuide?: string;
   briefingVideoPrompt?: string;
 }
 
@@ -79,7 +79,7 @@ export function serializeStation(station: GeneratedStation): SerializedStation {
     crewRoster: station.crewRoster,
     arrivalScenario: station.arrivalScenario,
     mapLayout,
-    visualStyleSeed: station.visualStyleSeed,
+    visualStyleGuide: station.visualStyleGuide,
     briefingVideoPrompt: station.briefingVideoPrompt,
   };
 }
@@ -121,7 +121,8 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
     crewRoster: data.crewRoster,
     arrivalScenario: data.arrivalScenario,
     mapLayout,
-    visualStyleSeed: data.visualStyleSeed,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+    visualStyleGuide: data.visualStyleGuide ?? (data as any).visualStyleSeed as string | undefined,
     briefingVideoPrompt: data.briefingVideoPrompt,
   };
 }

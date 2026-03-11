@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
-import { log, prune, recent, byGame, byStation, errors, detail, stats } from "./aiLogs";
+import { log, prune, recent, byGame, byStation, errors, stats } from "./aiLogs";
 import { extractHandler } from "./test_utils";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -120,7 +120,6 @@ const recentHandler = extractHandler<Ctx, Record<string, unknown>, unknown[]>(re
 const byGameHandler = extractHandler<Ctx, Record<string, unknown>, unknown[]>(byGame);
 const _byStationHandler = extractHandler<Ctx, Record<string, unknown>, unknown[]>(byStation);
 const errorsHandler = extractHandler<Ctx, Record<string, unknown>, unknown[]>(errors);
-const detailHandler = extractHandler<Ctx, Record<string, unknown>, unknown>(detail);
 const statsHandler = extractHandler<Ctx, Record<string, unknown>, unknown>(stats);
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -140,9 +139,9 @@ describe("AI log structured persistence and querying", () => {
     expect(docs.size).toBe(1);
   });
 
-  it("[O] retrieves one log entry with full prompt and response via detail", async () => {
-    const prompt = "System prompt with full detail content here";
-    const response = '{"segments":[{"type":"narration","text":"Hello"}]}';
+  it("[O] retrieves one log entry with full untruncated prompt via recent query", async () => {
+    const prompt = "System prompt with full detail content that is longer than two hundred characters and should not be truncated by any query because AI logs exist for debugging and truncation defeats their purpose entirely and completely";
+    const response = '{"segments":[{"type":"narration","text":"Hello world response also long"}]}';
     const { ctx } = createAiLogsHarness([
       {
         _id: "log-1",
@@ -158,10 +157,10 @@ describe("AI log structured persistence and querying", () => {
       },
     ]);
 
-    const result = await detailHandler(ctx, { id: "log-1" }) as AiLogDoc;
-    expect(result.prompt).toBe(prompt);
-    expect(result.response).toBe(response);
-    expect(result.provider).toBe("openrouter");
+    const result = await recentHandler(ctx, { limit: 1 }) as AiLogDoc[];
+    expect(result).toHaveLength(1);
+    expect(result[0].prompt).toBe(prompt);
+    expect(result[0].response).toBe(response);
   });
 
   it("[M] returns many logs filtered by provider and ordered by creation time desc", async () => {

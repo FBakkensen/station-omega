@@ -63,8 +63,8 @@ export function SegmentCard({ type, spans, revealedChars, finalized, entityRefs,
   const images: StationImage[] = [];
   if (entityRefs && stationImages) {
     for (const ref of entityRefs) {
-      const cacheKey = `${ref.type}:${ref.id}`;
-      const img = stationImages.get(cacheKey);
+      const prefix = `${ref.type}:${ref.id}`;
+      const img = stationImages.get(prefix);
       if (img) images.push(img);
     }
   }

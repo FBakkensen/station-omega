@@ -57,11 +57,46 @@ function formatArchetype(archetype: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Sizing constants for dynamic room boxes. */
+const CHAR_WIDTH = 6; // px per char at fontSize 10, monospace
+const RECT_PAD_X = 16; // 8px padding each side inside rect
+const MIN_RECT_WIDTH = 80;
+const COLUMN_GAP = 30; // gap between column right-edge and next column left-edge
+
+interface RoomMetric {
+  displayText: string;
+  rectWidth: number;
+}
+
+function computeRoomMetrics(
+  rooms: Record<string, MapRoom>,
+  visibleRoomIds: string[],
+  roomVisibility: Map<string, RoomVisibility>,
+): Map<string, RoomMetric> {
+  const metrics = new Map<string, RoomMetric>();
+  for (const id of visibleRoomIds) {
+    const room = rooms[id];
+    const vis = roomVisibility.get(id);
+    const isUnvisited = vis === 'adjacent-unvisited';
+    const displayText = isUnvisited
+      ? room.name
+      : `${getIcon(room.archetype)} ${room.name}`;
+    const textWidth = displayText.length * CHAR_WIDTH;
+    const rectWidth = Math.max(MIN_RECT_WIDTH, textWidth + RECT_PAD_X);
+    metrics.set(id, { displayText, rectWidth });
+  }
+  return metrics;
+}
+
 /**
  * Generate a force-directed-inspired layout for SVG rendering.
  * Groups rooms by depth on the X axis, spreads vertically within each group.
  */
-function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
+function computeLayout(
+  rooms: Record<string, MapRoom>,
+  seed: number,
+  columnWidths: Map<number, number>,
+) {
   const roomIds = Object.keys(rooms);
   const byDepth = new Map<number, string[]>();
 
@@ -89,38 +124,33 @@ function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
     }
   }
 
-  const DX = 140;
   const DY = 80;
   const positions = new Map<string, { x: number; y: number }>();
 
   const maxDepth = Math.max(...[...byDepth.keys()]);
 
+  // Cumulative X positioning based on per-column max widths
+  let cumulativeX = 0;
   for (let depth = 0; depth <= maxDepth; depth++) {
     const ids = byDepth.get(depth) ?? [];
-    const x = depth * DX + 80;
+    const colWidth = columnWidths.get(depth) ?? MIN_RECT_WIDTH;
+    const x = cumulativeX + colWidth / 2;
+
     const groupHeight = (ids.length - 1) * DY;
     const startY = -groupHeight / 2 + 250; // Center vertically around 250
 
     for (let i = 0; i < ids.length; i++) {
       positions.set(ids[i], { x, y: startY + i * DY });
     }
+
+    cumulativeX += colWidth + COLUMN_GAP;
   }
 
-  // Compute bounds
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of positions.values()) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
-  }
-
-  return { positions, bounds: { minX: minX - 80, maxX: maxX + 80, minY: minY - 60, maxY: maxY + 60 } };
+  return { positions };
 }
 
 export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapModalProps) {
   const seed = useMemo(() => hashSeed(rooms), [rooms]);
-  const layout = useMemo(() => computeLayout(rooms, seed), [rooms, seed]);
 
   const {
     visibleRoomIds,
@@ -196,9 +226,29 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
     };
   }, [rooms, currentRoomId, visitedRoomIds]);
 
-  const { positions } = layout;
+  const roomMetrics = useMemo(
+    () => computeRoomMetrics(rooms, visibleRoomIds, roomVisibility),
+    [rooms, visibleRoomIds, roomVisibility],
+  );
+
+  const columnWidths = useMemo(() => {
+    const widths = new Map<number, number>();
+    for (const id of visibleRoomIds) {
+      const room = rooms[id];
+      const metric = roomMetrics.get(id);
+      if (!metric) continue;
+      const prev = widths.get(room.depth) ?? 0;
+      widths.set(room.depth, Math.max(prev, metric.rectWidth));
+    }
+    return widths;
+  }, [rooms, visibleRoomIds, roomMetrics]);
+
+  const { positions } = useMemo(
+    () => computeLayout(rooms, seed, columnWidths),
+    [rooms, seed, columnWidths],
+  );
+
   const bounds = useMemo(() => {
-    const PADDING_X = 80;
     const PADDING_Y = 60;
     let minX = Infinity;
     let maxX = -Infinity;
@@ -207,9 +257,11 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
 
     for (const roomId of visibleRoomIds) {
       const pos = positions.get(roomId);
-      if (!pos) continue;
-      minX = Math.min(minX, pos.x);
-      maxX = Math.max(maxX, pos.x);
+      const metric = roomMetrics.get(roomId);
+      if (!pos || !metric) continue;
+      const halfW = metric.rectWidth / 2;
+      minX = Math.min(minX, pos.x - halfW);
+      maxX = Math.max(maxX, pos.x + halfW);
       minY = Math.min(minY, pos.y);
       maxY = Math.max(maxY, pos.y);
     }
@@ -219,12 +271,12 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
     }
 
     return {
-      minX: minX - PADDING_X,
-      maxX: maxX + PADDING_X,
+      minX: minX - 20,
+      maxX: maxX + 20,
       minY: minY - PADDING_Y,
       maxY: maxY + PADDING_Y,
     };
-  }, [positions, visibleRoomIds]);
+  }, [positions, visibleRoomIds, roomMetrics]);
 
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY;
@@ -250,9 +302,10 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
 
         <svg
           viewBox={`${String(bounds.minX)} ${String(bounds.minY)} ${String(width)} ${String(height)}`}
-          width={Math.min(width, 800)}
-          height={Math.min(height, 500)}
+          width={width}
+          height={height}
           className="w-full"
+          style={{ minWidth: Math.min(width, 1200) }}
         >
           {/* Connection lines */}
           {connections.map(({ from, to }) => {
@@ -278,9 +331,9 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
 
           {/* Room nodes */}
           {visibleRoomIds.map((id) => {
-            const room = rooms[id];
             const pos = positions.get(id);
-            if (!pos) return null;
+            const metric = roomMetrics.get(id);
+            if (!pos || !metric) return null;
 
             const visibility = roomVisibility.get(id) ?? 'adjacent-unvisited';
             const isCurrent = visibility === 'current';
@@ -296,14 +349,14 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
             const textColor = isCurrent
               ? '#000'
               : (isVisited ? COLORS.text : '#8fa0bf');
-            const roomName = room.name.length > 12 ? `${room.name.slice(0, 11)}…` : room.name;
+            const halfW = metric.rectWidth / 2;
 
             return (
               <g key={id}>
                 <rect
-                  x={pos.x - 50}
+                  x={pos.x - halfW}
                   y={pos.y - 20}
-                  width={100}
+                  width={metric.rectWidth}
                   height={40}
                   rx={4}
                   fill={fill}
@@ -311,18 +364,18 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                   strokeWidth={isCurrent ? 2 : 1}
                 />
                 <text
-                  x={pos.x - 42}
+                  x={pos.x - halfW + 8}
                   y={pos.y - 4}
                   fill={textColor}
                   fontSize="10"
                   fontFamily="monospace"
                   opacity={isAdjacentUnvisited ? 0.8 : 1}
                 >
-                  {isAdjacentUnvisited ? roomName : `${getIcon(room.archetype)} ${roomName}`}
+                  {metric.displayText}
                 </text>
                 {isCurrent && (
                   <text
-                    x={pos.x - 42}
+                    x={pos.x - halfW + 8}
                     y={pos.y + 12}
                     fill="#000"
                     fontSize="8"

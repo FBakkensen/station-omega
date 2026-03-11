@@ -346,7 +346,7 @@ export const processAITurn = internalAction({
         });
       }
 
-      // ── Schedule image generation (fire-and-forget, batched) ──────
+      // ── Schedule image generation (fire-and-forget, all independent) ──
       const imageSchedules: Array<Promise<unknown>> = [];
 
       const roomChanged = state.currentRoom !== previousRoom || turnNumber === 1;
@@ -354,18 +354,18 @@ export const processAITurn = internalAction({
         const room = stationObj.rooms.get(state.currentRoom);
         if (room) {
           const cacheKey = `room:${state.currentRoom}`;
-          // Prefer AI-generated prompt; append station visual style guide
-          // Fall back to mechanical assembly if AI returned null
           const aiImagePrompt = typeof parsedOutput.imagePrompt === 'string'
             ? parsedOutput.imagePrompt + ' ' + (stationObj.visualStyleGuide ?? '')
             : null;
           const prompt = aiImagePrompt || buildRoomImagePrompt(room, stationObj, state.activeEvents);
+
           console.info("[processAITurn] Image prompt", {
             source: aiImagePrompt ? "ai" : "fallback",
             aiRaw: parsedOutput.imagePrompt,
             promptLength: prompt.split(/\s+/).length,
             prompt: prompt.slice(0, 200),
           });
+
           imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,
@@ -376,43 +376,30 @@ export const processAITurn = internalAction({
         }
       }
 
-      // NPC portrait generation for new dialogue encounters
-      for (const npcId of seenNpcIds) {
-        const npc = stationObj.npcs.get(npcId);
-        if (npc) {
-          const npcRoom = stationObj.rooms.get(npc.roomId);
-          const cacheKey = `npc:${npcId}:room:${npc.roomId}`;
-          const prompt = buildNPCImagePrompt(npc, npcRoom, stationObj.visualStyleGuide);
+      // Items — independent, room-agnostic atmospheric prompts
+      for (const itemId of seenItemIds) {
+        const item = stationObj.items.get(itemId);
+        if (item) {
           imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,
-            cacheKey,
-            category: "npc_portrait" as const,
-            prompt,
+            cacheKey: `item:${itemId}`,
+            category: "item_image" as const,
+            prompt: buildItemImagePrompt(item),
           }));
         }
       }
 
-      // Item image generation for newly referenced items
-      for (const itemId of seenItemIds) {
-        const item = stationObj.items.get(itemId);
-        if (item) {
-          let itemRoomId = state.currentRoom;
-          for (const [roomId, room] of stationObj.rooms) {
-            if (room.loot.includes(itemId)) {
-              itemRoomId = roomId;
-              break;
-            }
-          }
-          const itemRoom = stationObj.rooms.get(itemRoomId);
-          const cacheKey = `item:${itemId}:room:${itemRoomId}`;
-          const prompt = buildItemImagePrompt(item, itemRoom, stationObj.visualStyleGuide);
+      // NPCs — independent, room-agnostic chiaroscuro portraits
+      for (const npcId of seenNpcIds) {
+        const npc = stationObj.npcs.get(npcId);
+        if (npc) {
           imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
             stationId: game.stationId,
             gameId,
-            cacheKey,
-            category: "item_image" as const,
-            prompt,
+            cacheKey: `npc:${npcId}`,
+            category: "npc_portrait" as const,
+            prompt: buildNPCImagePrompt(npc),
           }));
         }
       }

@@ -57,9 +57,27 @@ function formatArchetype(archetype: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Approximate width of a single character in monospace at fontSize 10. */
+const CHAR_WIDTH = 6.1;
+/** Horizontal padding inside each room box (total, split evenly left/right). */
+const ROOM_H_PAD = 16;
+/** Vertical size of each room box. */
+const ROOM_HEIGHT = 40;
+/** Minimum gap between room columns. */
+const COLUMN_GAP = 40;
+/** Vertical spacing between rooms in the same depth column. */
+const ROW_SPACING = 80;
+
+/** Compute the display text length (in characters) for a room. */
+function displayTextLen(room: MapRoom): number {
+  // Icon + space + full name (worst case: visited/current shows icon)
+  return 2 + room.name.length;
+}
+
 /**
  * Generate a force-directed-inspired layout for SVG rendering.
  * Groups rooms by depth on the X axis, spreads vertically within each group.
+ * Room width is derived from the longest display text so nothing is truncated.
  */
 function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
   const roomIds = Object.keys(rooms);
@@ -89,33 +107,29 @@ function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
     }
   }
 
-  const DX = 140;
-  const DY = 80;
-  const positions = new Map<string, { x: number; y: number }>();
+  // Derive room box width from the longest display text
+  let maxChars = 14; // minimum sensible width (e.g. "► YOU ARE HERE")
+  for (const id of roomIds) {
+    maxChars = Math.max(maxChars, displayTextLen(rooms[id]));
+  }
+  const roomWidth = Math.ceil(maxChars * CHAR_WIDTH + ROOM_H_PAD);
+  const DX = roomWidth + COLUMN_GAP;
 
+  const positions = new Map<string, { x: number; y: number }>();
   const maxDepth = Math.max(...[...byDepth.keys()]);
 
   for (let depth = 0; depth <= maxDepth; depth++) {
     const ids = byDepth.get(depth) ?? [];
-    const x = depth * DX + 80;
-    const groupHeight = (ids.length - 1) * DY;
+    const x = depth * DX + roomWidth / 2 + 20;
+    const groupHeight = (ids.length - 1) * ROW_SPACING;
     const startY = -groupHeight / 2 + 250; // Center vertically around 250
 
     for (let i = 0; i < ids.length; i++) {
-      positions.set(ids[i], { x, y: startY + i * DY });
+      positions.set(ids[i], { x, y: startY + i * ROW_SPACING });
     }
   }
 
-  // Compute bounds
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of positions.values()) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
-  }
-
-  return { positions, bounds: { minX: minX - 80, maxX: maxX + 80, minY: minY - 60, maxY: maxY + 60 } };
+  return { positions, roomWidth };
 }
 
 export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapModalProps) {
@@ -196,9 +210,10 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
     };
   }, [rooms, currentRoomId, visitedRoomIds]);
 
-  const { positions } = layout;
+  const { positions, roomWidth } = layout;
+  const halfW = roomWidth / 2;
   const bounds = useMemo(() => {
-    const PADDING_X = 80;
+    const PADDING_X = 40;
     const PADDING_Y = 60;
     let minX = Infinity;
     let maxX = -Infinity;
@@ -208,8 +223,8 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
     for (const roomId of visibleRoomIds) {
       const pos = positions.get(roomId);
       if (!pos) continue;
-      minX = Math.min(minX, pos.x);
-      maxX = Math.max(maxX, pos.x);
+      minX = Math.min(minX, pos.x - halfW);
+      maxX = Math.max(maxX, pos.x + halfW);
       minY = Math.min(minY, pos.y);
       maxY = Math.max(maxY, pos.y);
     }
@@ -224,7 +239,7 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
       minY: minY - PADDING_Y,
       maxY: maxY + PADDING_Y,
     };
-  }, [positions, visibleRoomIds]);
+  }, [positions, visibleRoomIds, halfW]);
 
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY;
@@ -296,33 +311,36 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
             const textColor = isCurrent
               ? '#000'
               : (isVisited ? COLORS.text : '#8fa0bf');
-            const roomName = room.name.length > 12 ? `${room.name.slice(0, 11)}…` : room.name;
+            const displayText = isAdjacentUnvisited
+              ? room.name
+              : `${getIcon(room.archetype)} ${room.name}`;
+            const textX = pos.x - halfW + ROOM_H_PAD / 2;
 
             return (
               <g key={id}>
                 <rect
-                  x={pos.x - 50}
-                  y={pos.y - 20}
-                  width={100}
-                  height={40}
+                  x={pos.x - halfW}
+                  y={pos.y - ROOM_HEIGHT / 2}
+                  width={roomWidth}
+                  height={ROOM_HEIGHT}
                   rx={4}
                   fill={fill}
                   stroke={stroke}
                   strokeWidth={isCurrent ? 2 : 1}
                 />
                 <text
-                  x={pos.x - 42}
+                  x={textX}
                   y={pos.y - 4}
                   fill={textColor}
                   fontSize="10"
                   fontFamily="monospace"
                   opacity={isAdjacentUnvisited ? 0.8 : 1}
                 >
-                  {isAdjacentUnvisited ? roomName : `${getIcon(room.archetype)} ${roomName}`}
+                  {displayText}
                 </text>
                 {isCurrent && (
                   <text
-                    x={pos.x - 42}
+                    x={textX}
                     y={pos.y + 12}
                     fill="#000"
                     fontSize="8"

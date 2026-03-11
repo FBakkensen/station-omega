@@ -354,8 +354,9 @@ export const processAITurn = internalAction({
         const room = stationObj.rooms.get(state.currentRoom);
         if (room) {
           const cacheKey = `room:${state.currentRoom}`;
+          const cinematicSuffix = 'Dramatic directional lighting with deep shadows. Dark atmospheric haze. Cinematic wide-angle, shallow depth of field.';
           const aiImagePrompt = typeof parsedOutput.imagePrompt === 'string'
-            ? parsedOutput.imagePrompt + ' ' + (stationObj.visualStyleGuide ?? '')
+            ? parsedOutput.imagePrompt + ' ' + (stationObj.visualStyleGuide ?? '') + ' ' + cinematicSuffix
             : null;
           const prompt = aiImagePrompt || buildRoomImagePrompt(room, stationObj, state.activeEvents);
 

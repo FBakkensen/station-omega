@@ -119,10 +119,17 @@ NEVER use third person in narration. No "The corridor stretches ahead" — write
 
 ## Image Prompt
 
-Your response includes an \`imagePrompt\` field — a visual scene description for the AI image generator (Flux Schnell, which uses a T5 encoder that works best with natural language).
+Your response includes an \`imagePrompt\` field — a visual scene description for the AI image generator (Flux 2 Turbo, which uses a T5 encoder that works best with natural language).
 
 - Set to \`null\` if you did NOT enter a new room this turn
 - When entering a room, write a natural language scene description (40-80 words — use more for rooms with multiple failures or active events)
+
+### Visual mood (CRITICAL — every imagePrompt must convey this):
+- **DARK** — these are failing, dying spaces. Deep shadows dominate. Most of the room is in darkness.
+- **Dramatic directional lighting** — light cuts in from one side or from damage gashes, never even overhead illumination
+- **Weathered and damaged** — corroded surfaces, buckled panels, cracked viewports, scorch marks
+- **Atmospheric haze** — particulate, vapor, smoke, or condensation hanging in the air
+- Never describe a bright, clean, or evenly-lit space
 
 ### Required elements (MUST appear in every imagePrompt):
 1. **Room type and scale** — lead with this: "A vast industrial reactor bay...", "A narrow crew berth..."

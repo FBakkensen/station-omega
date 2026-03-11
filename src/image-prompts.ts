@@ -53,8 +53,8 @@ export function buildRoomImagePrompt(
 ): string {
   const parts: string[] = [];
 
-  // 1. Subject + scale (~15w) — front-loaded for T5 attention window
-  parts.push(`Interior view of a ${archetypeScale(room.archetype)} ${room.archetype} compartment aboard a space station.`);
+  // 1. Subject + scale (~15w) — front-loaded for T5 attention window, dark framing
+  parts.push(`Dark interior of a ${archetypeScale(room.archetype)} ${room.archetype} compartment aboard a damaged space station.`);
 
   // 2. Exit architecture (~8w)
   if (room.connections.length > 0) {
@@ -89,6 +89,9 @@ export function buildRoomImagePrompt(
   if (station.visualStyleGuide) {
     parts.push(station.visualStyleGuide);
   }
+
+  // 7. Cinematic anchor — ensures dark/dramatic consistency across all room images
+  parts.push('Dramatic directional lighting with deep shadows. Dark atmospheric haze. Cinematic wide-angle, shallow depth of field.');
 
   return parts.join(' ');
 }
@@ -153,13 +156,15 @@ export function buildBriefingImagePrompt(
 ): string {
   const parts: string[] = [];
 
-  parts.push(`Exterior view of space station "${station.stationName}" in deep space.`);
+  parts.push(`Dark silhouette of space station "${station.stationName}" against deep space.`);
   parts.push(`${station.briefing.split('.').slice(0, 2).join('.')}.`);
-  parts.push('Dramatic lighting from a nearby star, visible damage and debris.');
+  parts.push('Harsh directional star-light raking across damaged hull, deep shadows and visible debris.');
 
   if (station.visualStyleGuide) {
     parts.push(station.visualStyleGuide);
   }
+
+  parts.push('Cinematic wide shot, film grain, shallow depth of field.');
 
   return parts.join(' ');
 }

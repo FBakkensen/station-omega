@@ -241,13 +241,14 @@ export const generate = internalAction({
             throw new Error("No briefingVideoPrompt");
           }
           const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
-          const { VIDEO_MODEL_ID, VIDEO_I2V_MODEL_ID, VIDEO_COST_USD, VIDEO_I2V_COST_USD } = await import("../../src/model-catalog.js");
+          const { videoModelConfig } = await import("../../src/model-catalog.js");
           const videoStartMs = Date.now();
           const client = new FalVideoClient(process.env.FAL_API_KEY);
           const result = await client.generateVideo({
             prompt: videoPrompt,
             ...(briefingImageUrl ? { imageUrl: briefingImageUrl } : {}),
           });
+          const { modelId: videoModelId, costUsd: videoCostUsd } = videoModelConfig(!!briefingImageUrl);
 
           const blob = new Blob([result.videoBytes as BlobPart], { type: result.mimeType });
           const storageId = await ctx.storage.store(blob);
@@ -266,11 +267,11 @@ export const generate = internalAction({
               provider: "fal" as const,
               operation: "video_generation" as const,
               stationId,
-              modelId: briefingImageUrl ? VIDEO_I2V_MODEL_ID : VIDEO_MODEL_ID,
+              modelId: videoModelId,
               prompt: videoPrompt,
               status: "success" as const,
               durationMs: Date.now() - videoStartMs,
-              metadata: { cacheKey: "briefing_video", storageId, costUsd: briefingImageUrl ? VIDEO_I2V_COST_USD : VIDEO_COST_USD },
+              metadata: { cacheKey: "briefing_video", storageId, costUsd: videoCostUsd },
             });
           } catch { /* non-fatal */ }
         } catch (err) {

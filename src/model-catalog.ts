@@ -66,3 +66,10 @@ export const VIDEO_COST_USD = 0.048;
 export const VIDEO_I2V_MODEL_ID = 'fal-ai/bytedance/seedance/v1/pro/image-to-video';
 /** FAL SeedDance Pro image-to-video: ~$0.12 per video (480p, 5s). */
 export const VIDEO_I2V_COST_USD = 0.12;
+
+/** Select video model ID and cost based on whether an image is provided for i2v. */
+export function videoModelConfig(hasImage: boolean): { modelId: string; costUsd: number } {
+  return hasImage
+    ? { modelId: VIDEO_I2V_MODEL_ID, costUsd: VIDEO_I2V_COST_USD }
+    : { modelId: VIDEO_MODEL_ID, costUsd: VIDEO_COST_USD };
+}

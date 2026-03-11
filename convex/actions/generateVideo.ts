@@ -3,7 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { VIDEO_COST_USD, VIDEO_I2V_COST_USD } from "../../src/model-catalog.js";
+import { videoModelConfig } from "../../src/model-catalog.js";
 
 /**
  * Generate and cache an AI briefing video for a station.
@@ -55,9 +55,9 @@ export const generate = internalAction({
 
       // Generate video
       const { FalVideoClient } = await import("../../src/io/fal-video-client.js");
-      const { VIDEO_MODEL_ID, VIDEO_I2V_MODEL_ID } = await import("../../src/model-catalog.js");
       const client = new FalVideoClient(apiKey);
       const result = await client.generateVideo({ prompt, imageUrl: args.imageUrl });
+      const { modelId: videoModelId, costUsd: videoCostUsd } = videoModelConfig(!!args.imageUrl);
 
       // Store in Convex file storage
       const blob = new Blob([result.videoBytes as BlobPart], { type: result.mimeType });
@@ -79,11 +79,11 @@ export const generate = internalAction({
           provider: "fal" as const,
           operation: "video_generation" as const,
           stationId,
-          modelId: args.imageUrl ? VIDEO_I2V_MODEL_ID : VIDEO_MODEL_ID,
+          modelId: videoModelId,
           prompt,
           status: "success" as const,
           durationMs: Date.now() - startMs,
-          metadata: { cacheKey, category, storageId, costUsd: args.imageUrl ? VIDEO_I2V_COST_USD : VIDEO_COST_USD },
+          metadata: { cacheKey, category, storageId, costUsd: videoCostUsd },
         });
       } catch { /* non-fatal */ }
     } catch (err) {

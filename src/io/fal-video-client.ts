@@ -41,22 +41,10 @@ export class FalVideoClient implements VideoClient {
     const modelId = isI2V ? VIDEO_I2V_MODEL_ID : VIDEO_MODEL_ID;
     const queueUrl = `https://queue.fal.run/${modelId}`;
 
+    const common = { prompt: request.prompt, duration: '5', aspect_ratio: '16:9', resolution: '480p' };
     const body = isI2V
-      ? {
-          image_url: request.imageUrl,
-          prompt: request.prompt,
-          duration: '5',
-          aspect_ratio: '16:9',
-          resolution: '480p',
-          camera_fixed: true,
-          seed: 42,
-        }
-      : {
-          prompt: request.prompt,
-          duration: '5',
-          aspect_ratio: '16:9',
-          resolution: '480p',
-        };
+      ? { ...common, image_url: request.imageUrl, camera_fixed: true, seed: 42 }
+      : common;
 
     // Submit to queue
     const submitResponse = await this.fetchFn(queueUrl, {

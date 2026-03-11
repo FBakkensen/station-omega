@@ -5,7 +5,7 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
-import { buildRoomImagePrompt, buildNPCImagePrompt, buildItemImagePrompt } from "../../src/image-prompts.js";
+import { buildRoomImagePrompt, buildNPCImagePrompt, buildItemImagePrompt, CINEMATIC_SUFFIX } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
@@ -354,9 +354,8 @@ export const processAITurn = internalAction({
         const room = stationObj.rooms.get(state.currentRoom);
         if (room) {
           const cacheKey = `room:${state.currentRoom}`;
-          const cinematicSuffix = 'Dramatic directional lighting with deep shadows. Dark atmospheric haze. Cinematic wide-angle, shallow depth of field.';
           const aiImagePrompt = typeof parsedOutput.imagePrompt === 'string'
-            ? parsedOutput.imagePrompt + ' ' + (stationObj.visualStyleGuide ?? '') + ' ' + cinematicSuffix
+            ? parsedOutput.imagePrompt + ' ' + (stationObj.visualStyleGuide ?? '') + ' ' + CINEMATIC_SUFFIX
             : null;
           const prompt = aiImagePrompt || buildRoomImagePrompt(room, stationObj, state.activeEvents);
 

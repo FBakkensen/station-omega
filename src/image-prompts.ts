@@ -46,6 +46,8 @@ function truncateAtSentence(text: string, maxLen: number): string {
   return '';
 }
 
+export const CINEMATIC_SUFFIX = 'Dramatic directional lighting with deep shadows. Dark atmospheric haze. Cinematic wide-angle, shallow depth of field.';
+
 export function buildRoomImagePrompt(
   room: Room,
   station: GeneratedStation,
@@ -91,7 +93,7 @@ export function buildRoomImagePrompt(
   }
 
   // 7. Cinematic anchor — ensures dark/dramatic consistency across all room images
-  parts.push('Dramatic directional lighting with deep shadows. Dark atmospheric haze. Cinematic wide-angle, shallow depth of field.');
+  parts.push(CINEMATIC_SUFFIX);
 
   return parts.join(' ');
 }

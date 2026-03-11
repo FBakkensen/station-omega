@@ -117,7 +117,7 @@ export const generate = internalAction({
           prompt,
           status: "error" as const,
           error: message,
-          durationMs: 0,
+          durationMs: Date.now() - startMs,
           metadata: { cacheKey, category },
         });
       } catch { /* non-fatal */ }

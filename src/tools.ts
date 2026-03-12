@@ -13,7 +13,8 @@ import type {
 import { getProficiencyModifier } from './character.js';
 import { CRAFT_RECIPES, computeActionMinutes } from './data.js';
 import { computeEnvironment } from './environment.js';
-import { advanceCascadeCountdowns } from './events.js';
+import { advanceCascadeCountdowns, resolveHazardsByRepair, resolveHazardsByAction, resolveHazardsByItem } from './events.js';
+import { randInt } from './generation/random-utils.js';
 import {
     formatObjectiveUpdate,
     getActiveObjectiveStep,
@@ -22,10 +23,6 @@ import {
 } from './objectives.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function randInt(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
 
 function getAdjacentRooms(state: GameState, station: GeneratedStation): string[] {
     const room = station.rooms.get(state.currentRoom);
@@ -542,24 +539,30 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             }
             state.metrics.itemsUsed.push(foundId);
 
+            // Check if using this item resolves a hazard in the current room
+            const itemHazardsResolved = resolveHazardsByItem(state, state.currentRoom, foundId);
+            const itemHazardNames = itemHazardsResolved.length > 0
+                ? itemHazardsResolved.map(h => h.type.replace(/_/g, ' '))
+                : undefined;
+
             switch (item.effect.type) {
                 case 'heal': {
                     const healAmount = build.id === 'medic' ? item.effect.value * 2 : item.effect.value;
                     const healed = Math.min(healAmount, state.maxHp - state.hp);
                     state.hp += healed;
                     state.metrics.totalDamageHealed += healed;
-                    const healResultObj = { success: true, item_name: item.name, effect_type: 'heal', healed, player_hp: state.hp, player_maxHp: state.maxHp };
+                    const healResultObj = { success: true, item_name: item.name, effect_type: 'heal', healed, player_hp: state.hp, player_maxHp: state.maxHp, hazards_resolved: itemHazardNames };
                     detectMoralChoice('use_item', { item: foundId } as Record<string, unknown>, healResultObj, state, station);
                     return JSON.stringify(healResultObj);
                 }
                 case 'tool':
-                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'tool', reusable: true, description: item.effect.description });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: 'tool', reusable: true, description: item.effect.description, hazards_resolved: itemHazardNames });
                 case 'material':
                 case 'component':
                 case 'chemical':
-                    return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type, note: 'Material consumed. Primarily used for repairs and crafting.' });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type, note: 'Material consumed. Primarily used for repairs and crafting.', hazards_resolved: itemHazardNames });
                 default:
-                    return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type });
+                    return JSON.stringify({ success: true, item_name: item.name, effect_type: item.effect.type, hazards_resolved: itemHazardNames });
             }
         },
     });
@@ -658,10 +661,17 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             }
 
             // Add room modifier on success (mechanical flag only)
+            let hazardsClearedNames: string[] | undefined;
             if (outcome === 'critical_success' || outcome === 'success') {
                 const room = station.rooms.get(state.currentRoom);
                 if (room) {
                     room.roomModifiers.push(`creative_action_success:${String(state.turnCount)}`);
+                }
+
+                // Resolve hazards matched by action description tags
+                const resolvedHazards = resolveHazardsByAction(state, state.currentRoom, args.action, false);
+                if (resolvedHazards.length > 0) {
+                    hazardsClearedNames = resolvedHazards.map(h => h.type.replace(/_/g, ' '));
                 }
             }
 
@@ -676,6 +686,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 difficulty_used: effectiveDifficulty,
                 difficulty_clamped: clamped.adjusted ? { from: difficulty, to: effectiveDifficulty } : undefined,
                 damage_dealt_to_player: damageDealt > 0 ? damageDealt : undefined,
+                hazards_resolved: hazardsClearedNames,
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
                 game_over: state.gameOver || undefined,
@@ -840,10 +851,16 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 failure.challengeState = 'stabilized';
                 failure.minutesUntilCascade *= 2;
                 failure.status = 'degraded';
+
+                // Stabilize matching hazards (downgrade severity, don't fully clear)
+                const resolvedHazards = resolveHazardsByAction(state, state.currentRoom, args.method, true);
+                const hazardsClearedNames = resolvedHazards.map(h => h.type.replace(/_/g, ' '));
+
                 return JSON.stringify({
                     action_minutes: minutes,
                     success: true, system_id: failure.systemId, method: args.method,
                     roll, target, new_cascade_minutes: failure.minutesUntilCascade,
+                    hazards_mitigated: hazardsClearedNames.length > 0 ? hazardsClearedNames : undefined,
                 });
             }
 
@@ -918,10 +935,16 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 failure.status = 'repaired';
                 state.repairedSystems.add(`${failure.systemId}:${state.currentRoom}`);
                 state.metrics.systemsRepaired++;
+
+                // Resolve matching hazards in this room
+                const resolvedHazards = resolveHazardsByRepair(state, state.currentRoom, failure.systemId);
+                const hazardsClearedNames = resolvedHazards.map(h => h.type.replace(/_/g, ' '));
+
                 const objectiveProgress = buildObjectiveProgressPayload(state, station);
                 const repairResultObj = {
                     action_minutes: minutes,
                     success: true, outcome, system_id: failure.systemId, roll, target,
+                    hazards_resolved: hazardsClearedNames.length > 0 ? hazardsClearedNames : undefined,
                     inventory: inventoryList(state, station),
                     ...objectiveProgress,
                 };
@@ -1026,9 +1049,15 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 state.metrics.systemsRepaired++;
                 state.metrics.improvizedSolutions++;
                 state.improvizedSolutions++;
+
+                // Resolve matching hazards
+                const resolvedHazards = resolveHazardsByRepair(state, state.currentRoom, failure.systemId);
+                const hazardsClearedNames = resolvedHazards.map(h => h.type.replace(/_/g, ' '));
+
                 return JSON.stringify({
                     success: true, system_id: failure.systemId, approach: args.approach,
                     roll, target, improvised: true,
+                    hazards_resolved: hazardsClearedNames.length > 0 ? hazardsClearedNames : undefined,
                     inventory: inventoryList(state, station),
                 });
             }
@@ -1200,7 +1229,9 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
             const minutes = computeActionMinutes('check_environment', state, state.activeEvents, room);
             advanceTime(minutes);
 
-            const env = computeEnvironment(room, state.activeEvents);
+            // Only use events localized to this room (or global/legacy events)
+            const roomEvents = state.activeEvents.filter(e => !e.roomId || e.roomId === state.currentRoom);
+            const env = computeEnvironment(room, roomEvents);
             const failures = room.systemFailures.filter(f => f.challengeState !== 'resolved');
 
             // Additional derived physics for the AI (beyond EnvironmentSnapshot)

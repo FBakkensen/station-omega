@@ -8,7 +8,8 @@ import type {
   SystemFailure,
   SystemId,
 } from './types.js';
-import { computeEnvironment, EnvironmentTracker } from './environment.js';
+import { computeEnvironment, EnvironmentTracker, tickEnvironmentDamage } from './environment.js';
+import type { EnvironmentSnapshot } from './environment.js';
 import { createTestGameContext } from '../test/fixtures/factories.js';
 
 function fixtureRoom(roomId: string): Room {
@@ -175,6 +176,16 @@ describe('environment computation contracts', () => {
     expect(supply).toEqual(baseline);
   });
 
+  it('[S] follows standard tracker update flow with fire_outbreak modifying temperature and oxygen', () => {
+    const room = fixtureRoom('room_1');
+
+    const baseline = computeEnvironment(room, []);
+    const withFire = computeEnvironment(room, [makeEvent('fire_outbreak')]);
+
+    expect(withFire.temperatureC).toBe(baseline.temperatureC + 12);
+    expect(withFire.oxygenPct).toBe(Math.max(14, baseline.oxygenPct - 3));
+  });
+
   it('[S] follows standard tracker update flow with stable then falling and rising trend transitions', () => {
     const tracker = new EnvironmentTracker();
     const baselineRoom = fixtureRoom('room_1');
@@ -194,5 +205,149 @@ describe('environment computation contracts', () => {
     expect(third.trends.oxygenPct).toBe('rising');
     expect(third.trends.co2Ppm).toBe('falling');
     expect(tracker.current()).toEqual(third);
+  });
+});
+
+// ─── Environment Damage Tick Tests ──────────────────────────────────────────
+
+function nominalSnapshot(overrides: Partial<EnvironmentSnapshot> = {}): EnvironmentSnapshot {
+  return {
+    oxygenPct: 21,
+    co2Ppm: 400,
+    pressureKpa: 101,
+    temperatureC: 22,
+    radiationMsv: 0.1,
+    structuralPct: 98,
+    gravityG: 1.0,
+    powerStatus: 'nominal',
+    ppO2: 21.2,
+    hypoxiaRisk: 'nominal',
+    activeFailureCount: 0,
+    ...overrides,
+  };
+}
+
+describe('tickEnvironmentDamage threshold contracts', () => {
+  it('[Z] deals zero damage when all environment metrics are nominal', () => {
+    const { context } = createTestGameContext();
+    const snapshot = nominalSnapshot();
+
+    const result = tickEnvironmentDamage(context.state, snapshot, 5);
+
+    expect(result.hpDamage).toBe(0);
+    expect(result.suitDamage).toBe(0);
+    expect(result.oxygenDrain).toBe(0);
+    expect(result.messages).toHaveLength(0);
+    expect(context.state.hp).toBe(100);
+  });
+
+  it('[O] applies a single warning-level ppO2 (12-16 kPa) oxygen drain without HP damage', () => {
+    const { context } = createTestGameContext();
+    const snapshot = nominalSnapshot({ ppO2: 14.5, hypoxiaRisk: 'warning' });
+
+    const result = tickEnvironmentDamage(context.state, snapshot, 3);
+
+    expect(result.oxygenDrain).toBe(3);
+    expect(result.hpDamage).toBe(0);
+    expect(context.state.oxygen).toBe(97);
+  });
+
+  it('[M] combines multiple hazards: hypoxia, decompression, and extreme temperature damage in one tick', () => {
+    const { context } = createTestGameContext();
+    context.state.suitIntegrity = 0;
+    const snapshot = nominalSnapshot({
+      ppO2: 10,
+      hypoxiaRisk: 'critical',
+      pressureKpa: 65,
+      temperatureC: 48,
+    });
+
+    const result = tickEnvironmentDamage(context.state, snapshot, 2);
+
+    // ppO2<12 + suit=0: 2*2=4 HP + 1*2=2 O2
+    // pressure<70 + suit=0: 3*2=6 HP
+    // temp>=45: 1*2=2 HP + 1*2=2 suit
+    expect(result.oxygenDrain).toBe(2);
+    expect(result.hpDamage).toBe(4 + 6 + 2);
+    expect(result.suitDamage).toBe(2);
+    expect(result.messages.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('[B] applies correct pressure rates at the 70 kPa and 85 kPa boundaries', () => {
+    const { context: ctx1 } = createTestGameContext();
+    // Just below 85 kPa with suit — 1 suit/min
+    const result85 = tickEnvironmentDamage(ctx1.state, nominalSnapshot({ pressureKpa: 84 }), 2);
+    expect(result85.suitDamage).toBe(2);
+    expect(result85.hpDamage).toBe(0);
+
+    const { context: ctx2 } = createTestGameContext();
+    // Just below 70 kPa with suit — 2 suit/min
+    const result70 = tickEnvironmentDamage(ctx2.state, nominalSnapshot({ pressureKpa: 69 }), 2);
+    expect(result70.suitDamage).toBe(4);
+    expect(result70.hpDamage).toBe(0);
+
+    // Below 70 kPa with suit=0 — 3 HP/min
+    const { context: ctx3 } = createTestGameContext();
+    ctx3.state.suitIntegrity = 0;
+    const resultBreach = tickEnvironmentDamage(ctx3.state, nominalSnapshot({ pressureKpa: 65 }), 2);
+    expect(resultBreach.hpDamage).toBe(6);
+  });
+
+  it('[I] returns EnvironmentDamageResult with required fields and sets game over on lethal damage', () => {
+    const { context } = createTestGameContext();
+    context.state.hp = 3;
+    context.state.suitIntegrity = 0;
+    const snapshot = nominalSnapshot({ pressureKpa: 60 });
+
+    const result = tickEnvironmentDamage(context.state, snapshot, 2);
+
+    expect(result).toHaveProperty('hpDamage');
+    expect(result).toHaveProperty('suitDamage');
+    expect(result).toHaveProperty('oxygenDrain');
+    expect(result).toHaveProperty('messages');
+    expect(context.state.gameOver).toBe(true);
+    expect(context.state.hp).toBe(0);
+    // With pressure < 70 and suit=0, death cause is suit failure decompression
+    expect(context.state.metrics.deathCause).toBe('Suit failure — decompression');
+  });
+
+  it('[E] triggers suit failure death when suit hits zero under severe decompression', () => {
+    const { context } = createTestGameContext();
+    context.state.suitIntegrity = 1;
+    const snapshot = nominalSnapshot({ pressureKpa: 65 });
+
+    tickEnvironmentDamage(context.state, snapshot, 2);
+
+    // 2 suit/min * 2 = 4, suit goes from 1 to 0
+    expect(context.state.suitIntegrity).toBe(0);
+    expect(context.state.hp).toBe(0);
+    expect(context.state.gameOver).toBe(true);
+    expect(context.state.metrics.deathCause).toBe('Suit failure — decompression');
+  });
+
+  it('[S] handles temperature extremes: suit damage at moderate, HP+suit at extreme', () => {
+    // Hot but not extreme (38-44°C): suit only
+    const { context: ctx1 } = createTestGameContext();
+    const hot = tickEnvironmentDamage(ctx1.state, nominalSnapshot({ temperatureC: 40 }), 3);
+    expect(hot.suitDamage).toBe(3);
+    expect(hot.hpDamage).toBe(0);
+
+    // Extreme hot (≥45°C): suit + HP
+    const { context: ctx2 } = createTestGameContext();
+    const extreme = tickEnvironmentDamage(ctx2.state, nominalSnapshot({ temperatureC: 50 }), 3);
+    expect(extreme.suitDamage).toBe(3);
+    expect(extreme.hpDamage).toBe(3);
+
+    // Cold but not extreme (4-10°C): suit only
+    const { context: ctx3 } = createTestGameContext();
+    const cold = tickEnvironmentDamage(ctx3.state, nominalSnapshot({ temperatureC: 8 }), 3);
+    expect(cold.suitDamage).toBe(3);
+    expect(cold.hpDamage).toBe(0);
+
+    // Extreme cold (≤4°C): suit + HP
+    const { context: ctx4 } = createTestGameContext();
+    const extremeCold = tickEnvironmentDamage(ctx4.state, nominalSnapshot({ temperatureC: 2 }), 3);
+    expect(extremeCold.suitDamage).toBe(3);
+    expect(extremeCold.hpDamage).toBe(3);
   });
 });

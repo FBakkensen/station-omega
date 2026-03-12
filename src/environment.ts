@@ -1,4 +1,4 @@
-import type { Room, ActiveEvent } from './types.js';
+import type { Room, ActiveEvent, GameState } from './types.js';
 
 // ─── Environment Snapshot ────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ export function computeEnvironment(
     let radiationMsv = hasRad ? 2.5 + radFailureCount * 3.5 : 0.1;
     const structuralPct = hasStructural ? 70 - structuralFailureCount * 15 : 98;
 
-    // Active event modifiers
+    // Active event modifiers (only apply events localized to this room or global/legacy events)
     for (const event of activeEvents) {
         switch (event.type) {
             case 'hull_breach':
@@ -73,6 +73,10 @@ export function computeEnvironment(
                 break;
             case 'coolant_leak':
                 temperatureC += 6;
+                break;
+            case 'fire_outbreak':
+                temperatureC += 12;
+                oxygenPct = Math.max(14, oxygenPct - 3);
                 break;
         }
     }
@@ -97,6 +101,130 @@ export function computeEnvironment(
         hypoxiaRisk,
         activeFailureCount: failures.length,
     };
+}
+
+// ─── Environment Damage Tick ─────────────────────────────────────────────────
+
+export interface EnvironmentDamageResult {
+    hpDamage: number;
+    suitDamage: number;
+    oxygenDrain: number;
+    messages: string[];
+}
+
+/**
+ * Apply environment-based damage to the player based on the current-room snapshot.
+ * Called each tick alongside event and cascade processing.
+ *
+ * Threshold rules:
+ * - ppO2 12.0-15.9 kPa: +1 O₂ drain per minute
+ * - ppO2 < 12.0 kPa: +1 O₂ drain + HP loss when suit compromised (1/min at <50%, 2/min at 0%)
+ * - pressure < 85 kPa: 1 suit/min, escalating to 2/min below 70 kPa
+ * - pressure with suit=0: 2 HP/min below 85 kPa, 3 HP/min below 70 kPa
+ * - temp >= 38°C or <= 10°C: 1 suit/min
+ * - temp >= 45°C or <= 4°C: +1 HP/min on top of suit damage
+ */
+export function tickEnvironmentDamage(
+    state: GameState,
+    snapshot: EnvironmentSnapshot,
+    elapsedMinutes: number,
+): EnvironmentDamageResult {
+    let hpDamage = 0;
+    let suitDamage = 0;
+    let oxygenDrain = 0;
+    const messages: string[] = [];
+
+    // ── Hypoxia (ppO2) ──
+    if (snapshot.ppO2 < 16) {
+        // Accelerated oxygen drain in warning/critical zone
+        const o2 = Math.round(1 * elapsedMinutes);
+        oxygenDrain += o2;
+
+        if (snapshot.ppO2 < 12) {
+            // Critical hypoxia: HP loss if suit is compromised
+            if (state.suitIntegrity <= 0) {
+                const hp = Math.round(2 * elapsedMinutes);
+                hpDamage += hp;
+                messages.push(`HYPOXIA CRITICAL: ppO₂ ${snapshot.ppO2.toFixed(1)} kPa, suit breached — ${String(hp)} HP damage over ${String(elapsedMinutes)} min.`);
+            } else if (state.suitIntegrity < 50) {
+                const hp = Math.round(1 * elapsedMinutes);
+                hpDamage += hp;
+                messages.push(`HYPOXIA CRITICAL: ppO₂ ${snapshot.ppO2.toFixed(1)} kPa, suit degraded — ${String(hp)} HP damage over ${String(elapsedMinutes)} min.`);
+            } else {
+                messages.push(`HYPOXIA WARNING: ppO₂ ${snapshot.ppO2.toFixed(1)} kPa — accelerated oxygen drain.`);
+            }
+        } else {
+            messages.push(`HYPOXIA WARNING: ppO₂ ${snapshot.ppO2.toFixed(1)} kPa — oxygen drain accelerating.`);
+        }
+    }
+
+    // ── Decompression (pressure) ──
+    if (snapshot.pressureKpa < 85) {
+        if (state.suitIntegrity <= 0) {
+            // Suit breached: direct HP damage
+            const rate = snapshot.pressureKpa < 70 ? 3 : 2;
+            const hp = Math.round(rate * elapsedMinutes);
+            hpDamage += hp;
+            messages.push(`DECOMPRESSION: ${snapshot.pressureKpa.toFixed(1)} kPa, suit breached — ${String(hp)} HP damage over ${String(elapsedMinutes)} min.`);
+        } else {
+            // Suit absorbs decompression stress
+            const rate = snapshot.pressureKpa < 70 ? 2 : 1;
+            const suit = Math.round(rate * elapsedMinutes);
+            suitDamage += suit;
+            messages.push(`DECOMPRESSION: ${snapshot.pressureKpa.toFixed(1)} kPa — suit integrity -${String(suit)} over ${String(elapsedMinutes)} min.`);
+        }
+    }
+
+    // ── Temperature extremes ──
+    const isHot = snapshot.temperatureC >= 38;
+    const isCold = snapshot.temperatureC <= 10;
+    const isExtremeHot = snapshot.temperatureC >= 45;
+    const isExtremeCold = snapshot.temperatureC <= 4;
+
+    if (isHot || isCold) {
+        const suit = Math.round(1 * elapsedMinutes);
+        suitDamage += suit;
+
+        if (isExtremeHot || isExtremeCold) {
+            const hp = Math.round(1 * elapsedMinutes);
+            hpDamage += hp;
+            const label = isExtremeHot ? 'EXTREME HEAT' : 'EXTREME COLD';
+            messages.push(`${label}: ${String(Math.round(snapshot.temperatureC))}°C — ${String(hp)} HP, suit -${String(suit)} over ${String(elapsedMinutes)} min.`);
+        } else {
+            const label = isHot ? 'HIGH TEMP' : 'LOW TEMP';
+            messages.push(`${label}: ${String(Math.round(snapshot.temperatureC))}°C — suit integrity -${String(suit)} over ${String(elapsedMinutes)} min.`);
+        }
+    }
+
+    // Apply damage to state
+    if (hpDamage > 0) {
+        state.hp = Math.max(0, state.hp - hpDamage);
+        state.metrics.totalDamageTaken += hpDamage;
+    }
+    if (suitDamage > 0) {
+        state.suitIntegrity = Math.max(0, state.suitIntegrity - suitDamage);
+    }
+    if (oxygenDrain > 0) {
+        state.oxygen = Math.max(0, state.oxygen - oxygenDrain);
+    }
+
+    // Check death conditions
+    if (state.hp <= 0) {
+        state.gameOver = true;
+        state.metrics.deathCause = 'Environmental exposure';
+    }
+    if (state.oxygen <= 0) {
+        state.gameOver = true;
+        state.metrics.deathCause = 'Asphyxiation — oxygen depleted';
+    }
+    if (state.suitIntegrity <= 0 && snapshot.pressureKpa < 70) {
+        state.metrics.totalDamageTaken += state.hp;
+        state.hp = 0;
+        state.gameOver = true;
+        state.metrics.deathCause = 'Suit failure — decompression';
+    }
+
+    return { hpDamage, suitDamage, oxygenDrain, messages };
 }
 
 // ─── Environment Tracker ─────────────────────────────────────────────────────

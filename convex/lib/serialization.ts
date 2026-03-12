@@ -29,6 +29,7 @@ export interface SerializedStation {
   mapLayout: SerializedMapLayout;
   visualStyleGuide?: string;
   briefingVideoPrompt?: string;
+  scenario?: { theme: string; centralTension: string };
 }
 
 interface SerializedMapLayout {
@@ -70,6 +71,7 @@ export function serializeStation(station: GeneratedStation): SerializedStation {
     mapLayout,
     visualStyleGuide: station.visualStyleGuide,
     briefingVideoPrompt: station.briefingVideoPrompt,
+    scenario: station.scenario,
   };
 }
 
@@ -101,6 +103,7 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
     visualStyleGuide: data.visualStyleGuide ?? (data as any).visualStyleSeed as string | undefined,
     briefingVideoPrompt: data.briefingVideoPrompt,
+    scenario: data.scenario,
   };
 }
 

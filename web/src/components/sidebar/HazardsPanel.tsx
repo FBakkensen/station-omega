@@ -4,6 +4,8 @@ interface ActiveEvent {
   type: string;
   minutesRemaining: number;
   effect: string;
+  roomId?: string;
+  severity?: string;
 }
 
 interface HazardsPanelProps {
@@ -20,10 +22,11 @@ export function HazardsPanel({ events }: HazardsPanelProps) {
       <div className="mt-2 space-y-2">
         {events.map((e, i) => {
           const label = e.type.replace(/_/g, ' ').toUpperCase();
+          const location = e.roomId ? ` [${e.roomId}]` : '';
           return (
             <div key={i}>
               <div className="flex items-center justify-between text-xs">
-                <span style={{ color: COLORS.hpLow }}>{label}</span>
+                <span style={{ color: COLORS.hpLow }}>{label}{location}</span>
                 <span style={{ color: COLORS.hpMid }}>{e.minutesRemaining}m</span>
               </div>
               <p className="text-omega-dim text-xs mt-0.5">{e.effect}</p>

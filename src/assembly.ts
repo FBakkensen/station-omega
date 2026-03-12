@@ -122,5 +122,6 @@ export function assembleStation(
         mapLayout,
         visualStyleGuide: creative.visualStyleGuide,
         briefingVideoPrompt: creative.briefingVideoPrompt,
+        scenario: skeleton.scenario,
     };
 }

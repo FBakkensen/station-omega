@@ -285,6 +285,8 @@ export interface GeneratedStation {
     mapLayout: MapLayout;
     visualStyleGuide?: string;
     briefingVideoPrompt?: string;
+    /** Runtime disaster context from generation. */
+    scenario?: { theme: string; centralTension: string };
 }
 
 // ─── Moral Choices ──────────────────────────────────────────────────────────
@@ -310,7 +312,10 @@ export type ActionOutcome = 'critical_success' | 'success' | 'partial_success' |
 
 // ─── Random Events ──────────────────────────────────────────────────────────
 
-export type EventType = 'hull_breach' | 'power_failure' | 'distress_signal' | 'radiation_spike' | 'supply_cache' | 'cascade_failure' | 'atmosphere_alarm' | 'coolant_leak' | 'structural_alert';
+export type EventType = 'hull_breach' | 'power_failure' | 'distress_signal' | 'radiation_spike' | 'supply_cache' | 'cascade_failure' | 'atmosphere_alarm' | 'coolant_leak' | 'structural_alert' | 'fire_outbreak';
+
+/** Hazard severity for localized persistent hazards. */
+export type HazardSeverity = 'minor' | 'major' | 'critical';
 
 export interface ActiveEvent {
     type: EventType;
@@ -318,6 +323,12 @@ export interface ActiveEvent {
     minutesRemaining: number;
     effect: string;
     resolutionHint: string;
+    /** Room where this hazard is localized. Undefined for legacy/global events. */
+    roomId?: string;
+    /** Source system failure that spawned this hazard, if any. */
+    sourceSystemId?: SystemId;
+    /** Severity of the hazard for resolution and escalation logic. */
+    severity?: HazardSeverity;
 }
 
 // ─── Run Metrics & Scoring ──────────────────────────────────────────────────

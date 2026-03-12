@@ -2,6 +2,7 @@ import type { ActiveEvent, GameState, GeneratedStation, SystemFailure } from './
 import { getEventContext } from './events.js';
 import { computeEnvironment, type EnvironmentSnapshot } from './environment.js';
 import { getActiveObjectiveStep } from './objectives.js';
+import { buildStationPressureSnapshot, buildDisasterContext } from './hazard-director.js';
 
 function describeObjectivePressure(
     state: GameState,
@@ -94,6 +95,13 @@ export function buildTurnContext(state: GameState, station: GeneratedStation, me
     const mins = state.missionElapsedMinutes % 60;
     parts.push(`MISSION ELAPSED TIME: T+${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`);
 
+    // Disaster context from hazard director
+    const snapshot = buildStationPressureSnapshot(state, station);
+    const disasterCtx = buildDisasterContext(snapshot);
+    if (disasterCtx) {
+        parts.push(disasterCtx);
+    }
+
     const objectivePressure = describeObjectivePressure(state, station);
     if (objectivePressure) {
         parts.push(objectivePressure);
@@ -142,7 +150,9 @@ export function buildTurnContext(state: GameState, station: GeneratedStation, me
             parts.push(failurePressure);
         }
 
-        const env = computeEnvironment(currentRoom, state.activeEvents);
+        // Only use events localized to the current room (or global/legacy events)
+        const roomEvents = state.activeEvents.filter(e => !e.roomId || e.roomId === state.currentRoom);
+        const env = computeEnvironment(currentRoom, roomEvents);
         parts.push(
             `ENVIRONMENT: O₂ ${env.oxygenPct.toFixed(1)}% | CO₂ ${String(Math.round(env.co2Ppm))}ppm | ` +
             `Pressure ${env.pressureKpa.toFixed(1)}kPa | Temp ${String(Math.round(env.temperatureC))}°C | ` +
@@ -153,6 +163,20 @@ export function buildTurnContext(state: GameState, station: GeneratedStation, me
         if (bodyPressure) {
             parts.push(bodyPressure);
         }
+    }
+
+    // Local vs off-room hazard summary
+    const localHazards = state.activeEvents.filter(e => e.roomId === state.currentRoom);
+    const offRoomHazards = state.activeEvents.filter(e => e.roomId && e.roomId !== state.currentRoom);
+    if (localHazards.length > 0 || offRoomHazards.length > 0) {
+        const hazardLines: string[] = [];
+        if (localHazards.length > 0) {
+            hazardLines.push(`LOCAL HAZARDS (harming you now): ${localHazards.map(h => `${h.type.replace(/_/g, ' ')} [${h.severity ?? 'unknown'}]`).join(', ')}`);
+        }
+        if (offRoomHazards.length > 0) {
+            hazardLines.push(`OFF-ROOM HAZARDS (draining station resources): ${offRoomHazards.map(h => `${h.type.replace(/_/g, ' ')} in ${h.roomId ?? 'unknown'}`).join(', ')}`);
+        }
+        parts.push(hazardLines.join('\n'));
     }
 
     if (mechanicalEvents && mechanicalEvents.length > 0) {

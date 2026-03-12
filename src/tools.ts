@@ -14,6 +14,7 @@ import { getProficiencyModifier } from './character.js';
 import { CRAFT_RECIPES, computeActionMinutes } from './data.js';
 import { computeEnvironment } from './environment.js';
 import { advanceCascadeCountdowns, resolveHazardsByRepair, resolveHazardsByAction, resolveHazardsByItem } from './events.js';
+import { randInt } from './generation/random-utils.js';
 import {
     formatObjectiveUpdate,
     getActiveObjectiveStep,
@@ -22,10 +23,6 @@ import {
 } from './objectives.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function randInt(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
 
 function getAdjacentRooms(state: GameState, station: GeneratedStation): string[] {
     const room = station.rooms.get(state.currentRoom);

@@ -9,6 +9,7 @@
 
 import type { GameState, GeneratedStation, EventType, SystemId } from './types.js';
 import { computeEnvironment, type EnvironmentSnapshot } from './environment.js';
+import { getEventDefinition } from './events.js';
 import { getActiveObjectiveStep } from './objectives.js';
 import { getDisasterFamily, getDisasterFamilyMeta, type DisasterFamilyId } from './generation/scenario-families.js';
 
@@ -225,14 +226,26 @@ export function computeHazardDirectorDecision(
     // Suppress if saturated
     const shouldSpawn = !atCapacity && !tooEarly && !inBreak && Math.random() < spawnProbability;
 
-    // Score candidates
+    // Score candidates — pre-build lookup maps to avoid repeated O(n) scans
     const familyMeta = getDisasterFamilyMeta(snapshot.scenarioTheme ?? '');
     const candidates: HazardCandidate[] = [];
 
+    const activeCountByType = new Map<EventType, number>();
+    const activeCountByRoom = new Map<string, number>();
+    const activeTypeRoomSet = new Set<string>();
+    let hasStructuralAlert = false;
+    for (const e of state.activeEvents) {
+        activeCountByType.set(e.type, (activeCountByType.get(e.type) ?? 0) + 1);
+        if (e.roomId) {
+            activeCountByRoom.set(e.roomId, (activeCountByRoom.get(e.roomId) ?? 0) + 1);
+            activeTypeRoomSet.add(`${e.type}:${e.roomId}`);
+        }
+        if (e.type === 'structural_alert') hasStructuralAlert = true;
+    }
+
     for (const type of SPAWNABLE_HAZARD_TYPES) {
         // Skip types at per-type-per-station limit of 2 active
-        const activeOfType = state.activeEvents.filter(e => e.type === type).length;
-        if (activeOfType >= 2) continue;
+        if ((activeCountByType.get(type) ?? 0) >= 2) continue;
 
         let weight = 1.0;
 
@@ -249,7 +262,7 @@ export function computeHazardDirectorDecision(
         if (phase === 'establishing') weight *= 0.7;
 
         // Find the best room for this hazard
-        const preferredRoom = findPreferredRoom(type, state, station, familyMeta);
+        const preferredRoom = findPreferredRoom(type, state, station, familyMeta, activeCountByRoom, activeTypeRoomSet);
         if (preferredRoom) {
             // Boost if the room has a relevant failed system
             weight *= 1.3;
@@ -262,9 +275,8 @@ export function computeHazardDirectorDecision(
         }
 
         // hull_breach special: boost after structural_alert activity
-        if (type === 'hull_breach') {
-            const hasStructural = state.activeEvents.some(e => e.type === 'structural_alert');
-            if (hasStructural) weight *= 1.5;
+        if (type === 'hull_breach' && hasStructuralAlert) {
+            weight *= 1.5;
         }
 
         candidates.push({
@@ -287,6 +299,8 @@ function findPreferredRoom(
     state: GameState,
     station: GeneratedStation,
     familyMeta: import('./generation/scenario-families.js').DisasterFamilyMeta,
+    activeCountByRoom: Map<string, number>,
+    activeTypeRoomSet: Set<string>,
 ): string | null {
     const roomIds = [...station.rooms.keys()];
     let bestRoom: string | null = null;
@@ -297,11 +311,10 @@ function findPreferredRoom(
         if (!room) continue;
 
         // Don't stack too many hazards in one room
-        const hazardsInRoom = state.activeEvents.filter(e => e.roomId === roomId).length;
-        if (hazardsInRoom >= 2) continue;
+        if ((activeCountByRoom.get(roomId) ?? 0) >= 2) continue;
 
         // Don't put same event type in same room
-        if (state.activeEvents.some(e => e.type === eventType && e.roomId === roomId)) continue;
+        if (activeTypeRoomSet.has(`${eventType}:${roomId}`)) continue;
 
         let score = 1.0;
 
@@ -331,16 +344,8 @@ function findPreferredRoom(
 }
 
 function isSystemRelatedToEvent(systemId: SystemId, eventType: EventType): boolean {
-    const relations: Partial<Record<EventType, SystemId[]>> = {
-        hull_breach: ['pressure_seal', 'structural_integrity'],
-        radiation_spike: ['radiation_shielding'],
-        atmosphere_alarm: ['life_support', 'atmosphere_processor'],
-        coolant_leak: ['coolant_loop', 'thermal_regulator'],
-        structural_alert: ['structural_integrity'],
-        fire_outbreak: ['fire_suppression', 'power_relay', 'coolant_loop', 'thermal_regulator'],
-        power_failure: ['power_relay'],
-    };
-    return relations[eventType]?.includes(systemId) ?? false;
+    const def = getEventDefinition(eventType);
+    return def?.resolvableBySystems.includes(systemId) ?? false;
 }
 
 function findRoomsWithFailedSystems(

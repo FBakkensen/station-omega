@@ -207,9 +207,14 @@ export const EVENT_DEFINITIONS: EventDefinition[] = [
     },
 ];
 
+/** O(1) lookup map for event definitions by type. */
+const EVENT_DEF_MAP = new Map<EventType, EventDefinition>(
+    EVENT_DEFINITIONS.map(d => [d.type, d]),
+);
+
 /** Look up an event definition by type. */
 export function getEventDefinition(type: EventType): EventDefinition | undefined {
-    return EVENT_DEFINITIONS.find(d => d.type === type);
+    return EVENT_DEF_MAP.get(type);
 }
 
 // ─── Event Tracker ──────────────────────────────────────────────────────────
@@ -245,7 +250,7 @@ export class EventTracker {
 
         // Try candidates in order of weight
         for (const candidate of decision.candidates) {
-            const def = EVENT_DEFINITIONS.find(d => d.type === candidate.type);
+            const def = getEventDefinition(candidate.type);
             if (!def) continue;
 
             if (elapsed < def.minElapsedMinutes) continue;
@@ -268,25 +273,12 @@ export class EventTracker {
             // Select this candidate
             this.lastTriggered.set(def.type, elapsed);
 
-            const [minDur, maxDur] = def.durationMinutes;
-            const duration = minDur === maxDur ? minDur
-                : minDur + Math.floor(Math.random() * (maxDur - minDur + 1));
-
-            const hint = def.resolutionHints.length > 0
-                ? def.resolutionHints[Math.floor(Math.random() * def.resolutionHints.length)]
-                : '';
-
             const roomId = candidate.preferredRoomId ?? state.currentRoom;
 
-            return {
-                type: def.type,
-                description: def.effect,
-                minutesRemaining: duration,
-                effect: def.effect,
-                resolutionHint: hint,
+            return buildActiveEvent(def, {
                 roomId: def.persistent ? roomId : undefined,
                 severity: deriveSeverity(def, snapshot.pressurePhase === 'crescendo'),
-            };
+            });
         }
 
         return null;
@@ -314,22 +306,7 @@ export class EventTracker {
 
             if (Math.random() < probability) {
                 this.lastTriggered.set(def.type, elapsed);
-
-                const [minDur, maxDur] = def.durationMinutes;
-                const duration = minDur === maxDur ? minDur
-                    : minDur + Math.floor(Math.random() * (maxDur - minDur + 1));
-
-                const hint = def.resolutionHints.length > 0
-                    ? def.resolutionHints[Math.floor(Math.random() * def.resolutionHints.length)]
-                    : '';
-
-                return {
-                    type: def.type,
-                    description: def.effect,
-                    minutesRemaining: duration,
-                    effect: def.effect,
-                    resolutionHint: hint,
-                };
+                return buildActiveEvent(def);
             }
         }
 
@@ -345,7 +322,7 @@ export class EventTracker {
         const remaining: ActiveEvent[] = [];
 
         for (const event of state.activeEvents) {
-            const def = EVENT_DEFINITIONS.find(d => d.type === event.type);
+            const def = getEventDefinition(event.type);
             if (!def) {
                 remaining.push(event);
                 continue;
@@ -520,7 +497,7 @@ export function resolveHazardsByRepair(
     const remaining: ActiveEvent[] = [];
 
     for (const event of state.activeEvents) {
-        const def = EVENT_DEFINITIONS.find(d => d.type === event.type);
+        const def = getEventDefinition(event.type);
         if (
             def &&
             event.roomId === roomId &&
@@ -551,7 +528,7 @@ export function resolveHazardsByAction(
     const remaining: ActiveEvent[] = [];
 
     for (const event of state.activeEvents) {
-        const def = EVENT_DEFINITIONS.find(d => d.type === event.type);
+        const def = getEventDefinition(event.type);
         if (!def || event.roomId !== roomId) {
             remaining.push(event);
             continue;
@@ -625,6 +602,28 @@ export function resolveHazardsByItem(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+function buildActiveEvent(
+    def: EventDefinition,
+    overrides?: { roomId?: string; severity?: HazardSeverity },
+): ActiveEvent {
+    const [minDur, maxDur] = def.durationMinutes;
+    const duration = minDur === maxDur ? minDur
+        : minDur + Math.floor(Math.random() * (maxDur - minDur + 1));
+
+    const hint = def.resolutionHints.length > 0
+        ? def.resolutionHints[Math.floor(Math.random() * def.resolutionHints.length)]
+        : '';
+
+    return {
+        type: def.type,
+        description: def.effect,
+        minutesRemaining: duration,
+        effect: def.effect,
+        resolutionHint: hint,
+        ...overrides,
+    };
+}
 
 function deriveSeverity(def: EventDefinition, isCrescendo: boolean): HazardSeverity {
     if (isCrescendo) return 'critical';

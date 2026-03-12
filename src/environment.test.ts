@@ -306,6 +306,7 @@ describe('tickEnvironmentDamage threshold contracts', () => {
     expect(result).toHaveProperty('oxygenDrain');
     expect(result).toHaveProperty('messages');
     expect(context.state.gameOver).toBe(true);
+    expect(context.state.hp).toBe(0);
     // With pressure < 70 and suit=0, death cause is suit failure decompression
     expect(context.state.metrics.deathCause).toBe('Suit failure — decompression');
   });
@@ -319,6 +320,7 @@ describe('tickEnvironmentDamage threshold contracts', () => {
 
     // 2 suit/min * 2 = 4, suit goes from 1 to 0
     expect(context.state.suitIntegrity).toBe(0);
+    expect(context.state.hp).toBe(0);
     expect(context.state.gameOver).toBe(true);
     expect(context.state.metrics.deathCause).toBe('Suit failure — decompression');
   });

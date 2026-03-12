@@ -400,9 +400,8 @@ export class EventTracker {
                 }
             }
 
-            // Global drain applies only when the player is NOT in the hazard room.
-            // When in-room, local oxygenDrainPerMinute already covers the impact.
-            if (def.globalOxygenDrainPerMinute > 0 && !isInRoom) {
+            // Global drain always applies: the hazard depletes the whole station's atmosphere.
+            if (def.globalOxygenDrainPerMinute > 0) {
                 const globalDrain = Math.round(def.globalOxygenDrainPerMinute * effectiveMinutes);
                 if (globalDrain > 0) {
                     state.oxygen = Math.max(0, state.oxygen - globalDrain);

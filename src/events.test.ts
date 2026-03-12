@@ -110,7 +110,8 @@ describe('event system contracts', () => {
 
     expect(context.state.hp).toBe(98);
     expect(context.state.suitIntegrity).toBe(99);
-    expect(context.state.oxygen).toBe(99);
+    // hull_breach: global 1 O₂/min × 4 min = 4; atmosphere_alarm: local 0.4 × 3 = 1, global 1 × 3 = 3; total = 8
+    expect(context.state.oxygen).toBe(92);
     expect(context.state.metrics.totalDamageTaken).toBe(2);
     expect(context.state.activeEvents).toHaveLength(1);
     expect(context.state.activeEvents[0]?.type).toBe('hull_breach');
@@ -273,20 +274,19 @@ describe('localized hazard lifecycle contracts', () => {
     expect(context.state.suitIntegrity).toBe(100);
   });
 
-  it('[B] applies local drain but not global drain for in-room hazard', () => {
+  it('[B] applies both local and global drain for in-room hazard', () => {
     const tracker = new EventTracker();
     const { context } = createTestGameContext();
     context.state.currentRoom = 'room_0';
     context.state.activeEvents = [
-      // hull_breach: oxygenDrainPerMinute=1, globalOxygenDrainPerMinute=1
+      // hull_breach: oxygenDrainPerMinute=0, globalOxygenDrainPerMinute=1
       makeEvent('hull_breach', { roomId: 'room_0', minutesRemaining: 10 }),
     ];
 
     tracker.tickActiveEvents(context.state, 4);
 
-    // hull_breach: oxygenDrainPerMinute=0, globalOxygenDrainPerMinute=1 (suppressed when in-room)
-    // No oxygen drain at all when in the hazard room (local is 0, global suppressed)
-    expect(context.state.oxygen).toBe(100);
+    // hull_breach: local O₂ drain=0, global O₂ drain=1/min × 4 min = 4
+    expect(context.state.oxygen).toBe(96);
   });
 
   it('[I] includes roomId and severity in event context output', () => {

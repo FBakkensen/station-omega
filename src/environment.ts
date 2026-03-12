@@ -218,6 +218,8 @@ export function tickEnvironmentDamage(
         state.metrics.deathCause = 'Asphyxiation — oxygen depleted';
     }
     if (state.suitIntegrity <= 0 && snapshot.pressureKpa < 70) {
+        state.metrics.totalDamageTaken += state.hp;
+        state.hp = 0;
         state.gameOver = true;
         state.metrics.deathCause = 'Suit failure — decompression';
     }

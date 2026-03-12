@@ -108,13 +108,27 @@ export const processAITurn = internalAction({
         tracker.lastTriggered.set(k as EventType, cooldownVal);
       }
 
+      const { computeEnvironment, tickEnvironmentDamage } = await import("../../src/environment.js");
+
       const PRE_TURN_MINUTES = 5;
       const preEventCtx = tracker.tickActiveEvents(state, PRE_TURN_MINUTES);
       const preCascadeCtx = tracker.processCascadeEffects(state, stationObj, PRE_TURN_MINUTES);
-      const newEvent = tracker.checkRandomEvent(state);
+
+      // Environment damage tick: apply threshold-based damage from current room
+      const currentRoomForEnv = stationObj.rooms.get(state.currentRoom);
+      if (currentRoomForEnv) {
+        const roomEvents = state.activeEvents.filter(e => !e.roomId || e.roomId === state.currentRoom);
+        const envSnapshot = computeEnvironment(currentRoomForEnv, roomEvents);
+        const envDamage = tickEnvironmentDamage(state, envSnapshot, PRE_TURN_MINUTES);
+        preEventCtx.push(...envDamage.messages);
+      }
+
+      // Director-driven hazard spawning (passes station for state-aware selection)
+      const newEvent = tracker.checkRandomEvent(state, stationObj);
       if (newEvent) {
         state.activeEvents.push(newEvent);
-        preEventCtx.push("NEW EVENT: " + newEvent.type + " — " + newEvent.description);
+        const roomLabel = newEvent.roomId ? ` in ${newEvent.roomId}` : '';
+        preEventCtx.push("NEW EVENT: " + newEvent.type + roomLabel + " — " + newEvent.description);
       }
       const mechanicalEvents = [...preEventCtx, ...preCascadeCtx];
 
@@ -248,12 +262,20 @@ export const processAITurn = internalAction({
         rawJsonLength: rawJson.length,
       });
 
-      // ── Post-turn: apply event damage for action-elapsed time ──
+      // ── Post-turn: apply event damage + environment damage for action-elapsed time ──
       if (gameCtx.turnElapsedMinutes > 0) {
         const postEventCtx = tracker.tickActiveEvents(state, gameCtx.turnElapsedMinutes);
         const postCascadeCtx = tracker.processCascadeEffects(state, stationObj, gameCtx.turnElapsedMinutes);
         void postEventCtx;
         void postCascadeCtx;
+
+        // Post-turn environment damage
+        const postRoom = stationObj.rooms.get(state.currentRoom);
+        if (postRoom) {
+          const postRoomEvents = state.activeEvents.filter(e => !e.roomId || e.roomId === state.currentRoom);
+          const postEnvSnapshot = computeEnvironment(postRoom, postRoomEvents);
+          tickEnvironmentDamage(state, postEnvSnapshot, gameCtx.turnElapsedMinutes);
+        }
       }
 
       // ── Persist state after successful stream ────────────────────────

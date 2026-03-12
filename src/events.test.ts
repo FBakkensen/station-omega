@@ -8,6 +8,9 @@ import {
   EventTracker,
   advanceCascadeCountdowns,
   getEventContext,
+  resolveHazardsByRepair,
+  resolveHazardsByAction,
+  resolveHazardsByItem,
 } from './events.js';
 import { createTestGameContext } from '../test/fixtures/factories.js';
 
@@ -214,5 +217,230 @@ describe('event system contracts', () => {
     expect(appended.challengeState).toBe('detected');
     expect(appended.severity).toBe(3);
     expect(appended.diagnosisHint).toContain('Cascaded from Docking Vestibule');
+  });
+});
+
+// ─── Localized Hazard Tests ─────────────────────────────────────────────────
+
+describe('localized hazard lifecycle contracts', () => {
+  it('[Z] applies zero local damage when hazard is in a different room', () => {
+    const tracker = new EventTracker();
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_1';
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0', minutesRemaining: 5 }),
+    ];
+
+    tracker.tickActiveEvents(context.state, 3);
+
+    // No HP/suit damage — player is not in room_0
+    expect(context.state.hp).toBe(100);
+    expect(context.state.suitIntegrity).toBe(100);
+  });
+
+  it('[O] applies one hazard damage only when player is in the hazard room', () => {
+    const tracker = new EventTracker();
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_0';
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0', minutesRemaining: 10 }),
+    ];
+
+    tracker.tickActiveEvents(context.state, 3);
+
+    // hull_breach: 0.4 HP/min × 3 = round(1.2) = 1, 0.15 suit/min × 3 = round(0.45) = 0
+    expect(context.state.hp).toBe(99);
+    expect(context.state.suitIntegrity).toBe(100);
+  });
+
+  it('[M] applies global oxygen drain for multiple off-room hazards but not local damage', () => {
+    const tracker = new EventTracker();
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_1';
+    context.state.activeEvents = [
+      // hull_breach has globalOxygenDrainPerMinute: 1
+      makeEvent('hull_breach', { roomId: 'room_0', minutesRemaining: 10 }),
+      // atmosphere_alarm has globalOxygenDrainPerMinute: 1
+      makeEvent('atmosphere_alarm', { roomId: 'room_0', minutesRemaining: 10 }),
+    ];
+
+    tracker.tickActiveEvents(context.state, 4);
+
+    // Global drain: 2 events × 1 O₂/min × 4 min = 8
+    expect(context.state.oxygen).toBe(92);
+    // No local damage
+    expect(context.state.hp).toBe(100);
+    expect(context.state.suitIntegrity).toBe(100);
+  });
+
+  it('[B] applies local drain but not global drain for in-room hazard', () => {
+    const tracker = new EventTracker();
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_0';
+    context.state.activeEvents = [
+      // hull_breach: oxygenDrainPerMinute=1, globalOxygenDrainPerMinute=1
+      makeEvent('hull_breach', { roomId: 'room_0', minutesRemaining: 10 }),
+    ];
+
+    tracker.tickActiveEvents(context.state, 4);
+
+    // hull_breach: oxygenDrainPerMinute=0, globalOxygenDrainPerMinute=1 (suppressed when in-room)
+    // No oxygen drain at all when in the hazard room (local is 0, global suppressed)
+    expect(context.state.oxygen).toBe(100);
+  });
+
+  it('[I] includes roomId and severity in event context output', () => {
+    const contextText = getEventContext([
+      makeEvent('hull_breach', {
+        roomId: 'room_0',
+        severity: 'critical',
+        minutesRemaining: 8,
+        effect: 'hull puncture',
+      }),
+    ]);
+
+    expect(contextText).toContain('room_0');
+    expect(contextText).toContain('critical');
+  });
+
+  it('[E] post-cascade failed systems continue dealing hazard damage', () => {
+    const tracker = new EventTracker();
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_0';
+
+    const room = context.station.rooms.get('room_0');
+    if (!room) throw new Error('Expected room_0 fixture');
+    room.systemFailures = [
+      makeFailure('coolant_loop', {
+        challengeState: 'failed',
+        hazardPerMinute: 2,
+        minutesUntilCascade: 0,
+      }),
+    ];
+
+    const output = tracker.processCascadeEffects(context.state, context.station, 3);
+
+    // Failed system still deals hazard damage: 2 HP/min × 3 min = 6
+    expect(context.state.hp).toBe(94);
+    expect(context.state.metrics.totalDamageTaken).toBe(6);
+    expect(output.some((line) => line.includes('HAZARD: coolant loop'))).toBe(true);
+  });
+
+  it('[S] fire_outbreak follows standard damage flow dealing HP, suit, and oxygen damage to room occupant', () => {
+    const tracker = new EventTracker();
+    const { context } = createTestGameContext();
+    context.state.currentRoom = 'room_0';
+    context.state.activeEvents = [
+      makeEvent('fire_outbreak', { roomId: 'room_0', minutesRemaining: 10 }),
+    ];
+
+    tracker.tickActiveEvents(context.state, 2);
+
+    // fire_outbreak: 1 HP/min, 1 suit/min, 2 O₂/min
+    expect(context.state.hp).toBe(98);
+    expect(context.state.suitIntegrity).toBe(98);
+    expect(context.state.oxygen).toBe(96);
+  });
+});
+
+// ─── Hazard Resolution Tests ─────────────────────────────────────────────────
+
+describe('hazard resolution contracts', () => {
+  it('[Z] resolveHazardsByRepair returns empty when no hazards match', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0' }),
+    ];
+
+    const resolved = resolveHazardsByRepair(context.state, 'room_0', 'power_relay');
+
+    expect(resolved).toHaveLength(0);
+    expect(context.state.activeEvents).toHaveLength(1);
+  });
+
+  it('[O] resolveHazardsByRepair clears one matching hazard by system', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0' }),
+      makeEvent('fire_outbreak', { roomId: 'room_0' }),
+    ];
+
+    // pressure_seal resolves hull_breach
+    const resolved = resolveHazardsByRepair(context.state, 'room_0', 'pressure_seal');
+
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.type).toBe('hull_breach');
+    expect(context.state.activeEvents).toHaveLength(1);
+    expect(context.state.activeEvents[0]?.type).toBe('fire_outbreak');
+  });
+
+  it('[M] resolveHazardsByAction matches action text against multiple tags', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0', severity: 'major' }),
+      makeEvent('atmosphere_alarm', { roomId: 'room_0', severity: 'minor' }),
+    ];
+
+    // "seal the vent" matches 'seal' for hull_breach and 'vent' for atmosphere_alarm
+    const resolved = resolveHazardsByAction(context.state, 'room_0', 'seal the vent panels', false);
+
+    expect(resolved).toHaveLength(2);
+    expect(context.state.activeEvents).toHaveLength(0);
+  });
+
+  it('[B] stabilize downgrades severity at boundary from critical to major instead of removing', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0', severity: 'critical' }),
+    ];
+
+    const resolved = resolveHazardsByAction(context.state, 'room_0', 'seal the breach', true);
+
+    // Stabilize doesn't fully resolve critical — it downgrades
+    expect(resolved).toHaveLength(0);
+    expect(context.state.activeEvents).toHaveLength(1);
+    expect(context.state.activeEvents[0]?.severity).toBe('major');
+  });
+
+  it('[I] resolveHazardsByItem maps items to correct hazard types', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0' }),
+      makeEvent('coolant_leak', { roomId: 'room_0' }),
+    ];
+
+    // sealant_patch resolves hull_breach and atmosphere_alarm, not coolant_leak
+    const resolved = resolveHazardsByItem(context.state, 'room_0', 'sealant_patch');
+
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.type).toBe('hull_breach');
+    expect(context.state.activeEvents).toHaveLength(1);
+    expect(context.state.activeEvents[0]?.type).toBe('coolant_leak');
+  });
+
+  it('[E] resolution safely skips hazards in other rooms without invalid removal', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0' }),
+      makeEvent('hull_breach', { roomId: 'room_1' }),
+    ];
+
+    const resolved = resolveHazardsByRepair(context.state, 'room_0', 'pressure_seal');
+
+    expect(resolved).toHaveLength(1);
+    expect(context.state.activeEvents).toHaveLength(1);
+    expect(context.state.activeEvents[0]?.roomId).toBe('room_1');
+  });
+
+  it('[S] stabilize follows standard flow to fully resolve minor severity hazards', () => {
+    const { context } = createTestGameContext();
+    context.state.activeEvents = [
+      makeEvent('hull_breach', { roomId: 'room_0', severity: 'minor' }),
+    ];
+
+    const resolved = resolveHazardsByAction(context.state, 'room_0', 'seal it up', true);
+
+    expect(resolved).toHaveLength(1);
+    expect(context.state.activeEvents).toHaveLength(0);
   });
 });

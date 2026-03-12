@@ -18,7 +18,6 @@ const baseMetrics: RunMetrics = {
   itemsCollected: ['item_0', 'item_1'],
   crewLogsFound: 4,
   creativeActionsAttempted: 2,
-  npcInteractions: 1,
   deathCause: null,
   won: true,
   endingId: null,

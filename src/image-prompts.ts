@@ -100,60 +100,6 @@ export function buildRoomImagePrompt(
 }
 
 
-// ─── NPC Image: Void Portrait ────────────────────────────────────────────────
-
-const DISPOSITION_LIGHTING: Record<string, string> = {
-  neutral: 'Amber side-light, balanced chiaroscuro with half-face in deep shadow',
-  friendly: 'Warm golden front-fill, softer shadows revealing open expression',
-  fearful: 'Harsh red under-lighting, deep angular shadows obscuring half the face',
-};
-
-const DISPOSITION_PARTICLES: Record<string, string> = {
-  neutral: 'Fine particles drifting through the light.',
-  friendly: 'Soft haze catching the warmth of the light.',
-  fearful: 'Faint embers and scattered pinpoints of light.',
-};
-
-const DISPOSITION_BODY: Record<string, string> = {
-  neutral: 'guarded stance, arms at sides',
-  friendly: 'relaxed posture, slight lean forward',
-  fearful: 'tense shoulders, eyes darting',
-};
-
-const DISPOSITION_EXPRESSION: Record<string, string> = {
-  neutral: 'calm, watchful gaze',
-  friendly: 'warm, relieved expression',
-  fearful: 'nervous, wide-eyed stare',
-};
-
-const DEFAULT_NPC_LIGHTING = 'Cool white side-light, stark shadows';
-const DEFAULT_NPC_PARTICLES = 'Fine particles drifting through the light.';
-const DEFAULT_NPC_BODY = 'neutral stance';
-const DEFAULT_NPC_EXPRESSION = 'neutral expression';
-
-export function buildNPCImagePrompt(
-  npc: { name: string; appearance: string; disposition: string },
-): string {
-  const parts: string[] = [];
-
-  const expression = DISPOSITION_EXPRESSION[npc.disposition] ?? DEFAULT_NPC_EXPRESSION;
-  const body = DISPOSITION_BODY[npc.disposition] ?? DEFAULT_NPC_BODY;
-  parts.push(`Dramatic close-up portrait of ${npc.name}, ${npc.appearance}.`);
-  parts.push(`${expression}, ${body}.`);
-
-  const lighting = DISPOSITION_LIGHTING[npc.disposition] ?? DEFAULT_NPC_LIGHTING;
-  parts.push(`${lighting}.`);
-
-  const particles = DISPOSITION_PARTICLES[npc.disposition] ?? DEFAULT_NPC_PARTICLES;
-  parts.push(particles);
-
-  parts.push('Dark background dissolving to black.');
-
-  parts.push('Widescreen 16:9 cinematic portrait, Caravaggio lighting, shallow depth of field, 85mm lens.');
-
-  return parts.join(' ');
-}
-
 export function buildBriefingImagePrompt(
   station: GeneratedStation,
 ): string {

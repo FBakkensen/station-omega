@@ -8,8 +8,6 @@ import type {
     ActionDomain,
     ActionDifficulty,
     ActionOutcome,
-    Disposition,
-    NPC,
     Room,
 } from './types.js';
 import { getProficiencyModifier } from './character.js';
@@ -40,10 +38,6 @@ function getAdjacentRooms(state: GameState, station: GeneratedStation): string[]
         }
     }
     return connections;
-}
-
-function getNPCsInRoom(roomId: string, station: GeneratedStation): NPC[] {
-    return [...station.npcs.values()].filter(npc => npc.roomId === roomId);
 }
 
 function getItemName(itemId: string, station: GeneratedStation): string {
@@ -151,34 +145,6 @@ function detectMoralChoice(
     };
 
     const success = resultObj.success === true || (typeof resultObj.outcome === 'string' && !['failure', 'critical_failure'].includes(resultObj.outcome));
-
-    if (toolName === 'interact_npc') {
-        const approach = args.approach as string;
-        if (success && (approach === 'offer_mercy' || approach === 'negotiate') && !alreadyThisTurn('mercy')) {
-            recordMoralChoiceInternal(state, 'mercy', approach === 'offer_mercy' ? 2 : 1, `${approach} with NPC`);
-        }
-        if (success && approach === 'recruit' && !alreadyThisTurn('mercy')) {
-            recordMoralChoiceInternal(state, 'mercy', 1, 'recruited NPC ally');
-        }
-    }
-
-    if (toolName === 'use_item') {
-        const itemQuery = (args.item ?? '') as string;
-        let foundItem = station.items.get(itemQuery);
-        if (!foundItem) {
-            for (const [, i] of station.items) {
-                if (i.name.toLowerCase() === itemQuery.toLowerCase()) {
-                    foundItem = i;
-                    break;
-                }
-            }
-        }
-        const isHeal = foundItem?.effect.type === 'heal';
-        const hasNpcAlly = state.npcAllies.size > 0;
-        if (isHeal && hasNpcAlly && !alreadyThisTurn('sacrifice')) {
-            recordMoralChoiceInternal(state, 'sacrifice', 2, 'healed NPC ally');
-        }
-    }
 
     if (toolName === 'move_to') {
         const currentRoom = station.rooms.get(state.currentRoom);
@@ -307,12 +273,6 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
                 room_index: `${String([...station.rooms.keys()].indexOf(state.currentRoom) + 1)} of ${String(station.rooms.size)}`,
                 description: room.descriptionSeed,
                 items: availableItems.map(id => ({ id, name: getItemName(id, station) })),
-                npcs_present: getNPCsInRoom(state.currentRoom, station).map(npc => ({
-                    id: npc.id,
-                    name: npc.name,
-                    disposition: npc.disposition,
-                    is_ally: npc.isAlly,
-                })),
                 exits,
                 player_hp: state.hp,
                 player_maxHp: state.maxHp,
@@ -610,7 +570,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         description: 'Resolve a creative player action through dice roll. The AI assesses domain and difficulty; the game engine resolves outcome. Use for any non-standard action (barricading, hacking, improvising, etc.).',
         inputSchema: z.object({
             action: z.string().describe('What the player is attempting'),
-            domain: z.enum(['tech', 'medical', 'social', 'survival', 'science']).describe('The skill domain'),
+            domain: z.enum(['tech', 'medical', 'command', 'survival', 'science']).describe('The skill domain'),
             difficulty: z.enum(['trivial', 'easy', 'moderate', 'hard', 'extreme', 'impossible']).describe('How hard this is'),
             relevant_items: z.array(z.string()).default([]).describe('Item IDs or names of inventory items that help'),
             environmental_factors: z.array(z.string()).default([]).describe('Room features that help'),
@@ -723,133 +683,6 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         },
     });
 
-    const interactNPC = tool({
-        description: 'Interact with an NPC non-violently. Use the npc id from look_around. Only works on NPCs with appropriate behavior flags.',
-        inputSchema: z.object({
-            approach: z.enum(['negotiate', 'intimidate', 'offer_mercy', 'trade', 'ask_info', 'recruit']).describe('Interaction approach'),
-            target_npc: z.string().describe('NPC ID or name'),
-            leverage: z.string().default('').describe('What the player is offering or using as leverage'),
-            tone: z.enum(['aggressive', 'calm', 'desperate', 'commanding', 'empathetic']).describe('Tone of approach'),
-        }),
-        execute: (args: { approach: string; target_npc: string; leverage: string; tone: string }) => {
-            const { state, station, build } = gameCtx;
-            if (state.gameOver) return JSON.stringify({ error: 'The game is over.' });
-
-            const room = station.rooms.get(state.currentRoom);
-            if (room) {
-                const minutes = computeActionMinutes('interact_npc', state, state.activeEvents, room);
-                advanceTime(minutes);
-            }
-
-            // Find NPC by ID or name
-            let npc: NPC | null = null;
-            const npcQuery = args.target_npc.toLowerCase();
-            for (const n of station.npcs.values()) {
-                if (n.roomId === state.currentRoom && (n.id.toLowerCase() === npcQuery || n.name.toLowerCase() === npcQuery)) {
-                    npc = n;
-                    break;
-                }
-            }
-            if (!npc) {
-                const npcsHere = getNPCsInRoom(state.currentRoom, station).map(n => ({ id: n.id, name: n.name, disposition: n.disposition }));
-                return JSON.stringify({ error: `No NPC "${args.target_npc}" is here.`, npcs_in_room: npcsHere });
-            }
-
-            // Check behavior compatibility
-            const approach = args.approach;
-            if (approach === 'negotiate' && !npc.behaviors.has('can_negotiate') && !npc.behaviors.has('is_intelligent')) {
-                return JSON.stringify({ error: `${npc.name} cannot be reasoned with.` });
-            }
-            if (approach === 'trade' && !npc.behaviors.has('can_trade')) {
-                return JSON.stringify({ error: `${npc.name} has nothing to trade.` });
-            }
-            if (approach === 'recruit' && !npc.behaviors.has('can_ally')) {
-                return JSON.stringify({ error: `${npc.name} will not join you.` });
-            }
-
-            // Base chance from disposition
-            const BASE: Record<Disposition, number> = { neutral: 60, friendly: 85, fearful: 75 };
-            let chance = BASE[npc.disposition];
-
-            // Social proficiency
-            const socialMod = getProficiencyModifier(build, 'social');
-            chance += socialMod;
-
-            // Tone matching bonus
-            const toneBonus = getToneBonus(args.tone, approach, npc.disposition);
-            chance += toneBonus;
-
-            // Mercy reputation bonus
-            const mercyBonus = state.moralProfile.tendencies.mercy * 3;
-            chance += Math.min(mercyBonus, 15);
-
-            chance = Math.max(5, Math.min(95, chance));
-            const roll = randInt(1, 100);
-            const success = roll <= chance;
-
-            npc.memory.playerActions.push(`${approach} (${args.tone})`);
-            state.metrics.npcInteractions++;
-
-            if (success) {
-                const prevDisposition = npc.disposition;
-                switch (approach) {
-                    case 'negotiate':
-                    case 'offer_mercy':
-                        npc.disposition = 'neutral';
-                        if (approach === 'offer_mercy') npc.memory.wasSpared = true;
-                        break;
-                    case 'intimidate':
-                        npc.disposition = 'fearful';
-                        break;
-                    case 'recruit':
-                        npc.disposition = 'friendly';
-                        npc.isAlly = true;
-                        state.npcAllies.add(npc.id);
-                        break;
-                    case 'trade':
-                        break;
-                    case 'ask_info':
-                        break;
-                }
-
-                if (npc.disposition !== prevDisposition) {
-                    npc.memory.dispositionHistory.push({
-                        turn: state.turnCount,
-                        from: prevDisposition,
-                        to: npc.disposition,
-                        reason: `Player ${approach} (${args.tone})`,
-                    });
-                }
-
-                const npcResultObj = {
-                    success: true,
-                    approach,
-                    npc_id: npc.id,
-                    npc_name: npc.name,
-                    old_disposition: prevDisposition,
-                    new_disposition: npc.disposition,
-                    roll,
-                    chance,
-                    is_ally: npc.isAlly,
-                };
-                detectMoralChoice('interact_npc', args as Record<string, unknown>, npcResultObj, state, station);
-                return JSON.stringify(npcResultObj);
-            }
-
-            const npcFailResultObj = {
-                success: false,
-                approach,
-                npc_id: npc.id,
-                npc_name: npc.name,
-                disposition: npc.disposition,
-                roll,
-                chance,
-            };
-            detectMoralChoice('interact_npc', args as Record<string, unknown>, npcFailResultObj, state, station);
-            return JSON.stringify(npcFailResultObj);
-        },
-    });
-
     const recordMoralChoice = tool({
         description: 'Record a significant moral choice the player made. Call this when the player spares an enemy, sacrifices resources, ignores a plea for help, or makes any morally significant decision.',
         inputSchema: z.object({
@@ -871,14 +704,6 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         'actions',
         '3-5 contextual creative actions',
         'Action options displayed as interactive UI buttons. Do NOT list them in text.',
-    );
-
-    const suggestInteractions = defineSuggestTool(
-        'Present 3-5 contextual NPC interaction approaches. Call BEFORE interact_npc when player wants to interact but hasn\'t specified an approach. Include tradeoffs when the approach carries social or tactical risk.',
-        'How Do You Approach?',
-        'interactions',
-        '3-5 contextual NPC interaction approaches',
-        'Interaction options displayed as interactive UI buttons. Do NOT list them in text. Write one brief line, then STOP and wait.',
     );
 
     const completeObjective = tool({
@@ -1573,9 +1398,7 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
         check_environment: checkEnvironment,
         suggest_diagnostics: suggestDiagnostics,
         suggest_actions: suggestActions,
-        suggest_interactions: suggestInteractions,
         attempt_action: attemptAction,
-        interact_npc: interactNPC,
         record_moral_choice: recordMoralChoice,
         complete_objective: completeObjective,
     };
@@ -1584,22 +1407,4 @@ export function createGameToolSets(classId: string, gameCtx: GameContext): GameT
     if (crisisAssessment) all['crisis_assessment'] = crisisAssessment;
 
     return { all };
-}
-
-// ─── Tone Matching ──────────────────────────────────────────────────────────
-
-function getToneBonus(tone: string, approach: string, disposition: Disposition): number {
-    // Good matches
-    if (tone === 'empathetic' && approach === 'offer_mercy') return 15;
-    if (tone === 'calm' && approach === 'negotiate') return 10;
-    if (tone === 'commanding' && approach === 'intimidate' && disposition === 'fearful') return 15;
-    if (tone === 'empathetic' && approach === 'recruit') return 10;
-    if (tone === 'calm' && approach === 'trade') return 5;
-
-    // Bad matches
-    if (tone === 'aggressive' && approach === 'offer_mercy') return -10;
-    if (tone === 'desperate' && approach === 'intimidate') return -10;
-    if (tone === 'aggressive' && approach === 'negotiate' && disposition === 'fearful') return -5;
-
-    return 0;
 }

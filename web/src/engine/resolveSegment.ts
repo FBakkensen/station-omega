@@ -5,13 +5,12 @@ import type { GameSegment, DisplaySegment } from './types';
  * Mirrors the shape stored in Convex (serialized — Records, not Maps).
  */
 interface StationData {
-  npcs?: Record<string, { name: string }>;
   crewRoster?: Array<{ name: string; role: string }>;
   arrivalScenario?: { playerCallsign?: string };
 }
 
 /**
- * Resolve a raw GameSegment into a DisplaySegment by looking up NPC and crew names.
+ * Resolve a raw GameSegment into a DisplaySegment by looking up crew names.
  */
 export function resolveSegment(
   seg: GameSegment,
@@ -24,12 +23,6 @@ export function resolveSegment(
   switch (seg.type) {
     case 'narration':
       speakerName = stationData?.arrivalScenario?.playerCallsign ?? null;
-      break;
-    case 'dialogue':
-      if (seg.npcId && stationData?.npcs) {
-        const npc: { name: string } | undefined = stationData.npcs[seg.npcId] as { name: string } | undefined;
-        speakerName = npc?.name ?? seg.npcId;
-      }
       break;
     case 'crew_echo':
       if (seg.crewName && stationData?.crewRoster) {

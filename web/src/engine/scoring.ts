@@ -20,7 +20,6 @@ export interface RunMetrics {
   itemsCollected: string[];
   crewLogsFound: number;
   creativeActionsAttempted: number;
-  npcInteractions: number;
   deathCause: string | null;
   won: boolean;
   endingId: string | null;

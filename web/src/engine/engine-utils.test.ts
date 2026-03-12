@@ -20,7 +20,6 @@ const baseMetrics: RunMetrics = {
   itemsCollected: ['item_0', 'item_1'],
   crewLogsFound: 2,
   creativeActionsAttempted: 1,
-  npcInteractions: 1,
   deathCause: null,
   won: true,
   endingId: null,
@@ -76,12 +75,12 @@ describe('web engine deterministic helpers', () => {
     const segment = resolveSegment(
       { type: 'dialogue', text: '...', npcId: 'npc_unknown', crewName: null },
       1,
-      { npcs: {} },
+      {},
     );
     expect(segment).toMatchObject({
       type: 'dialogue',
       segmentIndex: 1,
-      speakerName: 'npc_unknown',
+      speakerName: null,
     });
   });
 

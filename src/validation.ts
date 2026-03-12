@@ -5,22 +5,17 @@ import { getActiveObjectiveStep } from './objectives.js';
 /** Validate AI output against game rules. Returns issue strings or empty array. */
 export function validateGameResponse(
     response: GameResponse,
-    state: GameState,
+    _state: GameState,
     station: GeneratedStation,
 ): string[] {
     const issues: string[] = [];
 
     for (const seg of response.segments) {
-        // Dialogue must reference a living NPC in the current room
-        if (seg.type === 'dialogue' && seg.npcId) {
-            let npc = station.npcs.get(seg.npcId);
-            if (!npc) {
-                for (const n of station.npcs.values()) {
-                    if (n.name === seg.npcId) { npc = n; break; }
-                }
-            }
-            if (!npc) issues.push(`Unknown NPC ID: ${seg.npcId}`);
-            else if (npc.roomId !== state.currentRoom) issues.push(`NPC not in room: ${seg.npcId}`);
+        if (seg.type === 'dialogue') {
+            issues.push('Dialogue segments are disabled; use narration instead.');
+        }
+        if (seg.npcId) {
+            issues.push(`npcId is no longer supported: ${seg.npcId}`);
         }
         // Crew echo must reference a roster member
         if (seg.type === 'crew_echo' && seg.crewName) {
@@ -101,17 +96,6 @@ export function buildGuardrailFeedback(
         ...issues.map(i => `- ${i}`),
         '',
     ];
-
-    // Valid NPCs in current room
-    const roomNpcs = [...station.npcs.values()]
-        .filter(n => n.roomId === state.currentRoom);
-    if (roomNpcs.length > 0) {
-        parts.push('Valid NPCs in current room (use the "id" value for npcId):');
-        for (const npc of roomNpcs) {
-            parts.push(`- id: "${npc.id}", name: "${npc.name}", disposition: ${npc.disposition}`);
-        }
-        parts.push('');
-    }
 
     // Valid crew roster
     if (station.crewRoster.length > 0) {

@@ -108,13 +108,6 @@ export function buildTurnContext(state: GameState, station: GeneratedStation, me
         parts.push(eventPressure);
     }
 
-    const roomNpcs = [...station.npcs.values()].filter((npc) => npc.roomId === state.currentRoom);
-    for (const npc of roomNpcs) {
-        if (npc.isAlly) {
-            parts.push(`ALLY: ${npc.name} is helping you.`);
-        }
-    }
-
     const { mercy, sacrifice, pragmatic } = state.moralProfile.tendencies;
     if (mercy + sacrifice + pragmatic > 0) {
         parts.push(`MORAL PROFILE: mercy=${String(mercy)}, sacrifice=${String(sacrifice)}, pragmatic=${String(pragmatic)}`);

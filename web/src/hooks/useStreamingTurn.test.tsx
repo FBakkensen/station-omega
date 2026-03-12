@@ -159,7 +159,7 @@ describe('useStreamingTurn', () => {
     const { result } = renderHook(() =>
       useStreamingTurn({
         gameId: 'game_3',
-        stationData: { npcs: { npc_1: { name: 'Kade' } } },
+        stationData: null,
         missionElapsedMinutes: 12,
       }),
     );
@@ -317,7 +317,6 @@ describe('useStreamingTurn', () => {
         gameId: 'game_5',
         stationData: {
           arrivalScenario: { playerCallsign: 'Vector' },
-          npcs: { npc_1: { name: 'Kade' } },
           crewRoster: [{ name: 'Inez', role: 'Medic' }],
         },
         missionElapsedMinutes: 35,
@@ -331,7 +330,7 @@ describe('useStreamingTurn', () => {
     });
     expect(result.current.segments[1]).toMatchObject({
       type: 'dialogue',
-      speakerName: 'Kade',
+      speakerName: null,
       segmentIndex: 1,
     });
     expect(result.current.segments[2]).toMatchObject({

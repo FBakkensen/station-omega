@@ -15,6 +15,8 @@
     "deadcode": "knip",
     "build:web": "bun run --cwd web build",
     "ai-logs": "bun scripts/ai-logs.ts",
+    "cleanup:legacy-games": "bun scripts/purge-legacy-games.ts",
+    "cleanup:legacy-games:apply": "bun scripts/purge-legacy-games.ts --apply",
     "pw": "playwright-cli",
     "pw:snapshot": "bash ./scripts/pw-snapshot.sh",
     "pw:install": "playwright-cli install",

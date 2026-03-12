@@ -3,7 +3,7 @@ import { v } from "convex/values";
 
 export default defineSchema({
   /**
-   * Generated station data (rooms, NPCs, items, objectives, map).
+    * Generated station data (rooms, items, objectives, map).
    * Stored as a single document with v.any() for deeply nested game data.
    * Immutable after generation — per-game mutations go in the games table.
    */
@@ -11,7 +11,7 @@ export default defineSchema({
     stationName: v.string(),
     briefing: v.string(),
     difficulty: v.union(v.literal("normal"), v.literal("hard"), v.literal("nightmare")),
-    /** Full serialized station data (rooms, npcs, items as Records, Sets as Arrays). */
+    /** Full serialized station data (rooms and items as Records, Sets as Arrays). */
     data: v.any(),
   }),
 
@@ -30,8 +30,6 @@ export default defineSchema({
     difficulty: v.union(v.literal("normal"), v.literal("hard"), v.literal("nightmare")),
     /** Serialized GameState (Sets→Arrays, Maps→Records). */
     state: v.any(),
-    /** Per-game NPC overrides (disposition, memory, isAlly changes). */
-    npcOverrides: v.any(),
     /** Per-game room overrides (loot changes, modifier changes). */
     roomOverrides: v.any(),
     /** Per-game objective chain override. */
@@ -80,7 +78,7 @@ export default defineSchema({
       npcId: v.union(v.string(), v.null()),
       crewName: v.union(v.string(), v.null()),
       entityRefs: v.optional(v.array(v.object({
-        type: v.union(v.literal("room"), v.literal("npc"), v.literal("item")),
+        type: v.union(v.literal("room"), v.literal("item")),
         id: v.string(),
       }))),
     }),
@@ -141,7 +139,7 @@ export default defineSchema({
     turnCount: v.number(),
     duration: v.number(),
     date: v.string(),
-  }),
+  }).index("by_game", ["gameId"]),
 
   /**
    * Station generation progress — reactive for loading UI.
@@ -190,7 +188,7 @@ export default defineSchema({
 
   /**
    * Cached AI-generated images.
-   * Room/NPC images are scoped per game (narrative-informed).
+    * Room and item images are scoped per game (narrative-informed).
    * Briefing images are scoped per station (shared across games).
    */
   /**
@@ -230,7 +228,7 @@ export default defineSchema({
     stationId: v.id("stations"),
     /** Game ID for per-game scoping. Undefined for station-scoped images (briefings). */
     gameId: v.optional(v.id("games")),
-    /** Cache key for deduplication (e.g., "room:reactor", "npc:chen", "briefing"). */
+    /** Cache key for deduplication (e.g., "room:reactor", "briefing"). */
     cacheKey: v.string(),
     /** Convex file storage blob ID. */
     storageId: v.id("_storage"),
@@ -239,7 +237,6 @@ export default defineSchema({
     /** Image category for UI rendering. */
     category: v.union(
       v.literal("room_scene"),
-      v.literal("npc_portrait"),
       v.literal("briefing"),
       v.literal("briefing_video"),
       v.literal("item_image"),

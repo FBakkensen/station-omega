@@ -91,8 +91,8 @@ describe('segment validation helpers', () => {
     }
   });
 
-  it('[M] multiple social keywords all trigger social input detection', () => {
-    const socialInputs = [
+  it('[M] multiple dialogue inputs are downgraded regardless of social wording', () => {
+    const dialogueInputs = [
       'talk to the engineer',
       'speak with Ari',
       'ask about the relay',
@@ -101,29 +101,21 @@ describe('segment validation helpers', () => {
       'hello, anyone there?',
       'address the crew',
     ];
-    for (const input of socialInputs) {
-      // social inputs → shouldDowngrade = false (don't downgrade social dialogue)
-      expect(shouldDowngradeDialogue('dialogue', input)).toBe(false);
+    for (const input of dialogueInputs) {
+      expect(shouldDowngradeDialogue('dialogue', input)).toBe(true);
     }
   });
 
-  it('[B] social keyword at word boundary matches but partial word does not', () => {
-    // 'ask' at word boundary matches (social input → no downgrade)
-    expect(shouldDowngradeDialogue('dialogue', 'ask about the relay')).toBe(false);
-    // 'task' contains 'ask' but not at word boundary — should NOT match social → should downgrade
+  it('[B] dialogue downgrade stays true at keyword boundaries and partial-word boundaries alike', () => {
+    expect(shouldDowngradeDialogue('dialogue', 'ask about the relay')).toBe(true);
     expect(shouldDowngradeDialogue('dialogue', 'complete the task')).toBe(true);
-    // 'address' at boundary matches
-    expect(shouldDowngradeDialogue('dialogue', 'address the crew')).toBe(false);
+    expect(shouldDowngradeDialogue('dialogue', 'address the crew')).toBe(true);
   });
 
-  it('[I] shouldDowngradeDialogue returns boolean contract for dialogue vs narration types', () => {
-    // dialogue on non-social turn → downgrade (true)
+  it('[I] shouldDowngradeDialogue returns a stable boolean contract for dialogue vs narration types', () => {
     expect(shouldDowngradeDialogue('dialogue', 'check the panel')).toBe(true);
-    // dialogue on social turn → no downgrade (false)
-    expect(shouldDowngradeDialogue('dialogue', 'talk to the engineer')).toBe(false);
-    // narration on non-social turn → no downgrade (false) — only dialogue is downgraded
+    expect(shouldDowngradeDialogue('dialogue', 'talk to the engineer')).toBe(true);
     expect(shouldDowngradeDialogue('narration', 'check the panel')).toBe(false);
-    // narration on social turn → no downgrade (false)
     expect(shouldDowngradeDialogue('narration', 'talk to the engineer')).toBe(false);
   });
 
@@ -133,10 +125,8 @@ describe('segment validation helpers', () => {
     expect(isValidSegmentType('NARRATION')).toBe(false); // case-sensitive check
   });
 
-  it('[S] dialogue on social turn is not downgraded; narration is never downgraded', () => {
-    // Standard happy path: dialogue + social → keep as dialogue (false = don't downgrade)
-    expect(shouldDowngradeDialogue('dialogue', 'speak with Ari about the plan')).toBe(false);
-    // narration never downgraded regardless of input
+  it('[S] dialogue is always downgraded while narration is never downgraded in standard flow', () => {
+    expect(shouldDowngradeDialogue('dialogue', 'speak with Ari about the plan')).toBe(true);
     expect(shouldDowngradeDialogue('narration', 'repair the relay')).toBe(false);
   });
 });

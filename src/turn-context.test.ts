@@ -61,7 +61,7 @@ describe('buildTurnContext', () => {
     expect(built).toContain('(12 min remaining)');
   });
 
-  it('[M] includes many context signals across events, allies, and degraded status', () => {
+  it('[M] includes many context signals across events and degraded status', () => {
     const { context } = createTestGameContext();
     context.state.currentRoom = 'room_0';
     context.state.activeEvents = [
@@ -81,27 +81,8 @@ describe('buildTurnContext', () => {
     context.state.oxygen = 82;
     context.state.suitIntegrity = 91;
 
-    const primaryNpc = context.station.npcs.get('npc_0');
-    if (!primaryNpc) throw new Error('Expected npc_0 fixture');
-    primaryNpc.isAlly = true;
-    context.station.npcs.set('npc_1', {
-      ...primaryNpc,
-      id: 'npc_1',
-      name: 'Len Marr',
-      behaviors: new Set(primaryNpc.behaviors),
-      memory: {
-        playerActions: [],
-        dispositionHistory: [],
-        wasSpared: false,
-        wasHelped: false,
-        tradeInventory: [],
-      },
-    });
-
     const built = expectContext(buildTurnContext(context.state, context.station));
 
-    expect(built).toContain('ALLY: Ari Voss is helping you.');
-    expect(built).toContain('ALLY: Len Marr is helping you.');
     expect(built).toContain('OBJECTIVE PRESSURE: Diagnose the relay fault in Docking Vestibule.');
     expect(built).toContain('MORAL PROFILE: mercy=2, sacrifice=1, pragmatic=0');
     expect(built).toContain('PLAYER CONDITION: HP 40/100 (40%)');

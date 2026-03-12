@@ -22,7 +22,7 @@ describe('CharacterSelectScreen contracts', () => {
 
     const confirmButton = screen.getByRole('button', { name: 'Select a Class' });
     expect(confirmButton).toBeDisabled();
-    expect(screen.getByText('Select a crew member to view details')).toBeInTheDocument();
+    expect(screen.getByText('Select a specialist profile to view details')).toBeInTheDocument();
   });
 
   it('[O] selects one class and emits one callback with the matching class id', async () => {
@@ -63,7 +63,7 @@ describe('CharacterSelectScreen contracts', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /Flight Surgeon/i }));
-    await user.click(screen.getByRole('button', { name: /Station Commander/i }));
+    await user.click(screen.getByRole('button', { name: /Operations Lead/i }));
     await user.click(screen.getByRole('button', { name: 'Hard' }));
     await user.click(screen.getByRole('button', { name: 'Nightmare' }));
 

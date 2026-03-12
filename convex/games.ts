@@ -31,7 +31,6 @@ export const create = mutation({
       difficulty: args.difficulty,
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       state: args.state,
-      npcOverrides: {},
       roomOverrides: {},
       roomDrops: {},
       isOver: false,
@@ -47,7 +46,6 @@ export const updateAfterTurn = internalMutation({
   args: {
     gameId: v.id("games"),
     state: v.any(),
-    npcOverrides: v.any(),
     roomOverrides: v.any(),
     objectivesOverride: v.optional(v.any()),
     roomDrops: v.optional(v.any()),

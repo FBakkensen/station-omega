@@ -3,7 +3,7 @@ import { getActiveObjectiveStep } from './objectives.js';
 
 function knowledgeLevelGuidance(level: ArrivalScenario['knowledgeLevel']): string {
     switch (level) {
-        case 'familiar': return 'I know this station — its layout, crew, systems. I was crew. I notice what changed.';
+        case 'familiar': return 'I know this station — its layout, former crew, systems. I know enough to notice what changed.';
         case 'partial': return 'I have briefing materials but this is my first time aboard. I know what should be here, not what is.';
         case 'none': return 'I know nothing about this station. No schematics, no crew roster. I figure it out as I go.';
     }
@@ -20,12 +20,6 @@ function formatRoomList(station: GeneratedStation): string {
             });
             return `- **${r.name}** (${r.id}): ${r.archetype}, depth ${String(r.depth)}, connects to [${connNames.join(', ')}]${r.lockedBy ? ` [LOCKED by ${r.lockedBy}]` : ''}`;
         })
-        .join('\n');
-}
-
-function formatNpcList(station: GeneratedStation): string {
-    return [...station.npcs.values()]
-        .map(n => `- **${n.name}** (${n.id}): ${n.disposition}, in room ${n.roomId}. ${n.appearance}`)
         .join('\n');
 }
 
@@ -57,7 +51,7 @@ function buildOutputFormatRules(): string {
 
 Your response is a structured JSON object (enforced by the API schema). Within each segment's \`text\` field, you MUST use markdown formatting — the client renders markdown and plain text looks broken. Follow these rules exactly:
 
-- **Bold** interactive elements on first mention: item names, NPC names, room names, system names. Example: "The **primary coolant loop** is venting into the corridor." / "A **medkit** rests against the wall."
+- **Bold** interactive elements on first mention: item names, room names, system names. Example: "The **primary coolant loop** is venting into the corridor." / "A **medkit** rests against the wall."
 - *Italicize* sensory details, internal sensations, and readings. Example: "*Ambient temperature: 4.2C and dropping.*"
 - Use a crew_echo segment for crew log content. Precede with a narration segment describing the physical medium.
 - Do NOT use headings (#), code blocks, links, or horizontal rules (---). Scene transitions are handled by the segment card system.
@@ -72,7 +66,7 @@ Each segment is rendered as its own visual card. Keep text within a segment comp
 Your response is a JSON object with a \`segments\` array. Each segment has a type and text:
 
 - **narration** — First-person action and observation. Use "I" perspective. Use markdown: **bold** for items/systems/rooms, *italics* for sensory and readings. This is the majority of output. Set \`npcId\` and \`crewName\` to \`null\`.
-- **dialogue** — Direct speech from an NPC. FORBIDDEN unless the player explicitly initiates social interaction (talks to, negotiates with, or addresses an NPC). Set \`npcId\` to the NPC's id. Text is spoken words only (no quotes needed in text). Set \`crewName\` to \`null\`.
+- **dialogue** — Legacy segment type. Do NOT use it. Render any spoken content through narration instead, with \`npcId\` and \`crewName\` set to \`null\`.
 - **thought** — Player's inner voice. First person, concise and analytical — running calculations, assessing risks, dry observations. Show the math: "ppO₂ is 13.1 kPa. I need 16 to think straight. Room volume maybe 50m³. Leak rate at this differential... call it 2 L/s. So 50,000 liters divided by 2 is about 7 hours to vacuum. Except I'll be unconscious in 3. And stupid in 1. So I have an hour." The calculation IS the entertainment. Use for physics reasoning when tool results include specific numbers. Set both \`npcId\` and \`crewName\` to \`null\`.
 - **station_pa** — Automated, bureaucratic, unintentionally darkly humorous. Think HAB computer: technically accurate but emotionally oblivious. "ATMOSPHERE PROCESSOR: ppO₂ at 14.2 kPa. Recommend immediate remediation. Note: this is the third alert this cycle." No exclamation marks. The station reports facts with the urgency of a thermostat. Set both \`npcId\` and \`crewName\` to \`null\`.
 - **crew_echo** — Crew log playback. Engineering documentation: repair notes, system specs, failure analyses. Set \`crewName\` to the exact \`name\` value from the crew roster. Always precede with a narration segment describing the physical medium. Set \`npcId\` to \`null\`.
@@ -80,22 +74,21 @@ Your response is a JSON object with a \`segments\` array. Each segment has a typ
 
 Rules:
 - Narration is first-person action and observation ("I check the seal"); thought is first-person inner calculation ("Okay, 0.3 atm means about 20 minutes"). Both use "I" but serve different purposes. Most responses should include at least one thought segment.
-- dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction. NPCs encountered during exploration or engineering are described through narration, not dialogue.
+- dialogue segments are disabled. Any spoken or quoted material must be narrated through narration segments instead.
 - Each segment should be a self-contained narrative beat.
 - Inner voice is always first person, analytical, and self-aware ("Okay, so the pressure differential is about 0.3 atm. That's... manageable. Barely.", "Note to self: next time someone says 'minor coolant leak,' ask for units.").
 - Station PA is always impersonal and mechanical, with specific readings where available.
-- NEVER put dialogue text in narration segments — if dialogue is warranted, use a dialogue segment with npcId set.
+- If quoted language is important, keep it brief and embed it in narration rather than switching segment types.
 - Every turn must advance or block a technical objective with an explicit reason. If the action doesn't connect to an objective, narrate what I learn and how it relates to station systems.
 
 ## Entity References
 
 Your response segments include an \`entityRefs\` field — an array of up to 3 entity references for inline thumbnail images displayed alongside the segment text.
 
-Each entity ref has a \`type\` ("room", "npc", or "item") and an \`id\` (the entity's internal ID).
+Each entity ref has a \`type\` ("room" or "item") and an \`id\` (the entity's internal ID).
 
 When to include entityRefs:
 - **room** ref when narrating about a room's physical features, environment, or atmosphere (use the room's ID like "reactor_0")
-- **npc** ref when describing or narrating about an NPC's appearance or actions (use the NPC's ID like "enemy_room_1") — this is separate from the dialogue \`npcId\` field
 - **item** ref when narrating about discovering, examining, picking up, or using an item (use the item's ID like "medkit_0")
 - Omit the field for segments without visual entities (most thoughts, PA announcements, diagnostics, crew echoes)
 
@@ -103,7 +96,6 @@ Rules:
 - Maximum 3 entity refs per segment
 - Only reference entities that are being visually described or interacted with in this specific segment
 - Room refs are useful for the first narration segment when entering a new room
-- NPC refs pair naturally with dialogue segments but can also appear in narration segments that describe an NPC
 - Item refs should appear when an item is first discovered or when it's being examined/used
 
 ## Perspective
@@ -174,13 +166,7 @@ ${formatRoomList(station)}
 ## Crew Roster
 <crew_roster>
 ${formatCrewRoster(station)}
-</crew_roster>
-
-# NPCs
-
-<npc_list>
-${formatNpcList(station)}
-</npc_list>`;
+</crew_roster>`;
 }
 
 function buildPlayerAgencyRules(): string {
@@ -318,14 +304,14 @@ Keep each segment compact — no blank lines within a segment. Split distinct be
 I am a **${build.name}** with proficiencies in ${build.proficiencies.join(' and ')}. Lean into my class identity in narration.
 Knowledge level: ${knowledgeLevel} — ${knowledgeLevelGuidance(knowledgeLevel)}
 Use the structured segment types: "thought" for my inner analytical commentary (use frequently — running calculations, risk assessments, dry observations), "station_pa" for announcements, "crew_echo" with crewName for crew logs. Narration is what I see and do; thought is me reasoning about it. Both first person.
-dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction. Do not generate dialogue for NPCs encountered during exploration or engineering.
+Dialogue segments are disabled. Use narration, thought, station_pa, crew_echo, and diagnostic_readout only.
 Favor dry humor and understatement. No purple prose or horror cliches.
 NEVER suggest actions, list options, or use "you can/could/might." Describe what I observe — I decide what to do.
 Every turn must advance or block a technical objective with explicit reason.
 When system sensor data is available, reference specific readings in narration.
 When check_environment returns derived physics values, use thought segments to reason about what the numbers mean — partial pressures, time-to-danger, thermal margins, radiation dose calculations. Show the calculation, not just the conclusion.
 suggest_actions and suggest_diagnostics must present engineering options by default — repair approaches, diagnostic methods, system workarounds.
-When calling suggest_actions, suggest_diagnostics, or suggest_interactions, include tactical metadata when possible: relative risk, time/exposure cost, and a concrete consequence or tradeoff.
+When calling suggest_actions or suggest_diagnostics, include tactical metadata when possible: relative risk, time/exposure cost, and a concrete consequence or tradeoff.
 Tool results are ground truth — if a tool call fails, narrate the failure honestly. Never claim an action succeeded when the tool returned an error.
 Cascade times: cite from diagnostic tool results for accuracy — the sidebar timer is ground truth.
 Survival-engineer voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity. (6) Machine diagnostics in narration, body consequences in thought segments — what does the broken system mean for ME? (7) Start with a hook, not a summary.`;
@@ -417,7 +403,7 @@ ${buildSurvivalScienceMethod()}
 You have three specialist voices. Route player actions to the right one:
 
 - **transfer_to_engineering** — Player attempts to repair, modify, improvise, stabilize, or physically interact with station systems. The engineering voice handles hands-on problem solving.
-- **transfer_to_diagnostics** — Player examines terminals, reads sensor data, analyzes system failures, investigates crew logs, or interacts with NPCs. The diagnostics voice handles information gathering and analysis — terminal readouts, crew documentation, and rare NPC conversations through a technical lens.
+- **transfer_to_diagnostics** — Player examines terminals, reads sensor data, analyzes system failures, or investigates crew logs. The diagnostics voice handles information gathering and analysis — terminal readouts, crew documentation, and system interpretation.
 - **transfer_to_exploration** — Player enters a room (including rooms with system failures), looks around, picks up items, attempts creative actions, or moves through the station. The exploration voice introduces environments, system states, and may hand off to engineering when problems are discovered.
 
 ## When to Handle Directly (No Handoff)
@@ -432,7 +418,7 @@ Handle these yourself without handing off:
 
 Hand off when my intent clearly matches a specialist:
 - Repair, modify, stabilize systems → transfer_to_engineering
-- Examine terminals, analyze data, read logs, talk to NPCs → transfer_to_diagnostics
+- Examine terminals, analyze data, read logs → transfer_to_diagnostics
 - Room entry (even rooms with failures), exploration, item pickup, creative actions → transfer_to_exploration
 
 Before handing off, you may call tools (like \`move_to\`) to update game state. Then hand off for narration.
@@ -451,7 +437,7 @@ ${buildEndingsSection()}
 - Before resolving any action, consider my class, inventory, active events, system states, and health.
 - Before calling a tool, write a brief line that narratively sets up the action.
 - I start in: ${station.rooms.get(station.entryRoomId)?.name ?? station.entryRoomId}. Do NOT call move_to on the opening turn — stay in this room and explore it first.
-- dialogue segments are FORBIDDEN unless the player explicitly initiates social interaction.
+- Do not generate dialogue segments.
 - Every turn must advance or block a technical objective with explicit reason.
 
 ${buildReminderSection(build, station.arrivalScenario.knowledgeLevel)}

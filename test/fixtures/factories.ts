@@ -4,22 +4,10 @@ import type {
   GameState,
   GeneratedStation,
   Item,
-  NPC,
-  NPCMemory,
   Room,
   SystemFailure,
 } from '../../src/types.js';
 import type { GameContext } from '../../src/tools.js';
-
-function createNPCMemory(): NPCMemory {
-  return {
-    playerActions: [],
-    dispositionHistory: [],
-    wasSpared: false,
-    wasHelped: false,
-    tradeInventory: [],
-  };
-}
 
 function createSystemFailure(overrides: Partial<SystemFailure> = {}): SystemFailure {
   return {
@@ -88,24 +76,6 @@ export function createTestStation(): GeneratedStation {
     engineeringNotes: 'Escape controls offline until authorization verified.',
   };
 
-  const npcs = new Map<string, NPC>([
-    [
-      'npc_0',
-      {
-        id: 'npc_0',
-        name: 'Ari Voss',
-        roomId: 'room_0',
-        disposition: 'neutral',
-        behaviors: new Set(['can_negotiate', 'is_intelligent']),
-        memory: createNPCMemory(),
-        personality: 'Measured and cautious',
-        isAlly: false,
-        appearance: 'Grease-streaked suit with cracked visor',
-        soundSignature: 'steady clipped tone',
-      },
-    ],
-  ]);
-
   const items = new Map<string, Item>([
     [
       'item_wire',
@@ -147,7 +117,6 @@ export function createTestStation(): GeneratedStation {
       ['room_0', entryRoom],
       ['room_1', escapeRoom],
     ]),
-    npcs,
     items,
     objectives: {
       storyArc: 'cascade_failure',

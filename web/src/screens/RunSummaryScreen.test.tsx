@@ -21,7 +21,6 @@ type Metrics = {
   itemsCollected: string[];
   crewLogsFound: number;
   creativeActionsAttempted: number;
-  npcInteractions: number;
   deathCause: string | null;
   won: boolean;
   endingId: string | null;
@@ -78,7 +77,6 @@ function makeMetrics(overrides: Partial<Metrics> = {}): Metrics {
     itemsCollected: ['item_wire', 'item_keycard'],
     crewLogsFound: 2,
     creativeActionsAttempted: 1,
-    npcInteractions: 2,
     deathCause: null,
     won: true,
     endingId: 'escape_success',

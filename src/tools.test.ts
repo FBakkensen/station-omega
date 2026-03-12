@@ -284,39 +284,28 @@ describe('createGameToolSets', () => {
     expect(result.reason).toBe('wrong_room');
   });
 
-  it('[E] blocks NPC trade interactions when target has no trade behavior', async () => {
+  it('[I] omits legacy NPC interaction tools from the toolset interface', () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
-    const result = await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-      approach: 'trade',
-      target_npc: 'Ari Voss',
-      leverage: 'Spare wire',
-      tone: 'calm',
-    });
-
-    expect(result.error).toBe('Ari Voss has nothing to trade.');
+    expect('interact_npc' in tools.all).toBe(false);
+    expect('suggest_interactions' in tools.all).toBe(false);
   });
 
-  it('[S] successful recruit interaction promotes an NPC to ally state', async () => {
+  it('[S] attempt_action accepts the command domain in the live tool schema', async () => {
     const { context } = createTestGameContext();
-    const npc = context.station.npcs.get('npc_0');
-    if (!npc) throw new Error('Expected npc_0 fixture');
-    npc.behaviors.add('can_ally');
-
     const tools = createGameToolSets('engineer', context);
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
     try {
-      const result = await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'recruit',
-        target_npc: 'npc_0',
-        leverage: 'Mission-critical support',
-        tone: 'empathetic',
+      const result = await runTool(tools.all as Record<string, unknown>, 'attempt_action', {
+        action: 'coordinate a controlled shutdown across nearby systems',
+        domain: 'command',
+        difficulty: 'moderate',
+        relevant_items: [],
+        environmental_factors: ['line of sight to relay indicators'],
       });
 
-      expect(result.success).toBe(true);
-      expect(result.is_ally).toBe(true);
-      expect(npc.disposition).toBe('friendly');
-      expect(context.state.npcAllies.has('npc_0')).toBe(true);
+      expect(['success', 'critical_success']).toContain(result.outcome);
+      expect(result.difficulty_used).toBe('moderate');
     } finally {
       randomSpy.mockRestore();
     }
@@ -789,34 +778,27 @@ describe('moral choice detection via tools', () => {
     expect(context.state.moralProfile.choices.length).toBe(0);
   });
 
-  it('[O] single successful offer_mercy interaction records mercy with magnitude 2', async () => {
+  it('[O] single record_moral_choice call records mercy with magnitude 2', async () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'spare them', tone: 'calm',
-      });
-      expect(context.state.moralProfile.tendencies.mercy).toBe(2);
-      expect(context.state.moralProfile.choices[0]?.tendency).toBe('mercy');
-    } finally { randomSpy.mockRestore(); }
+    await runTool(tools.all as Record<string, unknown>, 'record_moral_choice', {
+      tendency: 'mercy', magnitude: 2, description: 'Spared a hostile survivor cache by venting power instead of detonating it.',
+    });
+    expect(context.state.moralProfile.tendencies.mercy).toBe(2);
+    expect(context.state.moralProfile.choices[0]?.tendency).toBe('mercy');
   });
 
-  it('[M] multiple mercy triggers in the same turn are deduplicated', async () => {
+  it('[M] multiple manual moral choice records accumulate across repeated calls', async () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'first time', tone: 'calm',
-      });
-      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'second time', tone: 'calm',
-      });
-      // alreadyThisTurn('mercy') prevents double recording
-      expect(context.state.moralProfile.choices.length).toBe(1);
-      expect(context.state.moralProfile.tendencies.mercy).toBe(2);
-    } finally { randomSpy.mockRestore(); }
+    await runTool(tools.all as Record<string, unknown>, 'record_moral_choice', {
+      tendency: 'mercy', magnitude: 2, description: 'Preserved a damaged crew archive instead of scrapping it for parts.',
+    });
+    await runTool(tools.all as Record<string, unknown>, 'record_moral_choice', {
+      tendency: 'mercy', magnitude: 1, description: 'Rerouted power to emergency lighting for old memorial plaques.',
+    });
+    expect(context.state.moralProfile.choices.length).toBe(2);
+    expect(context.state.moralProfile.tendencies.mercy).toBe(3);
   });
 
   it('[B] repairing a non-objective system records sacrifice at exactly magnitude 1', async () => {
@@ -839,42 +821,33 @@ describe('moral choice detection via tools', () => {
   it('[I] moral choice record contains required turn, tendency, and description fields', async () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'spare them', tone: 'calm',
-      });
-      const choice = context.state.moralProfile.choices[0];
-      expect(choice).toBeDefined();
-      expect(typeof choice.turn).toBe('number');
-      expect(typeof choice.tendency).toBe('string');
-      expect(typeof choice.description).toBe('string');
-      expect(typeof choice.magnitude).toBe('number');
-    } finally { randomSpy.mockRestore(); }
+    await runTool(tools.all as Record<string, unknown>, 'record_moral_choice', {
+      tendency: 'pragmatic', magnitude: 1, description: 'Cut power to the secondary tram loop to preserve reactor stability.',
+    });
+    const choice = context.state.moralProfile.choices[0];
+    expect(choice).toBeDefined();
+    expect(typeof choice.turn).toBe('number');
+    expect(typeof choice.tendency).toBe('string');
+    expect(typeof choice.description).toBe('string');
+    expect(typeof choice.magnitude).toBe('number');
   });
 
-  it('[E] failed NPC interaction does not record moral choice', async () => {
+  it('[E] rejects invalid out-of-range manual moral choice magnitudes by clamping them safely', async () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
-    // Mock high roll → failure (roll=100, any target < 100 → failure)
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99);
-    try {
-      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'offer_mercy', target_npc: 'npc_0', leverage: 'please', tone: 'desperate',
-      });
-      expect(context.state.moralProfile.choices.length).toBe(0);
-    } finally { randomSpy.mockRestore(); }
+    await runTool(tools.all as Record<string, unknown>, 'record_moral_choice', {
+      tendency: 'sacrifice', magnitude: 99, description: 'Stayed in the hot compartment to finish the repair.',
+    });
+    expect(context.state.moralProfile.choices[0]?.magnitude).toBe(3);
+    expect(context.state.moralProfile.tendencies.sacrifice).toBe(3);
   });
 
-  it('[S] successful negotiate interaction records mercy with standard magnitude 1', async () => {
+  it('[S] standard manual record updates the intended tendency bucket', async () => {
     const { context } = createTestGameContext();
     const tools = createGameToolSets('engineer', context);
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      await runTool(tools.all as Record<string, unknown>, 'interact_npc', {
-        approach: 'negotiate', target_npc: 'npc_0', leverage: 'logic', tone: 'calm',
-      });
-      expect(context.state.moralProfile.tendencies.mercy).toBe(1);
-    } finally { randomSpy.mockRestore(); }
+    await runTool(tools.all as Record<string, unknown>, 'record_moral_choice', {
+      tendency: 'mercy', magnitude: 1, description: 'Preserved a trapped log archive instead of scavenging it.',
+    });
+    expect(context.state.moralProfile.tendencies.mercy).toBe(1);
   });
 });

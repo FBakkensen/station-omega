@@ -20,7 +20,7 @@ import { GameResponseSchema } from '../src/schema.js';
 import type { GameResponse } from '../src/schema.js';
 import { buildTurnContext } from '../src/turn-context.js';
 import { validateGameResponse, validateNarrativeHooks } from '../src/validation.js';
-import type { GeneratedStation, Room, NPC, ObjectiveChain } from '../src/types.js';
+import type { GeneratedStation, Room, ObjectiveChain } from '../src/types.js';
 import {
     type TestModel,
     createTestOpenRouter,
@@ -110,7 +110,6 @@ const SCENARIOS: Scenario[] = [
 
 interface FixtureStation {
     rooms: Record<string, Room>;
-    npcs: Record<string, NPC>;
     items: Record<string, unknown>;
     objectives: ObjectiveChain;
     [key: string]: unknown;
@@ -126,13 +125,6 @@ async function loadOrGenerateStation(): Promise<GeneratedStation> {
 
         // Reconstruct Maps from plain objects
         const rooms = new Map(Object.entries(s.rooms));
-        const npcs = new Map(Object.entries(s.npcs));
-        // NPC behaviors need to be Sets (serialized as arrays in JSON)
-        for (const npc of npcs.values()) {
-            if (Array.isArray(npc.behaviors)) {
-                npc.behaviors = new Set(npc.behaviors as Iterable<NPC['behaviors'] extends Set<infer T> ? T : never>);
-            }
-        }
         const items = new Map(Object.entries(s.items));
 
         // Reconstruct MapLayout positions
@@ -150,7 +142,6 @@ async function loadOrGenerateStation(): Promise<GeneratedStation> {
             briefing: s['briefing'] as string,
             backstory: s['backstory'] as string,
             rooms,
-            npcs,
             items: items as Map<string, GeneratedStation['items'] extends Map<string, infer V> ? V : never>,
             objectives: s.objectives,
             entryRoomId: s['entryRoomId'] as string,
@@ -180,7 +171,6 @@ function cloneStation(station: GeneratedStation): GeneratedStation {
     return {
         ...station,
         rooms: structuredClone(station.rooms),
-        npcs: structuredClone(station.npcs),
         items: structuredClone(station.items),
         objectives: structuredClone(station.objectives),
     };

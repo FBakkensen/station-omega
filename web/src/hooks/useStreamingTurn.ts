@@ -6,7 +6,6 @@ import { resolveSegment } from '../engine/resolveSegment';
 import type { DisplaySegment, Choice } from '../engine/types';
 
 interface StationData {
-  npcs?: Record<string, { name: string }>;
   crewRoster?: Array<{ name: string; role: string }>;
   arrivalScenario?: { playerCallsign?: string };
 }

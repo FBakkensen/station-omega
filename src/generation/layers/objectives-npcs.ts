@@ -1,8 +1,8 @@
 /**
- * Layer 3: Objectives & NPCs
+ * Layer 3: Objectives
  *
  * Given validated topology + systems + items, the AI designs
- * the objective chain and NPC placement.
+ * the objective chain.
  */
 
 import { z } from 'zod';
@@ -14,7 +14,7 @@ import {
 import type { ValidationResult } from '../validate.js';
 import type { ValidatedTopology } from './topology.js';
 import type { ValidatedSystemsItems } from './systems-items.js';
-import type { SystemId, Disposition, NPCBehaviorFlag } from '../../types.js';
+import type { SystemId } from '../../types.js';
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -25,16 +25,10 @@ const SystemIdEnum = z.enum([
     'thermal_regulator', 'structural_integrity',
 ]);
 
-const DispositionEnum = z.enum(['neutral', 'friendly', 'fearful']);
-
-const NPCBehaviorFlagEnum = z.enum([
-    'can_negotiate', 'can_ally', 'can_trade', 'is_intelligent',
-]);
-
 const ObjectivesNPCsSchema = z.object({
     objectives: z.object({
         title: z.string(),
-        // Constraints (3-7 steps, max 3 NPCs) enforced in validator, not schema,
+        // Constraints (3-7 steps) enforced in validator, not schema,
         // because Anthropic's structured output rejects minItems > 1.
         steps: z.array(z.object({
             id: z.string(),
@@ -44,13 +38,6 @@ const ObjectivesNPCsSchema = z.object({
             requiredSystemRepair: SystemIdEnum.nullable(),
         })),
     }),
-    npcs: z.array(z.object({
-        id: z.string(),
-        roomId: z.string(),
-        disposition: DispositionEnum,
-        behaviors: z.array(NPCBehaviorFlagEnum),
-        role: z.string(),
-    })),
 });
 
 type ObjectivesNPCsOutput = z.infer<typeof ObjectivesNPCsSchema>;
@@ -68,13 +55,6 @@ export interface ValidatedObjectivesNPCs {
             requiredSystemRepair: SystemId | null;
         }>;
     };
-    npcs: Array<{
-        id: string;
-        roomId: string;
-        disposition: Disposition;
-        behaviors: NPCBehaviorFlag[];
-        role: string;
-    }>;
 }
 
 // ─── Prompt Builder ──────────────────────────────────────────────────────────
@@ -83,7 +63,7 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
     const topology = context['topology'] as ValidatedTopology;
     const systemsItems = context['systemsItems'] as ValidatedSystemsItems;
 
-    const system = `You are a game designer creating the mission objectives and NPC encounters for a space station survival game.
+    const system = `You are a game designer creating the mission objectives for a space station survival game.
 
 # Objective Design
 - Create a compelling 3-7 step objective chain that guides the player through the station
@@ -98,15 +78,6 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
 - IMPORTANT: When a step requires BOTH a requiredItemId AND a requiredSystemRepair, the requiredItemId must be one of the materials needed for that system repair. The step description MUST mention ALL required materials for the repair (not just the objective item) so the player knows what to collect
 - Step IDs must be unique (like "step_0", "step_1", etc.)
 - Make descriptions action-oriented and specific to the scenario
-
-# NPC Design (0-3 NPCs)
-- NPCs are survivors, crew members, or other entities found on the station
-- Each has: id (like "npc_0"), roomId (must exist), disposition (neutral/friendly/fearful), behaviors, role
-- Dispositions: neutral (cautious), friendly (helpful), fearful (scared, may have useful info)
-- Behaviors: can_negotiate, can_ally, can_trade, is_intelligent
-- Role: brief description of who they are (e.g., "trapped engineer", "station medic", "security officer")
-- Place NPCs in mid-station rooms, not in entry or escape rooms
-- NPCs add social dynamics — a fearful survivor might need convincing, a trader might have needed materials
 
 # Rules
 - Objective steps must reference rooms that exist in the topology
@@ -141,7 +112,7 @@ ${roomsSummary}
 Items placed:
 ${itemsSummary}
 
-Create a 3-7 step objective chain and 0-3 NPCs. Make the objective list an ordered dependency chain where each step becomes the natural next reveal after the previous one.`;
+Create a 3-7 step objective chain. Make the objective list an ordered dependency chain where each step becomes the natural next reveal after the previous one.`;
 
     if (errors && errors.length > 0) {
         user += `\n\nYour previous output had the following errors. Fix ALL of them:\n\n${errors.map((e, i) => `${String(i + 1)}. ${e}`).join('\n')}\n\nGenerate a corrected version addressing all errors above.`;
@@ -166,10 +137,6 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
     if (output.objectives.steps.length > 7) {
         errors.push(`Objective must have at most 7 steps, got ${String(output.objectives.steps.length)}`);
     }
-    if (output.npcs.length > 3) {
-        errors.push(`At most 3 NPCs allowed, got ${String(output.npcs.length)}`);
-    }
-
     // 1. Step ID uniqueness
     const stepIds = output.objectives.steps.map(s => s.id);
     const stepIdSet = new Set(stepIds);
@@ -225,27 +192,6 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
         }
     }
 
-    // 7. NPC room validity
-    for (const npc of output.npcs) {
-        if (!roomIdSet.has(npc.roomId)) {
-            errors.push(`NPC '${npc.id}' is placed in room '${npc.roomId}' which does not exist. Valid rooms: [${[...roomIdSet].join(', ')}]`);
-        }
-        if (npc.roomId === topology.entryRoomId) {
-            errors.push(`NPC '${npc.id}' should not be placed in the entry room`);
-        }
-        if (npc.roomId === topology.escapeRoomId) {
-            errors.push(`NPC '${npc.id}' should not be placed in the escape room`);
-        }
-    }
-
-    // 8. NPC ID uniqueness
-    const npcIds = output.npcs.map(n => n.id);
-    const npcIdSet = new Set(npcIds);
-    if (npcIdSet.size !== npcIds.length) {
-        const dupes = npcIds.filter((id, i) => npcIds.indexOf(id) !== i);
-        errors.push(`NPC IDs must be unique — ${[...new Set(dupes)].join(', ')} appear(s) multiple times`);
-    }
-
     if (errors.length > 0) {
         return validationFailure(errors);
     }
@@ -261,29 +207,16 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
                 requiredSystemRepair: s.requiredSystemRepair as SystemId | null,
             })),
         },
-        npcs: output.npcs.map(n => ({
-            id: n.id,
-            roomId: n.roomId,
-            disposition: n.disposition as Disposition,
-            behaviors: n.behaviors as NPCBehaviorFlag[],
-            role: n.role,
-        })),
     });
 }
 
 // ─── Layer Config ────────────────────────────────────────────────────────────
 
 export const objectivesNPCsLayer: LayerConfig<ObjectivesNPCsOutput, ValidatedObjectivesNPCs> = {
-    name: 'Objectives & NPCs',
+    name: 'Objectives',
     schema: ObjectivesNPCsSchema,
     buildPrompt: buildObjectivesNPCsPrompt,
     validate: validateObjectivesNPCs,
     maxRetries: 3,
-    summarize: (v) => {
-        const dispositions = v.npcs.map(n => `${n.id}(${n.disposition})`);
-        return [
-            `Objective: "${v.objectives.title}" — ${String(v.objectives.steps.length)} steps`,
-            `NPCs: ${v.npcs.length > 0 ? dispositions.join(', ') : 'none'}`,
-        ].join('\n');
-    },
+    summarize: (v) => `Objective: "${v.objectives.title}" — ${String(v.objectives.steps.length)} steps`,
 };

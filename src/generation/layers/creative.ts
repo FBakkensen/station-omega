@@ -2,7 +2,7 @@
  * Layer 4: Creative Content
  *
  * Generates names, descriptions, sensory details, crew logs,
- * arrival scenario, starting item, and NPC creative content
+ * arrival scenario, and starting item
  * through parallel creative sub-layers.
  */
 
@@ -19,14 +19,12 @@ import type {
     ItemCreative,
     ArrivalScenario,
     StartingItemCreative,
-    NPCCreative,
 } from '../../types.js';
 import { identitySeedLayer } from './creative-identity.js';
 import { createSingleRoomLayer } from './creative-rooms.js';
 import type { RoomProseResult } from './creative-rooms.js';
 import { roomMechanicalBatchLayer } from './creative-rooms-mechanical.js';
 import { itemsCreativeLayer } from './creative-items.js';
-import { npcsCreativeLayer } from './creative-npcs.js';
 import { arrivalCreativeLayer } from './creative-arrival.js';
 import type { GenerationModelTiers } from '../../model-catalog.js';
 
@@ -81,13 +79,6 @@ export const CreativeLayerSchema = z.object({
         effectValue: z.number(),
         useNarration: z.string(),
     }),
-    npcCreative: z.array(z.object({
-        npcId: z.string(),
-        name: z.string(),
-        appearance: z.string(),
-        personality: z.string(),
-        soundSignature: z.string(),
-    })).optional(),
 });
 
 export const VALID_LOG_TYPES = new Set([
@@ -118,7 +109,7 @@ export function findCrewMatch(author: string, crewNames: Set<string>): string | 
  * Runs creative content generation as parallel sub-layers:
  * 1. Identity seed (sequential) — station name, crew roster, tone
  * 2a. Room mechanical batch (cheap model, single call) — names, sensory, notes
- * 2b. Room prose (N Opus calls) + Items + NPCs + Arrival (parallel)
+ * 2b. Room prose (N Opus calls) + Items + Arrival (parallel)
  * 3. Merge mechanical + prose into final RoomCreative[]
  *
  * Only failed sub-layers retry, preserving successful results.
@@ -171,12 +162,12 @@ export async function runCreativeSublayers(
 
     // ─── Phase 2b: Parallel Sub-Layers ───────────────────────────────────────
     const objectivesNPCs = context['objectivesNPCs'] as ValidatedObjectivesNPCs;
-    const hasNPCs = objectivesNPCs.npcs.length > 0;
+    void objectivesNPCs;
 
     const maxConcurrent = 4;
     const limiter = new ConcurrencyLimiter(maxConcurrent);
 
-    const sublayerNames = [`${String(roomCount)} room prose`, 'items', ...(hasNPCs ? ['NPCs'] : []), 'arrival'];
+    const sublayerNames = [`${String(roomCount)} room prose`, 'items', 'arrival'];
     onProgress?.(`Generating ${sublayerNames.join(', ')}...`);
     debugLog?.('GENERATION', `Starting Creative Phase 2b: ${sublayerNames.join(', ')} (max ${String(maxConcurrent)} concurrent)`);
 
@@ -197,7 +188,7 @@ export async function runCreativeSublayers(
         };
     });
 
-    // Items, arrival, NPCs
+    // Items and arrival
     sublayers.push({
         label: 'items',
         promise: limiter.run(() =>
@@ -213,23 +204,12 @@ export async function runCreativeSublayers(
             .then(value => ({ label: 'arrival', value })),
     });
 
-    if (hasNPCs) {
-        sublayers.push({
-            label: 'NPCs',
-            promise: limiter.run(() =>
-                runLayer(npcsCreativeLayer, context, aiClient, modelTiers.premium, onProgress, providerOptions, debugLog),
-            )
-                .then(value => ({ label: 'NPCs', value })),
-        });
-    }
-
     const results = await Promise.allSettled(sublayers.map(s => s.promise));
 
     // Collect successes and failures
     const failures: string[] = [];
     const roomProseResults: RoomProseResult[] = [];
     let items: ItemCreative[] | undefined;
-    let npcCreative: NPCCreative[] | undefined;
     let arrival: { arrivalScenario: ArrivalScenario; startingItem: StartingItemCreative } | undefined;
 
     for (const result of results) {
@@ -237,7 +217,6 @@ export async function runCreativeSublayers(
             const { label, value } = result.value;
             if (label.startsWith('room:')) roomProseResults.push(value as RoomProseResult);
             else if (label === 'items') items = value as ItemCreative[];
-            else if (label === 'NPCs') npcCreative = value as NPCCreative[];
             else if (label === 'arrival') arrival = value as { arrivalScenario: ArrivalScenario; startingItem: StartingItemCreative };
         } else {
             const err = result.reason instanceof LayerGenerationError
@@ -252,7 +231,6 @@ export async function runCreativeSublayers(
         const successLabels = [
             successCount > 0 ? `${String(successCount)}/${String(roomCount)} room prose` : null,
             items ? 'items' : null,
-            npcCreative ? 'NPCs' : null,
             arrival ? 'arrival' : null,
         ].filter(Boolean);
         debugLog?.('GENERATION-FAIL', `Creative sub-layer failures (${String(failures.length)}):\n${failures.join('\n\n')}\nSuccessful: [${successLabels.join(', ')}]`);
@@ -304,12 +282,11 @@ export async function runCreativeSublayers(
         items,
         arrivalScenario: arrival.arrivalScenario,
         startingItem: arrival.startingItem,
-        npcCreative: npcCreative && npcCreative.length > 0 ? npcCreative : undefined,
         visualStyleGuide: identity.visualStyleGuide,
         briefingVideoPrompt: identity.briefingVideoPrompt,
     };
 
-    debugLog?.('GENERATION', `Creative assembly complete: "${creative.stationName}" — ${String(creative.rooms.length)} rooms, ${String(creative.items.length)} items, ${String(creative.npcCreative?.length ?? 0)} NPCs`);
+    debugLog?.('GENERATION', `Creative assembly complete: "${creative.stationName}" — ${String(creative.rooms.length)} rooms, ${String(creative.items.length)} items`);
 
     return creative;
 }

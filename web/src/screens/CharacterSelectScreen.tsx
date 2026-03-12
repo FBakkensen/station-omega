@@ -28,7 +28,7 @@ const CHARACTER_BUILDS: CharacterBuild[] = [
     description: 'A resourceful technician who can bypass failing systems with duct tape, wire, and sheer stubbornness.',
     baseHp: 100,
     proficiencies: ['tech', 'survival'],
-    weaknesses: ['medical', 'social'],
+    weaknesses: ['medical', 'command'],
     startingItem: 'Multitool',
     maxInventory: 6,
   },
@@ -38,26 +38,26 @@ const CHARACTER_BUILDS: CharacterBuild[] = [
     description: 'An analytical mind who synthesizes solutions from first principles. Needs fewer materials to craft.',
     baseHp: 85,
     proficiencies: ['science', 'tech'],
-    weaknesses: ['survival', 'social'],
+    weaknesses: ['survival', 'command'],
     startingItem: 'Diagnostic Scanner',
     maxInventory: 5,
   },
   {
     id: 'medic',
     name: 'Flight Surgeon',
-    description: 'A field medic who keeps everyone alive through creative medicine and an alarming willingness to improvise.',
+    description: 'A trauma specialist who keeps one body functioning through creative medicine and an alarming willingness to improvise.',
     baseHp: 110,
     proficiencies: ['medical', 'science'],
-    weaknesses: ['tech', 'survival'],
+    weaknesses: ['tech', 'command'],
     startingItem: 'First Aid Kit',
     maxInventory: 5,
   },
   {
     id: 'commander',
-    name: 'Station Commander',
-    description: 'A crisis leader who sees the big picture. Can assess cascade timers in adjacent rooms and rally under pressure.',
+    name: 'Operations Lead',
+    description: 'A crisis coordinator who sees the whole failure graph. Can assess cascade timers in adjacent rooms and stay decisive under pressure.',
     baseHp: 100,
-    proficiencies: ['survival', 'social'],
+    proficiencies: ['survival', 'command'],
     weaknesses: ['science', 'tech'],
     startingItem: null,
     maxInventory: 5,
@@ -100,7 +100,7 @@ export function CharacterSelectScreen({
         >
           ← Back
         </button>
-        <h1 className="text-omega-title text-lg tracking-wider uppercase">Select Crew Member</h1>
+        <h1 className="text-omega-title text-lg tracking-wider uppercase">Select Specialist Profile</h1>
         <div className="w-16" /> {/* Spacer for centering */}
       </div>
 
@@ -183,7 +183,7 @@ export function CharacterSelectScreen({
             </>
           ) : (
             <p className="text-omega-dim text-sm text-center py-8">
-              Select a crew member to view details
+              Select a specialist profile to view details
             </p>
           )}
 

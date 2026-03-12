@@ -6,7 +6,7 @@
 export type SegmentType = 'narration' | 'dialogue' | 'thought' | 'station_pa' | 'crew_echo' | 'diagnostic_readout' | 'player_action';
 
 export interface EntityRef {
-  type: 'room' | 'npc' | 'item';
+  type: 'room' | 'item';
   id: string;
 }
 

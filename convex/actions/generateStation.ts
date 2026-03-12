@@ -182,14 +182,14 @@ export const generate = internalAction({
         try {
           const { buildBriefingImagePrompt } = await import("../../src/image-prompts.js");
           const { FalImageClient } = await import("../../src/io/fal-image-client.js");
-          const { IMAGE_MODEL_ID, IMAGE_COST_USD } = await import("../../src/model-catalog.js");
+          const { IMAGE_MODEL_ID, IMAGE_COST_USD, IMAGE_SIZE } = await import("../../src/model-catalog.js");
           const imageStartMs = Date.now();
           const briefingImagePrompt = buildBriefingImagePrompt(station);
           const imageClient = new FalImageClient(process.env.FAL_API_KEY);
           const imageResult = await imageClient.generateImage({
             prompt: briefingImagePrompt,
-            width: 1024,
-            height: 576,
+            width: IMAGE_SIZE.width,
+            height: IMAGE_SIZE.height,
           });
 
           const imageBlob = new Blob([imageResult.imageBytes as BlobPart], { type: imageResult.mimeType });

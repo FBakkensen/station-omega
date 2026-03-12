@@ -27,7 +27,7 @@ export function ImageLightbox({ image, onClose }: ImageLightboxProps) {
       aria-modal="true"
     >
       <div
-        className="relative max-w-[512px] max-h-[80vh] cursor-default"
+        className="relative max-w-[90vw] max-h-[80vh] cursor-default sm:max-w-3xl"
         onClick={(e) => { e.stopPropagation(); }}
       >
         <img

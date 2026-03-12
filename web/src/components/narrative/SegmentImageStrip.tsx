@@ -11,10 +11,10 @@ interface SegmentImageStripProps {
 }
 
 function getImageStyle(category: string): { aspectRatio: string; objectPosition: string } {
-  if (category === 'npc_portrait') {
-    return { aspectRatio: '4/3', objectPosition: 'top' };
-  }
-  return { aspectRatio: '5/2', objectPosition: 'center' };
+  return {
+    aspectRatio: '16/9',
+    objectPosition: category === 'npc_portrait' ? 'top' : 'center',
+  };
 }
 
 function getFlexBasis(images: StationImage[], index: number): string {

@@ -130,3 +130,23 @@ html, body, #root {
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
   animation: image-strip-scan 800ms ease-out forwards;
 }
+
+/* ─── Map Tactical Display Effects ───────────────────────────────────────── */
+
+@keyframes map-glow-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes map-scan-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(calc(var(--map-width, 800px) + 100%)); }
+}
+
+.map-glow-pulse {
+  animation: map-glow-pulse 2s ease-in-out infinite;
+}
+
+.map-scan-sweep {
+  animation: map-scan-sweep 4s linear infinite;
+}

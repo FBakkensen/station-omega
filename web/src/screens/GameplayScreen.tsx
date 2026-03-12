@@ -437,6 +437,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
           rooms={mapRooms}
           currentRoomId={currentRoomId}
           visitedRoomIds={visitedRoomIds}
+          stationImages={stationImages}
           onClose={() => { setShowMap(false); }}
         />
       )}

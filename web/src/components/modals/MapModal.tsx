@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { StationImage } from '../../hooks/useStationImages';
 import { COLORS } from '../../styles/theme';
 
 interface MapRoom {
@@ -13,6 +14,7 @@ interface MapModalProps {
   rooms: Record<string, MapRoom>;
   currentRoomId: string;
   visitedRoomIds: string[];
+  stationImages: Map<string, StationImage>;
   onClose: () => void;
 }
 
@@ -61,17 +63,15 @@ function formatArchetype(archetype: string): string {
 const CHAR_WIDTH = 6.1;
 /** Horizontal padding inside each room box (total, split evenly left/right). */
 const ROOM_H_PAD = 16;
-/** Vertical size of each room box. */
-const ROOM_HEIGHT = 40;
 /** Minimum gap between room columns. */
-const COLUMN_GAP = 40;
-/** Vertical spacing between rooms in the same depth column. */
-const ROW_SPACING = 80;
+const COLUMN_GAP = 60;
+/** Vertical gap between room boxes in the same depth column. */
+const ROW_GAP = 40;
 /** Size of corner bracket decorations on room boxes. */
-const BRACKET_SIZE = 5;
+const BRACKET_SIZE = 8;
 /** Minimum viewBox dimensions to prevent over-scaling with few rooms. */
-const MIN_VIEWBOX_W = 800;
-const MIN_VIEWBOX_H = 500;
+const MIN_VIEWBOX_W = 900;
+const MIN_VIEWBOX_H = 600;
 
 /** Compute the display text length (in characters) for a room. */
 function displayTextLen(room: MapRoom): number {
@@ -112,13 +112,15 @@ function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
     }
   }
 
-  // Derive room box width from the longest display text
-  let maxChars = 14; // minimum sensible width (e.g. "► CURRENT")
+  // Derive room box width from the longest display text, then height from 16:9 ratio
+  let maxChars = 14; // minimum sensible width
   for (const id of roomIds) {
     maxChars = Math.max(maxChars, displayTextLen(rooms[id]));
   }
   const roomWidth = Math.ceil(maxChars * CHAR_WIDTH + ROOM_H_PAD);
+  const roomHeight = Math.round(roomWidth * (9 / 16));
   const DX = roomWidth + COLUMN_GAP;
+  const rowSpacing = roomHeight + ROW_GAP;
 
   const positions = new Map<string, { x: number; y: number }>();
   const maxDepth = Math.max(...[...byDepth.keys()]);
@@ -126,15 +128,15 @@ function computeLayout(rooms: Record<string, MapRoom>, seed: number) {
   for (let depth = 0; depth <= maxDepth; depth++) {
     const ids = byDepth.get(depth) ?? [];
     const x = depth * DX + roomWidth / 2 + 20;
-    const groupHeight = (ids.length - 1) * ROW_SPACING;
+    const groupHeight = (ids.length - 1) * rowSpacing;
     const startY = -groupHeight / 2 + 250; // Center vertically around 250
 
     for (let i = 0; i < ids.length; i++) {
-      positions.set(ids[i], { x, y: startY + i * ROW_SPACING });
+      positions.set(ids[i], { x, y: startY + i * rowSpacing });
     }
   }
 
-  return { positions, roomWidth };
+  return { positions, roomWidth, roomHeight };
 }
 
 /** Compute a quadratic Bézier control point offset perpendicular to the midpoint. */
@@ -152,8 +154,8 @@ function bezierControlPoint(
   return { x: mx + (-dy / len) * offset, y: my + (dx / len) * offset };
 }
 
-/** SVG defs block with grid pattern, glow filter, and cross-hatch pattern. */
-function SvgDefs() {
+/** SVG defs block with grid pattern, glow filter, image filters, and cross-hatch pattern. */
+function SvgDefs({ roomWidth: rw, roomHeight: rh }: { roomWidth: number; roomHeight: number }) {
   return (
     <defs>
       {/* Subtle grid background */}
@@ -163,7 +165,7 @@ function SvgDefs() {
 
       {/* Glow filter for current room */}
       <filter id="room-glow" x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
         <feFlood floodColor={COLORS.title} floodOpacity="0.6" result="color" />
         <feComposite in="color" in2="blur" operator="in" result="glow" />
         <feMerge>
@@ -171,6 +173,50 @@ function SvgDefs() {
           <feMergeNode in="SourceGraphic" />
         </feMerge>
       </filter>
+
+      {/* Dim + desaturate filter for visited room images */}
+      <filter id="img-dim" colorInterpolationFilters="sRGB">
+        <feColorMatrix type="saturate" values="0.45" />
+        <feComponentTransfer>
+          <feFuncR type="linear" slope="0.5" />
+          <feFuncG type="linear" slope="0.5" />
+          <feFuncB type="linear" slope="0.5" />
+        </feComponentTransfer>
+      </filter>
+
+      {/* Brighter filter for current room image */}
+      <filter id="img-current" colorInterpolationFilters="sRGB">
+        <feColorMatrix type="saturate" values="0.65" />
+        <feComponentTransfer>
+          <feFuncR type="linear" slope="0.7" />
+          <feFuncG type="linear" slope="0.7" />
+          <feFuncB type="linear" slope="0.7" />
+        </feComponentTransfer>
+      </filter>
+
+      {/* Heavy blur + dim for unvisited rooms using briefing image */}
+      <filter id="img-blur-dim" colorInterpolationFilters="sRGB">
+        <feGaussianBlur stdDeviation="6" />
+        <feColorMatrix type="saturate" values="0.2" />
+        <feComponentTransfer>
+          <feFuncR type="linear" slope="0.35" />
+          <feFuncG type="linear" slope="0.35" />
+          <feFuncB type="linear" slope="0.35" />
+        </feComponentTransfer>
+      </filter>
+
+      {/* Bottom gradient overlay for text readability */}
+      <linearGradient id="room-text-gradient" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#000" stopOpacity="0" />
+        <stop offset="60%" stopColor="#000" stopOpacity="0.05" />
+        <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
+      </linearGradient>
+
+      {/* Inner vignette for room image depth */}
+      <radialGradient id="room-vignette" cx="50%" cy="50%" r="65%" fx="50%" fy="50%">
+        <stop offset="0%" stopColor="transparent" />
+        <stop offset="100%" stopColor="#000" stopOpacity="0.35" />
+      </radialGradient>
 
       {/* Cross-hatch pattern for unvisited rooms */}
       <pattern id="crosshatch" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -185,6 +231,32 @@ function SvgDefs() {
         <stop offset="60%" stopColor={COLORS.title} stopOpacity="0.08" />
         <stop offset="100%" stopColor={COLORS.title} stopOpacity="0" />
       </linearGradient>
+
+      {/* Clip path template — actual clip paths are per-room in renderRoomNode */}
+      {/* Using clipPathUnits="objectBoundingBox" won't work with rx, so we define per-room below */}
+
+      {/* Scanline overlay pattern for rooms */}
+      <pattern id="room-scanlines" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="0" x2="4" y2="0" stroke="#000" strokeWidth="0.5" opacity="0.15" />
+      </pattern>
+
+      {/* Static noise pattern for unvisited rooms without briefing image */}
+      <filter id="noise-filter">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" result="noise" />
+        <feColorMatrix type="saturate" values="0" in="noise" result="gray-noise" />
+        <feComponentTransfer in="gray-noise">
+          <feFuncR type="linear" slope="0.08" intercept="0.04" />
+          <feFuncG type="linear" slope="0.08" intercept="0.06" />
+          <feFuncB type="linear" slope="0.12" intercept="0.08" />
+          <feFuncA type="linear" slope="1" />
+        </feComponentTransfer>
+      </filter>
+
+      {/* Per-room clip paths will be added by RoomNode */}
+      {/* We need a generic one for the template size */}
+      <clipPath id="room-clip-template">
+        <rect x="0" y="0" width={rw} height={rh} rx={3} />
+      </clipPath>
     </defs>
   );
 }
@@ -208,7 +280,7 @@ function CornerBrackets({
   );
 }
 
-export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapModalProps) {
+export function MapModal({ rooms, currentRoomId, visitedRoomIds, stationImages, onClose }: MapModalProps) {
   const seed = useMemo(() => hashSeed(rooms), [rooms]);
   const layout = useMemo(() => computeLayout(rooms, seed), [rooms, seed]);
   const [hoveredRoom, setHoveredRoom] = useState<string | null>(null);
@@ -315,7 +387,7 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
       });
   }, [visibleRoomIds, rooms, roomVisibility]);
 
-  const { positions, roomWidth } = layout;
+  const { positions, roomWidth, roomHeight } = layout;
   const halfW = roomWidth / 2;
   const bounds = useMemo(() => {
     const PADDING_X = 40;
@@ -430,7 +502,7 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                 className="w-full h-full"
                 style={{ '--map-width': `${String(Math.min(width, 800))}px` } as React.CSSProperties}
               >
-                <SvgDefs />
+                <SvgDefs roomWidth={roomWidth} roomHeight={roomHeight} />
 
                 {/* Grid background */}
                 <rect
@@ -461,8 +533,8 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                   const isHovered = hoveredRoom !== null &&
                     (hoveredConnections.has(from) && hoveredConnections.has(to));
 
-                  // Compute Bézier control point with small perpendicular offset
-                  const cp = bezierControlPoint(p1, p2, 15);
+                  // Compute Bézier control point with perpendicular offset
+                  const cp = bezierControlPoint(p1, p2, 20);
                   const mx = (p1.x + p2.x) / 2;
                   const my = (p1.y + p2.y) / 2;
 
@@ -474,7 +546,7 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                           d={`M ${String(p1.x)} ${String(p1.y)} Q ${String(cp.x)} ${String(cp.y)} ${String(p2.x)} ${String(p2.y)}`}
                           fill="none"
                           stroke={COLORS.title}
-                          strokeWidth="4"
+                          strokeWidth="6"
                           opacity="0.15"
                         />
                       )}
@@ -482,17 +554,17 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                         d={`M ${String(p1.x)} ${String(p1.y)} Q ${String(cp.x)} ${String(cp.y)} ${String(p2.x)} ${String(p2.y)}`}
                         fill="none"
                         stroke={isHovered ? COLORS.title : (isStrong ? COLORS.border : '#33435f')}
-                        strokeWidth={isStrong ? 1.5 : 1}
-                        strokeDasharray={isStrong ? undefined : '4 4'}
+                        strokeWidth={isStrong ? 2 : 1.5}
+                        strokeDasharray={isStrong ? undefined : '5 5'}
                         opacity={isHovered ? 0.9 : (isStrong ? 0.85 : 0.55)}
                       />
                       {/* Door indicator at midpoint for explored connections */}
                       {isStrong && (
                         <circle
-                          cx={mx} cy={my} r="2.5"
+                          cx={mx} cy={my} r="3.5"
                           fill={COLORS.bg}
                           stroke={isHovered ? COLORS.title : COLORS.border}
-                          strokeWidth="1"
+                          strokeWidth="1.5"
                           opacity="0.7"
                         />
                       )}
@@ -513,21 +585,21 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                   const isHovered = hoveredConnections.has(id);
 
                   const rx = pos.x - halfW;
-                  const ry = pos.y - ROOM_HEIGHT / 2;
+                  const ry = pos.y - roomHeight / 2;
+                  const clipId = `room-clip-${id}`;
 
-                  const fill = isCurrent
-                    ? COLORS.title
-                    : (isVisited ? '#1a2f4a' : 'url(#crosshatch)');
+                  // Image lookup
+                  const roomImage = stationImages.get(`room:${id}`);
+                  const briefingImage = stationImages.get('briefing');
+                  const hasRoomImage = (isCurrent || isVisited) && roomImage?.url;
+                  const hasBriefingBg = isAdj && briefingImage?.url;
+
                   const stroke = isCurrent
                     ? COLORS.title
                     : (isVisited ? COLORS.border : '#2b3447');
-                  const textColor = isCurrent
-                    ? '#000'
-                    : (isVisited ? '#e0e8f0' : '#8a9aaf');
                   const displayText = isAdj
                     ? `? ${room.name}`
                     : `${getIcon(room.archetype)} ${room.name}`;
-                  const textX = rx + ROOM_H_PAD / 2;
 
                   return (
                     <g
@@ -536,57 +608,164 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                       onMouseLeave={() => { setHoveredRoom(null); }}
                       style={{ cursor: 'default' }}
                     >
-                      {/* Glow filter on current room */}
+                      {/* Per-room clip path */}
+                      <defs>
+                        <clipPath id={clipId}>
+                          <rect x={rx} y={ry} width={roomWidth} height={roomHeight} rx={3} />
+                        </clipPath>
+                      </defs>
+
+                      {/* Glow outline on current room */}
                       {isCurrent && (
                         <rect
-                          x={rx - 3} y={ry - 3}
-                          width={roomWidth + 6} height={ROOM_HEIGHT + 6}
+                          x={rx - 4} y={ry - 4}
+                          width={roomWidth + 8} height={roomHeight + 8}
                           rx={6}
                           fill="none"
                           stroke={COLORS.title}
-                          strokeWidth="1.5"
+                          strokeWidth="2"
                           opacity="0.4"
                           className="map-glow-pulse"
                         />
                       )}
 
-                      {/* Room background */}
+                      {/* Room background rect (fallback / base color) */}
                       <rect
                         x={rx} y={ry}
-                        width={roomWidth} height={ROOM_HEIGHT}
-                        rx={2}
-                        fill={isAdj ? '#0f1420' : fill}
+                        width={roomWidth} height={roomHeight}
+                        rx={3}
+                        fill={isAdj ? '#0a0e18' : (isCurrent ? '#0d1a2a' : '#0f1825')}
                         stroke={isHovered ? COLORS.title : stroke}
                         strokeWidth={isCurrent ? 2 : 1}
-                        strokeDasharray={isAdj ? '3 3' : undefined}
+                        strokeDasharray={isAdj ? '4 4' : undefined}
                         filter={isCurrent ? 'url(#room-glow)' : undefined}
                         opacity={isAdj ? 0.7 : 1}
                       />
+
+                      {/* Room image background — visited/current rooms */}
+                      {hasRoomImage && (
+                        <image
+                          href={roomImage.url}
+                          x={rx} y={ry}
+                          width={roomWidth} height={roomHeight}
+                          preserveAspectRatio="xMidYMid slice"
+                          clipPath={`url(#${clipId})`}
+                          filter={isCurrent ? 'url(#img-current)' : 'url(#img-dim)'}
+                        />
+                      )}
+
+                      {/* Briefing image background — adjacent-unvisited rooms */}
+                      {hasBriefingBg && (
+                        <image
+                          href={briefingImage.url}
+                          x={rx} y={ry}
+                          width={roomWidth} height={roomHeight}
+                          preserveAspectRatio="xMidYMid slice"
+                          clipPath={`url(#${clipId})`}
+                          filter="url(#img-blur-dim)"
+                        />
+                      )}
+
+                      {/* Static noise fallback for unvisited without briefing */}
+                      {isAdj && !hasBriefingBg && (
+                        <rect
+                          x={rx} y={ry}
+                          width={roomWidth} height={roomHeight}
+                          clipPath={`url(#${clipId})`}
+                          filter="url(#noise-filter)"
+                          opacity="0.6"
+                        />
+                      )}
 
                       {/* Cross-hatch overlay for adjacent-unvisited */}
                       {isAdj && (
                         <rect
                           x={rx} y={ry}
-                          width={roomWidth} height={ROOM_HEIGHT}
-                          rx={2}
+                          width={roomWidth} height={roomHeight}
+                          rx={3}
                           fill="url(#crosshatch)"
-                          opacity="0.3"
+                          opacity="0.25"
                         />
                       )}
 
-                      {/* Corner bracket decorations */}
-                      <CornerBrackets
-                        x={rx} y={ry} w={roomWidth} h={ROOM_HEIGHT}
-                        stroke={isCurrent ? COLORS.title : (isHovered ? COLORS.title : stroke)}
-                        opacity={isCurrent ? 0.8 : (isAdj ? 0.3 : 0.5)}
+                      {/* Inner vignette overlay */}
+                      {(hasRoomImage || hasBriefingBg) && (
+                        <rect
+                          x={rx} y={ry}
+                          width={roomWidth} height={roomHeight}
+                          clipPath={`url(#${clipId})`}
+                          fill="url(#room-vignette)"
+                          opacity="0.6"
+                        />
+                      )}
+
+                      {/* Scanline overlay */}
+                      <rect
+                        x={rx} y={ry}
+                        width={roomWidth} height={roomHeight}
+                        clipPath={`url(#${clipId})`}
+                        fill="url(#room-scanlines)"
+                        opacity={isAdj ? 0.3 : 0.5}
                       />
 
-                      {/* Room name */}
-                      {/* Room name */}
+                      {/* Bottom gradient for text readability */}
+                      <rect
+                        x={rx} y={ry}
+                        width={roomWidth} height={roomHeight}
+                        clipPath={`url(#${clipId})`}
+                        fill="url(#room-text-gradient)"
+                      />
+
+                      {/* Room border (on top of image) */}
+                      <rect
+                        x={rx} y={ry}
+                        width={roomWidth} height={roomHeight}
+                        rx={3}
+                        fill="none"
+                        stroke={isHovered ? COLORS.title : stroke}
+                        strokeWidth={isCurrent ? 2 : 1}
+                        strokeDasharray={isAdj ? '4 4' : undefined}
+                      />
+
+                      {/* Corner bracket decorations */}
+                      <CornerBrackets
+                        x={rx} y={ry} w={roomWidth} h={roomHeight}
+                        stroke={isCurrent ? COLORS.title : (isHovered ? COLORS.title : stroke)}
+                        opacity={isCurrent ? 0.9 : (isAdj ? 0.3 : 0.6)}
+                      />
+
+                      {/* Archetype icon — top left */}
+                      {!isAdj && (
+                        <text
+                          x={rx + 6}
+                          y={ry + 14}
+                          fill={isCurrent ? COLORS.title : '#8a9aaf'}
+                          fontSize="11"
+                          fontFamily="monospace"
+                          opacity="0.8"
+                        >
+                          {getIcon(room.archetype)}
+                        </text>
+                      )}
+
+                      {/* Text shadow for readability */}
                       <text
-                        x={textX}
-                        y={pos.y - 2}
-                        fill={isHovered && !isCurrent ? COLORS.title : textColor}
+                        x={rx + 6.5}
+                        y={ry + roomHeight - 9.5}
+                        fill="#000"
+                        fontSize="10"
+                        fontFamily="monospace"
+                        opacity="0.5"
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        {displayText}
+                      </text>
+
+                      {/* Room name — bottom left, over gradient */}
+                      <text
+                        x={rx + 6}
+                        y={ry + roomHeight - 10}
+                        fill={isHovered && !isCurrent ? COLORS.title : (isCurrent ? '#fff' : (isAdj ? '#6a7a8f' : '#d0d8e8'))}
                         fontSize="10"
                         fontFamily="monospace"
                         opacity={isAdj ? 0.8 : 1}
@@ -594,15 +773,16 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, onClose }: MapM
                         {displayText}
                       </text>
 
-                      {/* Current room indicator */}
+                      {/* Current room indicator — top right */}
                       {isCurrent && (
                         <text
-                          x={textX}
-                          y={pos.y + 12}
-                          fill="#000"
+                          x={rx + roomWidth - 6}
+                          y={ry + 14}
+                          fill={COLORS.title}
                           fontSize="8"
                           fontFamily="monospace"
-                          opacity="0.8"
+                          textAnchor="end"
+                          opacity="0.9"
                         >
                           ► CURRENT
                         </text>

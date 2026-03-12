@@ -73,8 +73,10 @@ export async function deleteGameCascade(
     await ctx.db.delete(image._id);
   }
 
-  const runHistoryEntries = await ctx.db.query("runHistory").collect() as RunHistoryEntry[];
-  const linkedRunHistory = runHistoryEntries.filter((entry) => entry.gameId === gameId);
+  const linkedRunHistory = await ctx.db
+    .query("runHistory")
+    .withIndex("by_game", (q) => q.eq("gameId", gameId))
+    .collect() as RunHistoryEntry[];
   for (const entry of linkedRunHistory) {
     await ctx.db.delete(entry._id);
   }

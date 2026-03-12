@@ -139,7 +139,7 @@ export default defineSchema({
     turnCount: v.number(),
     duration: v.number(),
     date: v.string(),
-  }),
+  }).index("by_game", ["gameId"]),
 
   /**
    * Station generation progress — reactive for loading UI.

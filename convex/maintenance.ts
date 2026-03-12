@@ -1,8 +1,8 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { deleteGameCascade } from "./lib/deleteGameCascade";
 
-export const purgeGames = mutation({
+export const purgeGames = internalMutation({
   args: {
     gameIds: v.array(v.id("games")),
   },
@@ -47,7 +47,7 @@ export const purgeGames = mutation({
   },
 });
 
-export const purgeOrphans = mutation({
+export const purgeOrphans = internalMutation({
   args: {},
   returns: v.object({
     messagesDeleted: v.number(),

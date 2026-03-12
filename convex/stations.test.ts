@@ -47,9 +47,8 @@ type StationsCtx = {
         index: string,
         callback: (query: { eq: (field: string, value: unknown) => unknown }) => unknown,
       ) => {
-        collect: () => Promise<Array<StationDoc | GameDoc | GameChildDoc | GameImageDoc | StationLogDoc>>;
+        collect: () => Promise<Array<StationDoc | GameDoc | GameChildDoc | GameImageDoc | StationLogDoc | RunHistoryDoc>>;
       };
-      collect?: () => Promise<RunHistoryDoc[]>;
     };
     get: (id: Id<'stations'>) => Promise<StationDoc | null>;
     insert: (
@@ -185,18 +184,16 @@ function createStationsHarness(options?: {
               if (gameId) return Promise.resolve(stationImages.filter((doc) => doc.gameId === gameId));
               if (stationId) return Promise.resolve(stationImages.filter((doc) => doc.stationId === stationId));
             }
+            if (table === 'runHistory') {
+              const gameId = conditions.get('gameId') as Id<'games'> | undefined;
+              return Promise.resolve(runHistory.filter((doc) => doc.gameId === gameId));
+            }
             if (table === 'stations') {
               return Promise.resolve([...stations.values()]);
             }
             return Promise.resolve([]);
           }),
         };
-      }),
-      collect: vi.fn(() => {
-        if (table === 'runHistory') {
-          return Promise.resolve(runHistory);
-        }
-        return Promise.resolve([]);
       }),
     })),
     get: vi.fn((id: Id<'stations'>) => Promise.resolve(stations.get(id) ?? null)),

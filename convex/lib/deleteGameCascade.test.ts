@@ -57,13 +57,10 @@ function createDeleteGameHarness(options?: {
             if (table === "turnLocks" && index === "by_game") return Promise.resolve(turnLocks.filter((doc) => doc.gameId === gameId));
             if (table === "aiLogs" && index === "by_game_turn") return Promise.resolve(aiLogs.filter((doc) => doc.gameId === gameId));
             if (table === "stationImages" && index === "by_game_cache") return Promise.resolve(stationImages.filter((doc) => doc.gameId === gameId));
+            if (table === "runHistory" && index === "by_game") return Promise.resolve(runHistory.filter((doc) => doc.gameId === gameId));
             return Promise.resolve([]);
           }),
         };
-      }),
-      collect: vi.fn(() => {
-        if (table === "runHistory") return Promise.resolve(runHistory);
-        return Promise.resolve([]);
       }),
     })),
     delete: vi.fn((id: string) => {

@@ -439,6 +439,10 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
           visitedRoomIds={visitedRoomIds}
           stationImages={stationImages}
           onClose={() => { setShowMap(false); }}
+          onMoveToRoom={(roomName) => {
+            setShowMap(false);
+            void submitTurn(`move to ${roomName}`);
+          }}
         />
       )}
 

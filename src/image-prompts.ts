@@ -93,6 +93,7 @@ export function buildRoomImagePrompt(
   }
 
   // 7. Cinematic anchor — ensures dark/dramatic consistency across all room images
+  parts.push('Widescreen 16:9 landscape composition.');
   parts.push(CINEMATIC_SUFFIX);
 
   return parts.join(' ');
@@ -148,7 +149,7 @@ export function buildNPCImagePrompt(
 
   parts.push('Dark background dissolving to black.');
 
-  parts.push('Cinematic portrait, Caravaggio lighting, shallow depth of field, 85mm lens.');
+  parts.push('Widescreen 16:9 cinematic portrait, Caravaggio lighting, shallow depth of field, 85mm lens.');
 
   return parts.join(' ');
 }
@@ -209,7 +210,7 @@ export function buildItemImagePrompt(
   const light = CATEGORY_LIGHT_COLOR[item.category] ?? DEFAULT_ITEM_LIGHT;
   parts.push(`${light}. Dark void background.`);
 
-  parts.push('Extreme close-up, shallow depth of field, macro lens.');
+  parts.push('Extreme close-up, widescreen 16:9 composition, shallow depth of field, macro lens.');
 
   parts.push('No text, labels, or UI elements.');
 

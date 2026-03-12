@@ -58,6 +58,10 @@ export const IMAGE_MODEL_ID = 'fal-ai/flux-2/turbo';
 /** FAL Flux 2 Turbo: $0.008 per megapixel (512×512 rounds to 1MP). */
 export const IMAGE_COST_USD = 0.008;
 
+/** 16:9 image dimensions used for all generated images (narrative strip + briefing).
+ *  Within fal.ai's 512–2048 per-axis constraint. */
+export const IMAGE_SIZE = { width: 1024, height: 576 };
+
 // ─── Video Generation ────────────────────────────────────────────────────────
 export const VIDEO_MODEL_ID = 'fal-ai/bytedance/seedance/v1/pro/fast/text-to-video';
 /** FAL SeedDance Pro Fast: ~$0.048 per video (480p, 5s). */

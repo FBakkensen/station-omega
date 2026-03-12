@@ -3,7 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { IMAGE_COST_USD } from "../../src/model-catalog.js";
+import { IMAGE_COST_USD, IMAGE_SIZE } from "../../src/model-catalog.js";
 
 const IMAGE_CATEGORY = v.union(
   v.literal("room_scene"),
@@ -69,8 +69,8 @@ export const generate = internalAction({
       const client = new FalImageClient(apiKey);
       const result = await client.generateImage({
         prompt,
-        width: 512,
-        height: 512,
+        width: IMAGE_SIZE.width,
+        height: IMAGE_SIZE.height,
       });
 
       // Store in Convex file storage

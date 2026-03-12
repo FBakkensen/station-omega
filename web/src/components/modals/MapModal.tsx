@@ -16,6 +16,7 @@ interface MapModalProps {
   visitedRoomIds: string[];
   stationImages: Map<string, StationImage>;
   onClose: () => void;
+  onMoveToRoom?: (roomName: string) => void;
 }
 
 type RoomVisibility = 'current' | 'visited' | 'adjacent-unvisited';
@@ -280,10 +281,18 @@ function CornerBrackets({
   );
 }
 
-export function MapModal({ rooms, currentRoomId, visitedRoomIds, stationImages, onClose }: MapModalProps) {
+export function MapModal({ rooms, currentRoomId, visitedRoomIds, stationImages, onClose, onMoveToRoom }: MapModalProps) {
   const seed = useMemo(() => hashSeed(rooms), [rooms]);
   const layout = useMemo(() => computeLayout(rooms, seed), [rooms, seed]);
   const [hoveredRoom, setHoveredRoom] = useState<string | null>(null);
+  const [confirmMoveRoom, setConfirmMoveRoom] = useState<string | null>(null);
+
+  // Rooms directly connected to the current room (clickable for movement)
+  const directlyConnected = useMemo(() => {
+    const currentRoom = rooms[currentRoomId] as MapRoom | undefined;
+    if (!currentRoom) return new Set<string>();
+    return new Set(currentRoom.connections.filter((id) => Object.prototype.hasOwnProperty.call(rooms, id)));
+  }, [rooms, currentRoomId]);
 
   const {
     visibleRoomIds,
@@ -337,7 +346,7 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, stationImages, 
 
     const dedupedConnections: Array<{ from: string; to: string }> = [];
     const seen = new Set<string>();
-    for (const roomId of visibleSet) {
+    for (const roomId of visitedSet) {
       const room = rooms[roomId];
       for (const neighborId of room.connections) {
         if (!visibleSet.has(neighborId) || !hasRoom(neighborId)) continue;
@@ -601,12 +610,15 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, stationImages, 
                     ? `? ${room.name}`
                     : `${getIcon(room.archetype)} ${room.name}`;
 
+                  const isDirectlyConnected = directlyConnected.has(id);
+
                   return (
                     <g
                       key={id}
                       onMouseEnter={() => { setHoveredRoom(id); }}
                       onMouseLeave={() => { setHoveredRoom(null); }}
-                      style={{ cursor: 'default' }}
+                      onClick={isDirectlyConnected ? () => { setConfirmMoveRoom(id); } : undefined}
+                      style={{ cursor: isDirectlyConnected ? 'pointer' : 'default' }}
                     >
                       {/* Per-room clip path */}
                       <defs>
@@ -840,12 +852,48 @@ export function MapModal({ rooms, currentRoomId, visitedRoomIds, stationImages, 
         </div>
 
         {/* ── Status Footer ───────────────────────────────────── */}
+        {/* ── Status Footer ───────────────────────────────────── */}
         <div className="flex items-center justify-between px-4 py-1.5 border-t border-omega-border bg-omega-bg/50 text-[10px] text-omega-dim uppercase tracking-wider">
           <span>{exploredCount} sector{exploredCount !== 1 ? 's' : ''} explored</span>
           {adjacentCount > 0 && <span>{adjacentCount} adjacent detected</span>}
-          <span className="hidden md:inline">Dimmed = unscanned one-hop exits</span>
+          <span className="hidden md:inline">Click a connected room to move</span>
         </div>
       </div>
+
+      {/* ── Move Confirmation Popup ───────────────────────── */}
+      {confirmMoveRoom && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          onClick={() => { setConfirmMoveRoom(null); }}
+        >
+          <div
+            className="border border-omega-border bg-omega-panel px-6 py-4 max-w-sm text-center"
+            onClick={(e) => { e.stopPropagation(); }}
+          >
+            <p className="text-omega-text text-sm mb-4">
+              Move to <span className="text-omega-title font-bold">{rooms[confirmMoveRoom].name}</span>?
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => { setConfirmMoveRoom(null); }}
+                className="px-4 py-1.5 text-xs uppercase tracking-wider border border-omega-border text-omega-dim hover:text-omega-text hover:bg-omega-input-focus transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const roomName = rooms[confirmMoveRoom].name;
+                  setConfirmMoveRoom(null);
+                  onMoveToRoom?.(roomName);
+                }}
+                className="px-4 py-1.5 text-xs uppercase tracking-wider border border-omega-title text-omega-title hover:bg-omega-title/20 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

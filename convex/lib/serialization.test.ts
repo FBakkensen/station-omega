@@ -11,7 +11,6 @@ describe('serialization helpers', () => {
   it('[Z] round-trips empty collection fields without loss', () => {
     const station = createTestStation();
     station.items.clear();
-    station.npcs.clear();
     station.rooms.clear();
     station.mapLayout.positions.clear();
 
@@ -20,7 +19,6 @@ describe('serialization helpers', () => {
 
     expect(restored.rooms.size).toBe(0);
     expect(restored.items.size).toBe(0);
-    expect(restored.npcs.size).toBe(0);
     expect(restored.mapLayout.positions.size).toBe(0);
   });
 
@@ -42,7 +40,7 @@ describe('serialization helpers', () => {
     expect(restored.stationName).toBe(station.stationName);
     expect(restored.rooms.get('room_0')?.name).toBe('Docking Vestibule');
     expect(restored.items.get('item_wire')?.name).toBe('Insulated Wire');
-    expect(restored.npcs.get('npc_0')?.behaviors.has('can_negotiate')).toBe(true);
+    expect(restored.objectives.title).toBe(station.objectives.title);
   });
 
   it('[B] supports large room visit maps and metric sets', () => {
@@ -64,20 +62,22 @@ describe('serialization helpers', () => {
     const serialized = serializeStation(station);
 
     expect(Array.isArray(Object.keys(serialized.rooms))).toBe(true);
-    expect(Array.isArray(serialized.npcs['npc_0'].behaviors)).toBe(true);
     expect(Array.isArray(serialized.crewRoster)).toBe(true);
   });
 
-  it('[E] throws when serialized NPC behaviors are missing', () => {
+  it('[E] tolerates malformed extra NPC payloads left over from legacy fixtures', () => {
     const station = createTestStation();
-    const malformed = serializeStation(station);
-    const malformedNPCs = malformed.npcs as unknown as Record<string, Record<string, unknown>>;
-    malformedNPCs['npc_0'] = {
-      ...malformedNPCs['npc_0'],
-      behaviors: undefined,
-    };
+    const malformed = {
+      ...serializeStation(station),
+      npcs: {
+        npc_0: {
+          behaviors: undefined,
+        },
+      },
+    } as ReturnType<typeof serializeStation> & { npcs: Record<string, unknown> };
 
-    expect(() => deserializeStation(malformed)).toThrow('Invalid NPC behaviors for npc_0');
+    const restored = deserializeStation(malformed);
+    expect(restored.rooms.size).toBe(station.rooms.size);
   });
 
   it('[S] is idempotent across serialize -> deserialize -> serialize', () => {

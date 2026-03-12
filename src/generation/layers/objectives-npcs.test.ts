@@ -87,15 +87,6 @@ function buildValidOutput(): ObjectivesOutput {
         },
       ],
     },
-    npcs: [
-      {
-        id: 'npc_0',
-        roomId: 'room_2',
-        disposition: 'neutral',
-        behaviors: ['can_negotiate', 'is_intelligent'],
-        role: 'relay technician',
-      },
-    ],
   };
 }
 
@@ -107,7 +98,6 @@ describe('objectivesNPCsLayer validation', () => {
   it('[Z] rejects objective chains with no steps', () => {
     const output = asSchemaValidObjectivesOutput({
       objectives: { title: 'Empty', steps: [] },
-      npcs: [],
     });
     const result = objectivesNPCsLayer.validate(output, context);
     expect(result.success).toBe(false);
@@ -120,30 +110,25 @@ describe('objectivesNPCsLayer validation', () => {
     expect(result.value?.objectives.steps).toHaveLength(3);
   });
 
-  it('[M] allows complex output with NPC placements and material-linked repairs', () => {
+  it('[M] allows complex output with material-linked repairs across multiple steps', () => {
     const output = buildValidOutput();
-    output.npcs.push({
-      id: 'npc_1',
-      roomId: 'room_1',
-      disposition: 'friendly',
-      behaviors: ['can_trade'],
-      role: 'salvage specialist',
+    output.objectives.steps.splice(2, 0, {
+      id: 'step_1b',
+      description: 'Stabilize the power routing through the command spine before opening the gantry.',
+      roomId: 'room_2',
+      requiredItemId: null,
+      requiredSystemRepair: 'power_relay',
     });
     const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
     expect(result.success).toBe(true);
-    expect(result.value?.npcs).toHaveLength(2);
+    expect(result.value?.objectives.steps).toHaveLength(4);
   });
 
-  it('[B] enforces the maximum NPC count boundary', () => {
+  it('[B] accepts the minimum boundary of exactly three ordered objective steps', () => {
     const output = buildValidOutput();
-    output.npcs.push(
-      { id: 'npc_1', roomId: 'room_1', disposition: 'friendly', behaviors: ['can_trade'], role: 'trader' },
-      { id: 'npc_2', roomId: 'room_2', disposition: 'fearful', behaviors: ['can_ally'], role: 'medic' },
-      { id: 'npc_3', roomId: 'room_1', disposition: 'neutral', behaviors: ['can_negotiate'], role: 'officer' },
-    );
     const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
-    expect(result.success).toBe(false);
-    expect(result.errors?.join(' ')).toContain('At most 3 NPCs allowed');
+    expect(result.success).toBe(true);
+    expect(result.value?.objectives.steps).toHaveLength(3);
   });
 
   it('[I] includes station context and retry guidance in prompt construction', () => {

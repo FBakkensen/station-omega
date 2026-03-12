@@ -11,9 +11,10 @@ interface SegmentImageStripProps {
 }
 
 function getImageStyle(category: string): { aspectRatio: string; objectPosition: string } {
+  void category;
   return {
     aspectRatio: '16/9',
-    objectPosition: category === 'npc_portrait' ? 'top' : 'center',
+    objectPosition: 'center',
   };
 }
 

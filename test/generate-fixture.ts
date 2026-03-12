@@ -23,7 +23,6 @@ function serializeStation(station: GeneratedStation): Record<string, unknown> {
         briefing: station.briefing,
         backstory: station.backstory,
         rooms: Object.fromEntries(station.rooms),
-        npcs: Object.fromEntries(station.npcs),
         items: Object.fromEntries(station.items),
         objectives: station.objectives,
         entryRoomId: station.entryRoomId,
@@ -58,7 +57,7 @@ async function main() {
     console.log(`Creative: ${creative.stationName}, ${String(creative.crewRoster.length)} crew`);
 
     const station = assembleStation(skeleton, creative);
-    console.log(`Assembled: ${String(station.rooms.size)} rooms, ${String(station.items.size)} items, ${String(station.npcs.size)} NPCs`);
+    console.log(`Assembled: ${String(station.rooms.size)} rooms, ${String(station.items.size)} items`);
 
     // Serialize
     const fixturesDir = ensureFixturesDir();

@@ -5,7 +5,7 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { buildTurnMessages, mapChoicesForPersistence, isValidSegmentType, shouldDowngradeDialogue } from "./streamTurn.helpers";
-import { buildRoomImagePrompt, buildNPCImagePrompt, buildItemImagePrompt, CINEMATIC_SUFFIX } from "../../src/image-prompts.js";
+import { buildRoomImagePrompt, buildItemImagePrompt, CINEMATIC_SUFFIX } from "../../src/image-prompts.js";
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
@@ -82,15 +82,6 @@ export const processAITurn = internalAction({
       const state = deserializeGameState(game.state);
       const build = getBuild(state.characterClass);
 
-      // Apply per-game overrides to station
-      if (game.npcOverrides) {
-        for (const [npcId, overrides] of Object.entries(
-          game.npcOverrides as Record<string, Record<string, unknown>>,
-        )) {
-          const npc = stationObj.npcs.get(npcId);
-          if (npc) Object.assign(npc, overrides);
-        }
-      }
       if (game.roomOverrides) {
         for (const [roomId, overrides] of Object.entries(
           game.roomOverrides as Record<string, Record<string, unknown>>,
@@ -183,7 +174,6 @@ export const processAITurn = internalAction({
 
       // Track room before AI execution for image generation triggers
       const previousRoom = state.currentRoom;
-      const seenNpcIds = new Set<string>();
       const seenItemIds = new Set<string>();
 
       console.time("[processAITurn] AI streaming");
@@ -220,11 +210,6 @@ export const processAITurn = internalAction({
               (seg as Record<string, unknown>).type = "narration";
               (seg as Record<string, unknown>).npcId = null;
               console.debug("[processAITurn] Downgraded dialogue to narration for non-social turn");
-            }
-
-            // Track NPC IDs from dialogue for image generation
-            if (seg.type === 'dialogue' && seg.npcId) {
-              seenNpcIds.add(seg.npcId);
             }
 
             // Track item IDs from entity refs for image generation
@@ -278,21 +263,9 @@ export const processAITurn = internalAction({
 
       const serializedState = serializeGameState(state);
 
-      // Persist NPC overrides
-      const npcOverrides: Record<string, Record<string, unknown>> = {};
-      for (const [npcId, npc] of stationObj.npcs) {
-        npcOverrides[npcId] = {
-          disposition: npc.disposition,
-          isAlly: npc.isAlly,
-          roomId: npc.roomId,
-          memory: npc.memory,
-        };
-      }
-
       await ctx.runMutation(internal.games.updateAfterTurn, {
         gameId,
         state: serializedState,
-        npcOverrides,
         objectivesOverride: stationObj.objectives,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         roomOverrides: game.roomOverrides ?? {},
@@ -386,20 +359,6 @@ export const processAITurn = internalAction({
             cacheKey: `item:${itemId}`,
             category: "item_image" as const,
             prompt: buildItemImagePrompt(item),
-          }));
-        }
-      }
-
-      // NPCs — independent, room-agnostic chiaroscuro portraits
-      for (const npcId of seenNpcIds) {
-        const npc = stationObj.npcs.get(npcId);
-        if (npc) {
-          imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateImage.generate, {
-            stationId: game.stationId,
-            gameId,
-            cacheKey: `npc:${npcId}`,
-            category: "npc_portrait" as const,
-            prompt: buildNPCImagePrompt(npc),
           }));
         }
       }

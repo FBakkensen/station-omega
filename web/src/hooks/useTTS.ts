@@ -74,12 +74,10 @@ function splitLongText(text: string, maxLen: number): string[] {
 
 const SENTENCE_END_RE = /[.!?](?:\s|$)/;
 
-function getEmotionMarkup(segType: string, npcDisposition?: string, hpPercent = 100): string {
+function getEmotionMarkup(segType: string, hpPercent = 100): string {
   switch (segType) {
     case 'narration':
       return hpPercent < 25 ? '[sigh] ' : '[laughing] ';
-    case 'dialogue':
-      return npcDisposition === 'fearful' ? '[whispering] ' : '';
     case 'thought':
     case 'crew_echo':
       return '[sigh] ';
@@ -90,12 +88,6 @@ function getEmotionMarkup(segType: string, npcDisposition?: string, hpPercent = 
 
 function getVoiceConfig(seg: DisplaySegment): { voiceId: string; tuning: VoiceTuning } {
   switch (seg.type) {
-    case 'dialogue':
-      if (seg.npcId) {
-        const idx = hashString(seg.npcId) % NPC_VOICE_POOL.length;
-        return { voiceId: NPC_VOICE_POOL[idx], tuning: TUNING_DEFAULT };
-      }
-      return { voiceId: NARRATOR_VOICE, tuning: TUNING_DEFAULT };
     case 'thought':
       return { voiceId: INNER_VOICE, tuning: TUNING_INNER };
     case 'station_pa':

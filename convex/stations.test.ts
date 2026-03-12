@@ -23,6 +23,22 @@ type GameChildDoc = {
   gameId: Id<'games'>;
 };
 
+type GameImageDoc = GameChildDoc & {
+  stationId: Id<'stations'>;
+  storageId: Id<'_storage'>;
+};
+
+type StationLogDoc = {
+  _id: string;
+  stationId: Id<'stations'>;
+  gameId?: Id<'games'>;
+};
+
+type RunHistoryDoc = {
+  _id: string;
+  gameId?: Id<'games'>;
+};
+
 type StationsCtx = {
   db: {
     query: (table: string) => {
@@ -31,8 +47,9 @@ type StationsCtx = {
         index: string,
         callback: (query: { eq: (field: string, value: unknown) => unknown }) => unknown,
       ) => {
-        collect: () => Promise<Array<StationDoc | GameDoc | GameChildDoc>>;
+        collect: () => Promise<Array<StationDoc | GameDoc | GameChildDoc | GameImageDoc | StationLogDoc>>;
       };
+      collect?: () => Promise<RunHistoryDoc[]>;
     };
     get: (id: Id<'stations'>) => Promise<StationDoc | null>;
     insert: (
@@ -40,6 +57,9 @@ type StationsCtx = {
       doc: { stationName: string; briefing: string; difficulty: Difficulty; data: unknown },
     ) => Promise<Id<'stations'>>;
     delete: (id: string) => Promise<void>;
+  };
+  storage: {
+    delete: (id: Id<'_storage'>) => Promise<void>;
   };
 };
 
@@ -93,13 +113,22 @@ function createStationsHarness(options?: {
   messages?: GameChildDoc[];
   segments?: GameChildDoc[];
   choices?: GameChildDoc[];
+  turnLocks?: GameChildDoc[];
+  aiLogs?: StationLogDoc[];
+  stationImages?: GameImageDoc[];
+  runHistory?: RunHistoryDoc[];
 }) {
   const stations = new Map<string, StationDoc>((options?.stations ?? []).map((doc) => [doc._id, doc]));
   const games = [...(options?.games ?? [])];
   const messages = [...(options?.messages ?? [])];
   const segments = [...(options?.segments ?? [])];
   const choices = [...(options?.choices ?? [])];
+  const turnLocks = [...(options?.turnLocks ?? [])];
+  const aiLogs = [...(options?.aiLogs ?? [])];
+  const stationImages = [...(options?.stationImages ?? [])];
+  const runHistory = [...(options?.runHistory ?? [])];
   const deletedIds: string[] = [];
+  const deletedStorageIds: string[] = [];
 
   const db: StationsCtx['db'] = {
     query: vi.fn((table: string) => ({
@@ -140,12 +169,34 @@ function createStationsHarness(options?: {
               const gameId = conditions.get('gameId') as Id<'games'> | undefined;
               return Promise.resolve(choices.filter((doc) => doc.gameId === gameId));
             }
+            if (table === 'turnLocks') {
+              const gameId = conditions.get('gameId') as Id<'games'> | undefined;
+              return Promise.resolve(turnLocks.filter((doc) => doc.gameId === gameId));
+            }
+            if (table === 'aiLogs') {
+              const gameId = conditions.get('gameId') as Id<'games'> | undefined;
+              const stationId = conditions.get('stationId') as Id<'stations'> | undefined;
+              if (gameId) return Promise.resolve(aiLogs.filter((doc) => doc.gameId === gameId));
+              if (stationId) return Promise.resolve(aiLogs.filter((doc) => doc.stationId === stationId));
+            }
+            if (table === 'stationImages') {
+              const gameId = conditions.get('gameId') as Id<'games'> | undefined;
+              const stationId = conditions.get('stationId') as Id<'stations'> | undefined;
+              if (gameId) return Promise.resolve(stationImages.filter((doc) => doc.gameId === gameId));
+              if (stationId) return Promise.resolve(stationImages.filter((doc) => doc.stationId === stationId));
+            }
             if (table === 'stations') {
               return Promise.resolve([...stations.values()]);
             }
             return Promise.resolve([]);
           }),
         };
+      }),
+      collect: vi.fn(() => {
+        if (table === 'runHistory') {
+          return Promise.resolve(runHistory);
+        }
+        return Promise.resolve([]);
       }),
     })),
     get: vi.fn((id: Id<'stations'>) => Promise.resolve(stations.get(id) ?? null)),
@@ -179,18 +230,38 @@ function createStationsHarness(options?: {
       if (segIdx >= 0) segments.splice(segIdx, 1);
       const choiceIdx = choices.findIndex((doc) => doc._id === id);
       if (choiceIdx >= 0) choices.splice(choiceIdx, 1);
+      const turnLockIdx = turnLocks.findIndex((doc) => doc._id === id);
+      if (turnLockIdx >= 0) turnLocks.splice(turnLockIdx, 1);
+      const aiLogIdx = aiLogs.findIndex((doc) => doc._id === id);
+      if (aiLogIdx >= 0) aiLogs.splice(aiLogIdx, 1);
+      const stationImageIdx = stationImages.findIndex((doc) => doc._id === id);
+      if (stationImageIdx >= 0) stationImages.splice(stationImageIdx, 1);
+      const runHistoryIdx = runHistory.findIndex((doc) => doc._id === id);
+      if (runHistoryIdx >= 0) runHistory.splice(runHistoryIdx, 1);
+      return Promise.resolve();
+    }),
+  };
+
+  const storage: StationsCtx['storage'] = {
+    delete: vi.fn((id: Id<'_storage'>) => {
+      deletedStorageIds.push(id);
       return Promise.resolve();
     }),
   };
 
   return {
-    ctx: { db },
+    ctx: { db, storage },
     deletedIds,
+    deletedStorageIds,
     stations,
     games,
     messages,
     segments,
     choices,
+    turnLocks,
+    aiLogs,
+    stationImages,
+    runHistory,
   };
 }
 
@@ -245,7 +316,7 @@ describe('stations persistence contracts', () => {
     const gameA = 'game_a' as Id<'games'>;
     const gameB = 'game_b' as Id<'games'>;
     const gameOther = 'game_other' as Id<'games'>;
-    const { ctx, deletedIds } = createStationsHarness({
+    const { ctx, deletedIds, deletedStorageIds } = createStationsHarness({
       stations: [
         {
           _id: stationTarget,
@@ -284,24 +355,59 @@ describe('stations persistence contracts', () => {
         { _id: 'choice_b_1', gameId: gameB },
         { _id: 'choice_other', gameId: gameOther },
       ],
+      turnLocks: [
+        { _id: 'lock_a_1', gameId: gameA },
+        { _id: 'lock_b_1', gameId: gameB },
+        { _id: 'lock_other', gameId: gameOther },
+      ],
+      aiLogs: [
+        { _id: 'log_a_1', stationId: stationTarget, gameId: gameA },
+        { _id: 'log_b_1', stationId: stationTarget, gameId: gameB },
+        { _id: 'log_station_only', stationId: stationTarget },
+        { _id: 'log_other', stationId: stationKeep, gameId: gameOther },
+      ],
+      stationImages: [
+        { _id: 'img_a_1', gameId: gameA, stationId: stationTarget, storageId: 'blob_a' as Id<'_storage'> },
+        { _id: 'img_b_1', gameId: gameB, stationId: stationTarget, storageId: 'blob_b' as Id<'_storage'> },
+        { _id: 'img_other', gameId: gameOther, stationId: stationKeep, storageId: 'blob_other' as Id<'_storage'> },
+      ],
+      runHistory: [
+        { _id: 'run_a_1', gameId: gameA },
+        { _id: 'run_b_1', gameId: gameB },
+        { _id: 'run_other', gameId: gameOther },
+      ],
     });
 
     await removeHandler(ctx, { id: stationTarget });
 
+    expect(deletedStorageIds).toEqual(['blob_a', 'blob_b']);
     expect(deletedIds).toEqual([
       'msg_a_1',
       'seg_a_1',
       'choice_a_1',
+      'lock_a_1',
+      'log_a_1',
+      'img_a_1',
+      'run_a_1',
       gameA,
       'msg_b_1',
       'seg_b_1',
       'choice_b_1',
+      'lock_b_1',
+      'log_b_1',
+      'img_b_1',
+      'run_b_1',
       gameB,
+      'log_station_only',
       stationTarget,
     ]);
     expect(deletedIds).not.toContain('msg_other');
     expect(deletedIds).not.toContain('seg_other');
     expect(deletedIds).not.toContain('choice_other');
+    expect(deletedIds).not.toContain('lock_other');
+    expect(deletedIds).not.toContain('log_other');
+    expect(deletedIds).not.toContain('img_other');
+    expect(deletedIds).not.toContain('run_other');
   });
 
   it('[B] keeps boundary list ordering stable at descending creation-time values', async () => {

@@ -8,7 +8,6 @@ type GameDoc = {
   characterClass: 'engineer' | 'scientist' | 'medic' | 'commander';
   difficulty: 'normal' | 'hard' | 'nightmare';
   state: Record<string, unknown>;
-  npcOverrides: Record<string, unknown>;
   roomOverrides: Record<string, unknown>;
   objectivesOverride?: Record<string, unknown>;
   roomDrops: Record<string, unknown>;
@@ -58,7 +57,6 @@ const updateAfterTurnHandler = (
       args: {
         gameId: Id<'games'>;
         state: Record<string, unknown>;
-        npcOverrides: Record<string, unknown>;
         roomOverrides: Record<string, unknown>;
         objectivesOverride?: Record<string, unknown>;
         roomDrops?: Record<string, unknown>;
@@ -156,7 +154,6 @@ describe('games lifecycle contracts', () => {
       stationId: 'station_1',
       characterClass: 'engineer',
       difficulty: 'normal',
-      npcOverrides: {},
       roomOverrides: {},
       roomDrops: {},
       isOver: false,
@@ -179,7 +176,6 @@ describe('games lifecycle contracts', () => {
           characterClass: 'medic',
           difficulty: 'hard',
           state: { hp: 90 },
-          npcOverrides: {},
           roomOverrides: {},
           roomDrops: {},
           isOver: false,
@@ -194,7 +190,6 @@ describe('games lifecycle contracts', () => {
       updateAfterTurnHandler(ctx, {
         gameId,
         state: { hp: 76, oxygen: 55 },
-        npcOverrides: { npc_0: { disposition: 'friendly' } },
         roomOverrides: { room_1: { collapsed: true } },
         objectivesOverride: { currentStepIndex: 2 },
         roomDrops: { room_1: ['item_wire'] },
@@ -209,7 +204,6 @@ describe('games lifecycle contracts', () => {
       id: gameId,
       updates: {
         state: { hp: 76, oxygen: 55 },
-        npcOverrides: { npc_0: { disposition: 'friendly' } },
         roomOverrides: { room_1: { collapsed: true } },
         objectivesOverride: { currentStepIndex: 2 },
         roomDrops: { room_1: ['item_wire'] },
@@ -233,7 +227,6 @@ describe('games lifecycle contracts', () => {
           characterClass: 'scientist',
           difficulty: 'nightmare',
           state: {},
-          npcOverrides: {},
           roomOverrides: {},
           roomDrops: {},
           isOver: false,
@@ -247,7 +240,6 @@ describe('games lifecycle contracts', () => {
     await updateAfterTurnHandler(ctx, {
       gameId,
       state: {},
-      npcOverrides: {},
       roomOverrides: {},
       isOver: false,
       won: false,
@@ -268,7 +260,6 @@ describe('games lifecycle contracts', () => {
           characterClass: 'commander',
           difficulty: 'hard',
           state: { hp: 88, currentRoom: 'room_2' },
-          npcOverrides: {},
           roomOverrides: {},
           roomDrops: {},
           isOver: true,
@@ -308,7 +299,6 @@ describe('games lifecycle contracts', () => {
           characterClass: 'engineer',
           difficulty: 'normal',
           state: {},
-          npcOverrides: {},
           roomOverrides: {},
           roomDrops: {},
           isOver: false,
@@ -330,7 +320,6 @@ describe('games lifecycle contracts', () => {
       characterClass: 'medic',
       difficulty: 'normal',
       state: { hp: 95 },
-      npcOverrides: {},
       roomOverrides: {},
       roomDrops: {},
       isOver: false,

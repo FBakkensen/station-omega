@@ -21,7 +21,7 @@ export interface RunConfig {
 
 export type CharacterClassId = 'engineer' | 'scientist' | 'medic' | 'commander';
 
-export type ActionDomain = 'tech' | 'medical' | 'social' | 'survival' | 'science';
+export type ActionDomain = 'tech' | 'medical' | 'command' | 'survival' | 'science';
 
 export interface CharacterBuild {
     id: CharacterClassId;
@@ -115,42 +115,6 @@ export interface SystemFailureSkeleton {
     mitigationPaths: string[];
 }
 
-// ─── NPC System ─────────────────────────────────────────────────────────────
-
-export type Disposition = 'neutral' | 'friendly' | 'fearful';
-
-export type NPCBehaviorFlag =
-    | 'can_negotiate'
-    | 'can_ally'
-    | 'can_trade'
-    | 'is_intelligent';
-
-export interface NPCMemory {
-    playerActions: string[];
-    dispositionHistory: Array<{ turn: number; from: Disposition; to: Disposition; reason: string }>;
-    wasSpared: boolean;
-    wasHelped: boolean;
-    tradeInventory: string[];
-}
-
-/** Structural NPC concept from AI generation Layer 3 (before creative names/descriptions). */
-export interface NPCConcept {
-    id: string;
-    roomId: string;
-    disposition: Disposition;
-    behaviors: NPCBehaviorFlag[];
-    role: string;
-}
-
-/** Creative content for an NPC, generated in Layer 4. */
-export interface NPCCreative {
-    npcId: string;
-    name: string;
-    appearance: string;
-    personality: string;
-    soundSignature: string;
-}
-
 // ─── Item System ────────────────────────────────────────────────────────────
 
 export type ItemEffectType = 'heal' | 'key' | 'objective' | 'utility' | 'trade' | 'material' | 'tool' | 'component' | 'chemical';
@@ -208,7 +172,6 @@ export interface StationSkeleton {
     objectives: ObjectiveChain;
     entryRoomId: string;
     escapeRoomId: string;
-    npcConcepts?: NPCConcept[];
     scenario?: { theme: string; centralTension: string };
 }
 
@@ -273,7 +236,6 @@ export interface CreativeContent {
     items: ItemCreative[];
     arrivalScenario: ArrivalScenario;
     startingItem: StartingItemCreative;
-    npcCreative?: NPCCreative[];
     visualStyleGuide?: string;
     briefingVideoPrompt?: string;
 }
@@ -298,19 +260,6 @@ export interface Room {
     engineeringNotes: string;
 }
 
-export interface NPC {
-    id: string;
-    name: string;
-    roomId: string;
-    disposition: Disposition;
-    behaviors: Set<NPCBehaviorFlag>;
-    memory: NPCMemory;
-    personality: string;
-    isAlly: boolean;
-    appearance: string;
-    soundSignature: string;
-}
-
 export interface Item {
     id: string;
     name: string;
@@ -327,7 +276,6 @@ export interface GeneratedStation {
     briefing: string;
     backstory: string;
     rooms: Map<string, Room>;
-    npcs: Map<string, NPC>;
     items: Map<string, Item>;
     objectives: ObjectiveChain;
     entryRoomId: string;
@@ -391,7 +339,6 @@ export interface RunMetrics {
     itemsCollected: string[];
     crewLogsFound: number;
     creativeActionsAttempted: number;
-    npcInteractions: number;
     deathCause: string | null;
     won: boolean;
     endingId: string | null;
@@ -456,7 +403,6 @@ export interface GameState {
     moralProfile: MoralProfile;
     metrics: RunMetrics;
     fieldSurgeryUsedInRoom: Set<string>;
-    npcAllies: Set<string>;
     missionElapsedMinutes: number;
     eventCooldowns: Record<string, number>;
 }

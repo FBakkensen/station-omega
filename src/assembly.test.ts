@@ -130,15 +130,6 @@ function makeSkeleton(overrides: Partial<StationSkeleton> = {}): StationSkeleton
     },
     entryRoomId: 'room_0',
     escapeRoomId: 'room_2',
-    npcConcepts: [
-      {
-        id: 'npc_0',
-        roomId: 'room_1',
-        disposition: 'neutral',
-        behaviors: ['can_negotiate'],
-        role: 'technician',
-      },
-    ],
     scenario: {
       theme: 'Power cascade',
       centralTension: 'Relays are failing station-wide.',
@@ -206,27 +197,17 @@ function makeCreative(overrides: Partial<CreativeContent> = {}): CreativeContent
       effectValue: 1,
       useNarration: 'You palm the multitool and run a quick check.',
     },
-    npcCreative: [
-      {
-        npcId: 'npc_0',
-        name: 'Ari Voss',
-        appearance: 'Scuffed suit, fractured visor.',
-        personality: 'Calm under pressure',
-        soundSignature: 'steady clipped tone',
-      },
-    ],
     ...overrides,
   };
 }
 
 describe('assembleStation contracts', () => {
-  it('[Z] assembles zero optional NPC concepts without adding phantom NPC records', () => {
-    const skeleton = makeSkeleton({ npcConcepts: [] });
-    const creative = makeCreative({ npcCreative: [] });
+  it('[Z] assembles zero optional people systems without adding phantom records', () => {
+    const skeleton = makeSkeleton();
+    const creative = makeCreative();
 
     const station = assembleStation(skeleton, creative);
 
-    expect(station.npcs.size).toBe(0);
     expect(station.rooms.size).toBe(3);
     expect(station.items.has('start_multitool')).toBe(true);
   });

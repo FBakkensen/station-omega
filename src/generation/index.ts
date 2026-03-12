@@ -83,9 +83,9 @@ export async function generateStation(
     context['systemsItems'] = systemsItems;
     combinedLog('GENERATION', `Layer 2 complete: ${String(systemsItems.roomFailures.length)} rooms with failures, ${String(systemsItems.items.length)} items`);
 
-    // ─── Layer 3: Objectives & NPCs ──────────────────────────────────────────
+    // ─── Layer 3: Objectives ────────────────────────────────────────────────
     onProgress?.('Designing mission objectives...');
-    combinedLog('GENERATION', 'Starting Layer 3: Objectives & NPCs');
+    combinedLog('GENERATION', 'Starting Layer 3: Objectives');
 
     const objectivesNPCs = await runLayer(
         objectivesNPCsLayer,
@@ -97,7 +97,7 @@ export async function generateStation(
         combinedLog,
     );
     context['objectivesNPCs'] = objectivesNPCs;
-    combinedLog('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps, ${String(objectivesNPCs.npcs.length)} NPCs`);
+    combinedLog('GENERATION', `Layer 3 complete: ${String(objectivesNPCs.objectives.steps.length)} objective steps`);
 
     // ─── Layer 4: Creative Content (parallel sub-layers) ────────────────────
     combinedLog('GENERATION', 'Starting Layer 4: Creative (parallel sub-layers)');
@@ -214,7 +214,6 @@ export async function generateStation(
         objectives,
         entryRoomId: topology.entryRoomId,
         escapeRoomId: topology.escapeRoomId,
-        npcConcepts: objectivesNPCs.npcs.length > 0 ? objectivesNPCs.npcs : undefined,
         scenario: topology.scenario,
     };
 

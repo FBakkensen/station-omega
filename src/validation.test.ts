@@ -27,7 +27,7 @@ describe('validation helpers', () => {
     expect(issues).toEqual([]);
   });
 
-  it('[O] accepts one valid in-room dialogue reference to a known NPC id', () => {
+  it('[O] rejects one dialogue segment that still carries a legacy npcId reference', () => {
     const station = cloneFixtureStation();
     const state = cloneFixtureState();
     const response: GameResponse = {
@@ -44,7 +44,10 @@ describe('validation helpers', () => {
 
     const issues = validateGameResponse(response, state, station);
 
-    expect(issues).toEqual([]);
+    expect(issues).toEqual([
+      'Dialogue segments are disabled; use narration instead.',
+      'npcId is no longer supported: npc_0',
+    ]);
   });
 
   it('[M] builds multi-section guardrail feedback with issue bullets, roster, failures, and ground-truth state', () => {

@@ -38,12 +38,11 @@ export function mapChoicesForPersistence(choiceSet: ChoiceSet): Array<{
 
 const VALID_SEGMENT_TYPES = new Set<string>(SEGMENT_TYPES);
 
-const SOCIAL_KEYWORDS_RE = /\b(talk|speak|ask|negotiate|greet|hello|address)\b/i;
-
 export function isValidSegmentType(type: string): boolean {
   return VALID_SEGMENT_TYPES.has(type);
 }
 
 export function shouldDowngradeDialogue(segType: string, playerInput: string): boolean {
-  return segType === "dialogue" && !SOCIAL_KEYWORDS_RE.test(playerInput);
+  void playerInput;
+  return segType === "dialogue";
 }

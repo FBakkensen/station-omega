@@ -5,7 +5,6 @@ import { SEGMENT_COLORS, HEADER_COLORS, CARD_STYLES } from '../styles/theme';
 /** Human-readable labels for image categories (used in image strip + lightbox). */
 export const IMAGE_CATEGORY_LABELS: Record<string, string> = {
   room_scene: 'CAM FEED',
-  npc_portrait: 'BIO SCAN',
   item_image: 'SPEC ANALYSIS',
   briefing: 'BRIEFING',
   briefing_video: 'BRIEFING',

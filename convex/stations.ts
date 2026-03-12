@@ -1,5 +1,6 @@
 import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
+import { deleteGameCascade } from "./lib/deleteGameCascade";
 
 /** List all saved stations (metadata only, sorted newest first). */
 export const list = query({
@@ -75,34 +76,15 @@ export const remove = mutation({
       .collect();
 
     for (const game of games) {
-      // Delete game's messages
-      const messages = await ctx.db
-        .query("messages")
-        .withIndex("by_game", (q) => q.eq("gameId", game._id))
-        .collect();
-      for (const msg of messages) {
-        await ctx.db.delete(msg._id);
-      }
+      await deleteGameCascade(ctx, game._id);
+    }
 
-      // Delete game's segments
-      const segments = await ctx.db
-        .query("turnSegments")
-        .withIndex("by_game_turn", (q) => q.eq("gameId", game._id))
-        .collect();
-      for (const seg of segments) {
-        await ctx.db.delete(seg._id);
-      }
-
-      // Delete game's choice sets
-      const choices = await ctx.db
-        .query("choiceSets")
-        .withIndex("by_game", (q) => q.eq("gameId", game._id))
-        .collect();
-      for (const choice of choices) {
-        await ctx.db.delete(choice._id);
-      }
-
-      await ctx.db.delete(game._id);
+    const stationLogs = await ctx.db
+      .query("aiLogs")
+      .withIndex("by_station", (q) => q.eq("stationId", args.id))
+      .collect();
+    for (const log of stationLogs) {
+      await ctx.db.delete(log._id);
     }
 
     // Delete cached images

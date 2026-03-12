@@ -38,7 +38,6 @@ export const save = internalMutation({
     prompt: v.string(),
     category: v.union(
       v.literal("room_scene"),
-      v.literal("npc_portrait"),
       v.literal("briefing"),
       v.literal("briefing_video"),
       v.literal("item_image"),
@@ -80,7 +79,7 @@ export const listForGame = query({
   },
   returns: v.any(),
   handler: async (ctx, args) => {
-    // Game-scoped images (rooms, NPCs)
+    // Game-scoped images (rooms, items)
     const gameImages = await ctx.db
       .query("stationImages")
       .withIndex("by_game_cache", (q) =>

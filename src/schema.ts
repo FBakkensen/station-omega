@@ -7,12 +7,12 @@ export const SEGMENT_TYPES = [
 export const GameSegmentSchema = z.object({
     type: z.enum(SEGMENT_TYPES),
     text: z.string(),
-    npcId: z.string().nullable().describe('NPC internal ID from the NPC list (e.g. "enemy_room_1"), or null'),
+    npcId: z.string().nullable().describe('Legacy field. Always set to null.'),
     crewName: z.string().nullable().describe('Crew member full name from the crew roster, or null'),
     entityRefs: z.array(z.object({
-      type: z.enum(['room', 'npc', 'item']),
+      type: z.enum(['room', 'item']),
       id: z.string(),
-    })).max(3).optional().describe('Up to 3 entity references for inline thumbnail images, or omitted'),
+    })).max(3).optional().describe('Up to 3 room or item references for inline thumbnail images, or omitted'),
 });
 
 export const GameResponseSchema = z.object({
@@ -24,7 +24,7 @@ export const GameResponseSchema = z.object({
 
 export type GameSegment = z.infer<typeof GameSegmentSchema>;
 export type GameResponse = z.infer<typeof GameResponseSchema>;
-export type EntityRef = { type: 'room' | 'npc' | 'item'; id: string };
+export type EntityRef = { type: 'room' | 'item'; id: string };
 
 /** A GameSegment enriched with display metadata for client rendering. */
 export interface DisplaySegment extends GameSegment {

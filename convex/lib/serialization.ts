@@ -5,8 +5,6 @@
 
 import type {
   GeneratedStation,
-  NPC,
-  NPCBehaviorFlag,
   MapLayout,
   Room,
   Item,
@@ -22,7 +20,6 @@ export interface SerializedStation {
   briefing: string;
   backstory: string;
   rooms: Record<string, Omit<Room, never>>;
-  npcs: Record<string, SerializedNPC>;
   items: Record<string, Omit<Item, never>>;
   objectives: GeneratedStation["objectives"];
   entryRoomId: string;
@@ -33,8 +30,6 @@ export interface SerializedStation {
   visualStyleGuide?: string;
   briefingVideoPrompt?: string;
 }
-
-type SerializedNPC = Omit<NPC, "behaviors"> & { behaviors: NPCBehaviorFlag[] };
 
 interface SerializedMapLayout {
   seed: number;
@@ -47,11 +42,6 @@ interface SerializedMapLayout {
 
 export function serializeStation(station: GeneratedStation): SerializedStation {
   const rooms = Object.fromEntries(station.rooms) as SerializedStation["rooms"];
-
-  const npcs: Record<string, SerializedNPC> = {};
-  for (const [id, npc] of station.npcs) {
-    npcs[id] = { ...npc, behaviors: Array.from(npc.behaviors) };
-  }
 
   const items = Object.fromEntries(station.items) as SerializedStation["items"];
 
@@ -71,7 +61,6 @@ export function serializeStation(station: GeneratedStation): SerializedStation {
     briefing: station.briefing,
     backstory: station.backstory,
     rooms,
-    npcs,
     items,
     objectives: station.objectives,
     entryRoomId: station.entryRoomId,
@@ -86,17 +75,6 @@ export function serializeStation(station: GeneratedStation): SerializedStation {
 
 export function deserializeStation(data: SerializedStation): GeneratedStation {
   const rooms = new Map(Object.entries(data.rooms));
-
-  const npcs = new Map<string, NPC>();
-  for (const [id, raw] of Object.entries(data.npcs)) {
-    if (!Array.isArray(raw.behaviors)) {
-      throw new Error(`Invalid NPC behaviors for ${id}: expected array`);
-    }
-    npcs.set(id, {
-      ...raw,
-      behaviors: new Set(raw.behaviors),
-    });
-  }
 
   const items = new Map(Object.entries(data.items));
 
@@ -113,7 +91,6 @@ export function deserializeStation(data: SerializedStation): GeneratedStation {
     briefing: data.briefing,
     backstory: data.backstory,
     rooms,
-    npcs,
     items,
     objectives: normalizeObjectiveChainWithLegacySupport(data.objectives),
     entryRoomId: data.entryRoomId,
@@ -162,7 +139,6 @@ export interface SerializedGameState {
     roomsVisited: string[];
   };
   fieldSurgeryUsedInRoom: string[];
-  npcAllies: string[];
   missionElapsedMinutes: number;
   eventCooldowns?: Record<string, number>;
 }
@@ -202,7 +178,6 @@ export function serializeGameState(state: GameState): SerializedGameState {
       roomsVisited: Array.from(state.metrics.roomsVisited),
     },
     fieldSurgeryUsedInRoom: Array.from(state.fieldSurgeryUsedInRoom),
-    npcAllies: Array.from(state.npcAllies),
     missionElapsedMinutes: state.missionElapsedMinutes,
     eventCooldowns: state.eventCooldowns,
   };
@@ -243,7 +218,6 @@ export function deserializeGameState(data: SerializedGameState): GameState {
       roomsVisited: new Set(data.metrics.roomsVisited),
     },
     fieldSurgeryUsedInRoom: new Set(data.fieldSurgeryUsedInRoom),
-    npcAllies: new Set(data.npcAllies),
     missionElapsedMinutes: data.missionElapsedMinutes,
     eventCooldowns: data.eventCooldowns ?? {},
   };

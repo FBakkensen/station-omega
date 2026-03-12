@@ -7,7 +7,6 @@ import { IMAGE_COST_USD, IMAGE_SIZE } from "../../src/model-catalog.js";
 
 const IMAGE_CATEGORY = v.union(
   v.literal("room_scene"),
-  v.literal("npc_portrait"),
   v.literal("briefing"),
   v.literal("briefing_video"),
   v.literal("item_image"),

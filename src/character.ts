@@ -70,7 +70,6 @@ export function initializePlayerState(
         itemsCollected: [...startingInventory],
         crewLogsFound: 0,
         creativeActionsAttempted: 0,
-        npcInteractions: 0,
         deathCause: null,
         won: false,
         endingId: null,
@@ -112,7 +111,6 @@ export function initializePlayerState(
         },
         metrics,
         fieldSurgeryUsedInRoom: new Set<string>(),
-        npcAllies: new Set<string>(),
         missionElapsedMinutes: 0,
         eventCooldowns: {},
     };

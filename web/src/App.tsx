@@ -113,7 +113,6 @@ export function App() {
         itemsCollected: [],
         crewLogsFound: 0,
         creativeActionsAttempted: 0,
-        npcInteractions: 0,
         deathCause: null,
         won: false,
         endingId: null,
@@ -124,7 +123,6 @@ export function App() {
         improvizedSolutions: 0,
       },
       fieldSurgeryUsedInRoom: [],
-      npcAllies: [],
       missionElapsedMinutes: 0,
       eventCooldowns: {},
     };

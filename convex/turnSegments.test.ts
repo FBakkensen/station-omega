@@ -22,6 +22,7 @@ type SegmentDoc = {
     text: string;
     npcId: string | null;
     crewName: string | null;
+    entityRefs?: Array<{ type: string; id: string }>;
   };
 };
 
@@ -203,6 +204,46 @@ describe('turnSegments query and persistence contracts', () => {
 
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.segment.text)).toEqual(['alpha', 'beta']);
+  });
+
+  it('[M] strips many legacy npc entity refs from query reads while preserving room and item refs', async () => {
+    const gameId = 'game_legacy' as Id<'games'>;
+    const expectedRefs = [
+      { type: 'room', id: 'room_0' },
+      { type: 'item', id: 'item_0' },
+    ];
+    const { ctx } = createHarness({
+      games: [{ _id: gameId, turnCount: 2 }],
+      segments: [
+        {
+          _id: 'segment_legacy' as Id<'turnSegments'>,
+          _creationTime: 9,
+          gameId,
+          turnNumber: 2,
+          segmentIndex: 1,
+          segment: {
+            type: 'narration',
+            text: 'Legacy refs',
+            npcId: 'npc_0',
+            crewName: null,
+            entityRefs: [
+              { type: 'room', id: 'room_0' },
+              { type: 'npc', id: 'npc_0' },
+              { type: 'item', id: 'item_0' },
+              { type: 'npc', id: 'npc_1' },
+            ],
+          },
+        },
+      ],
+    });
+
+    const byTurnRows = await listByTurnHandler(ctx, { gameId, turnNumber: 2 });
+    const latestRows = await listLatestTurnHandler(ctx, { gameId });
+    const allRows = await listAllForGameHandler(ctx, { gameId });
+
+    expect(byTurnRows[0]?.segment.entityRefs).toEqual(expectedRefs);
+    expect(latestRows[0]?.segment.entityRefs).toEqual(expectedRefs);
+    expect(allRows[0]?.segment.entityRefs).toEqual(expectedRefs);
   });
 
   it('[B] handles boundary turn-number filtering by returning only the exact turn index', async () => {

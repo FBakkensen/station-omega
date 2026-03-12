@@ -1,5 +1,45 @@
+import type { Id } from "./_generated/dataModel";
 import { query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+
+type SegmentType =
+  | "narration"
+  | "dialogue"
+  | "thought"
+  | "station_pa"
+  | "crew_echo"
+  | "diagnostic_readout"
+  | "player_action";
+
+type SegmentDoc = {
+  _id: Id<"turnSegments">;
+  _creationTime: number;
+  gameId: Id<"games">;
+  turnNumber: number;
+  segmentIndex: number;
+  segment: {
+    type: SegmentType;
+    text: string;
+    npcId: string | null;
+    crewName: string | null;
+    entityRefs?: unknown;
+  };
+};
+
+type NormalizedEntityRef = {
+  type: "room" | "item";
+  id: string;
+};
+
+type NormalizedSegmentDoc = Omit<SegmentDoc, "segment"> & {
+  segment: {
+    type: SegmentType;
+    text: string;
+    npcId: string | null;
+    crewName: string | null;
+    entityRefs?: NormalizedEntityRef[];
+  };
+};
 
 const segmentValidator = v.object({
   type: v.union(
@@ -20,6 +60,44 @@ const segmentValidator = v.object({
   }))),
 });
 
+function normalizeEntityRefs(entityRefs: unknown): NormalizedEntityRef[] | undefined {
+  if (!Array.isArray(entityRefs)) {
+    return undefined;
+  }
+
+  const normalized = entityRefs.filter((ref): ref is NormalizedEntityRef => {
+    if (typeof ref !== "object" || ref === null) {
+      return false;
+    }
+
+    const candidate = ref as { type?: unknown; id?: unknown };
+    return (candidate.type === "room" || candidate.type === "item") && typeof candidate.id === "string";
+  }).slice(0, 3);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeSegmentRow(row: SegmentDoc): NormalizedSegmentDoc {
+  const entityRefs = normalizeEntityRefs(row.segment.entityRefs);
+  return {
+    ...row,
+    segment: {
+      type: row.segment.type,
+      text: row.segment.text,
+      npcId: row.segment.npcId,
+      crewName: row.segment.crewName,
+      ...(entityRefs ? { entityRefs } : {}),
+    },
+  };
+}
+
+async function collectNormalizedSegments(
+  segmentsPromise: Promise<SegmentDoc[]>,
+): Promise<NormalizedSegmentDoc[]> {
+  const segments = await segmentsPromise;
+  return segments.map(normalizeSegmentRow);
+}
+
 /** Get all segments for a specific turn. */
 export const listByTurn = query({
   args: { gameId: v.id("games"), turnNumber: v.number() },
@@ -34,12 +112,14 @@ export const listByTurn = query({
     }),
   ),
   handler: async (ctx, args) => {
-    return await ctx.db
-      .query("turnSegments")
-      .withIndex("by_game_turn", (q) =>
-        q.eq("gameId", args.gameId).eq("turnNumber", args.turnNumber),
-      )
-      .collect();
+    return collectNormalizedSegments(
+      ctx.db
+        .query("turnSegments")
+        .withIndex("by_game_turn", (q) =>
+          q.eq("gameId", args.gameId).eq("turnNumber", args.turnNumber),
+        )
+        .collect() as Promise<SegmentDoc[]>,
+    );
   },
 });
 
@@ -51,12 +131,14 @@ export const listLatestTurn = query({
     const game = await ctx.db.get(args.gameId);
     if (!game) return [];
 
-    return await ctx.db
-      .query("turnSegments")
-      .withIndex("by_game_turn", (q) =>
-        q.eq("gameId", args.gameId).eq("turnNumber", game.turnCount),
-      )
-      .collect();
+    return collectNormalizedSegments(
+      ctx.db
+        .query("turnSegments")
+        .withIndex("by_game_turn", (q) =>
+          q.eq("gameId", args.gameId).eq("turnNumber", game.turnCount),
+        )
+        .collect() as Promise<SegmentDoc[]>,
+    );
   },
 });
 
@@ -65,10 +147,12 @@ export const listAllForGame = query({
   args: { gameId: v.id("games") },
   returns: v.any(),
   handler: async (ctx, args) => {
-    return await ctx.db
-      .query("turnSegments")
-      .withIndex("by_game_turn", (q) => q.eq("gameId", args.gameId))
-      .collect();
+    return collectNormalizedSegments(
+      ctx.db
+        .query("turnSegments")
+        .withIndex("by_game_turn", (q) => q.eq("gameId", args.gameId))
+        .collect() as Promise<SegmentDoc[]>,
+    );
   },
 });
 

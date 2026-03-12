@@ -2,19 +2,12 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
-type RawGameDoc = {
-  _id: string;
-  npcOverrides?: unknown;
-  state?: {
-    npcAllies?: unknown;
-    metrics?: {
-      npcInteractions?: unknown;
-    };
-  };
-};
-
-type LegacyReason = "npcOverrides" | "state.npcAllies" | "state.metrics.npcInteractions";
+import {
+  collectLegacyGameEntries,
+  parseJsonLines,
+  type RawGameDoc,
+  type RawTurnSegmentDoc,
+} from "./purge-legacy-games.helpers.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -35,29 +28,14 @@ function runConvex(commandArgs: string[]) {
   return result.stdout;
 }
 
-function detectLegacyReasons(doc: RawGameDoc): LegacyReason[] {
-  const reasons: LegacyReason[] = [];
-  if (Object.prototype.hasOwnProperty.call(doc, "npcOverrides")) {
-    reasons.push("npcOverrides");
-  }
-  if (Object.prototype.hasOwnProperty.call(doc.state ?? {}, "npcAllies")) {
-    reasons.push("state.npcAllies");
-  }
-  if (Object.prototype.hasOwnProperty.call(doc.state?.metrics ?? {}, "npcInteractions")) {
-    reasons.push("state.metrics.npcInteractions");
-  }
-  return reasons;
-}
-
 function listLegacyGames() {
-  const rawOutput = runConvex(["data", "games", "--format", "jsonLines"]);
-  return rawOutput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as RawGameDoc)
-    .map((doc) => ({ id: doc._id, reasons: detectLegacyReasons(doc) }))
-    .filter((entry) => entry.reasons.length > 0);
+  const rawGames = runConvex(["data", "games", "--format", "jsonLines"]);
+  const rawTurnSegments = runConvex(["data", "turnSegments", "--format", "jsonLines"]);
+
+  return collectLegacyGameEntries(
+    parseJsonLines<RawGameDoc>(rawGames),
+    parseJsonLines<RawTurnSegmentDoc>(rawTurnSegments),
+  );
 }
 
 const legacyGames = listLegacyGames();

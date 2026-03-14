@@ -30,6 +30,10 @@
 - Deterministic tests run under a no-network harness. Do not add direct `fetch`, `node:http`, `node:https`, `node:net`, or `node:tls` usage outside the explicit allowlist in `eslint.config.js`.
 - Keep `convex/_generated/` untouched; it is generated code.
 
+## Debugging
+- When debugging issues, ALWAYS read actual logs, error messages, and docs BEFORE guessing at causes. Do not speculate or hypothesize without evidence.
+- Never dismiss diagnostic errors, test failures, or UI issues as "stale" or "pre-existing" without verification. Always investigate when the user reports something is wrong.
+
 ## Pitfalls
 - Convex actions may need dynamic `await import()` when loading modules from `src/`. Follow the pattern in `convex/actions/streamTurn.ts` instead of converting those imports to static top-level imports.
 - The web app is a separate Vite workspace. Do not assume `web/src/` can import arbitrary files from the repo root; rely on its local code and generated Convex bindings unless the Vite config is updated.

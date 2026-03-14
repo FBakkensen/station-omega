@@ -19,6 +19,7 @@ export interface ConvexGameDoc {
   };
   objectivesOverride?: {
     title: string;
+    briefing?: string;
     steps: Array<{ id?: string; description: string; completed: boolean; revealed?: boolean }>;
     currentStepIndex: number;
     completed: boolean;
@@ -56,6 +57,7 @@ export interface ConvexStationDoc {
     arrivalScenario?: { playerCallsign?: string };
     objectives?: {
       title: string;
+      briefing?: string;
       steps: Array<{ id?: string; description: string; completed: boolean; revealed?: boolean }>;
       currentStepIndex: number;
       completed: boolean;
@@ -128,6 +130,7 @@ export function extractGameStatus(
     inventoryKeyFlags,
     maxInventory: state.maxInventory,
     activeEvents: state.activeEvents,
+    objectiveBriefing: objectives?.briefing ?? '',
     objectiveTitle: objectives?.title ?? 'Unknown',
     objectiveStep: currentVisibleStepIndex >= 0 ? currentVisibleStepIndex + 1 : visibleSteps.length,
     objectiveTotal: steps.length,

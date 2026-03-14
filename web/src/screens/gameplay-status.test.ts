@@ -54,6 +54,7 @@ function buildDocs(): { game: ConvexGameDoc; station: ConvexStationDoc } {
         },
         objectives: {
           title: 'Restore Main Relay',
+          briefing: 'Critical systems failing across the station.',
           steps: [
             { description: 'Diagnose the relay', completed: true, revealed: true },
             { description: 'Repair the relay', completed: false, revealed: true },
@@ -128,6 +129,22 @@ describe('extractGameStatus', () => {
       objectiveStep: 2,
       objectiveTotal: 2,
     });
+  });
+
+  it('[O] extracts objectiveBriefing from station objectives', () => {
+    const { game, station } = buildDocs();
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveBriefing).toBe('Critical systems failing across the station.');
+  });
+
+  it('[E] falls back to empty string when briefing is missing', () => {
+    const { game, station } = buildDocs();
+    const stationData = requireStationData(station);
+    if (stationData.objectives) {
+      delete stationData.objectives.briefing;
+    }
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveBriefing).toBe('');
   });
 
   it('[E] returns null when station.data is missing', () => {

@@ -488,6 +488,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       {missionVisible && status && (
         <MissionModal
           title={status.objectiveTitle}
+          briefing={status.objectiveBriefing}
           steps={status.objectiveSteps}
           currentStepIndex={status.objectiveStep - 1}
           isComplete={status.objectivesComplete}

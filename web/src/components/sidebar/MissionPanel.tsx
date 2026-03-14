@@ -5,6 +5,7 @@ interface ObjectiveStep {
 
 interface MissionPanelProps {
   title: string;
+  briefing: string;
   currentStep: number;
   totalSteps: number;
   currentDescription: string;
@@ -12,7 +13,7 @@ interface MissionPanelProps {
   isComplete: boolean;
 }
 
-export function MissionPanel({ title, currentStep, totalSteps, currentDescription, steps, isComplete }: MissionPanelProps) {
+export function MissionPanel({ title, briefing, currentStep, totalSteps, currentDescription, steps, isComplete }: MissionPanelProps) {
   return (
     <div className="border border-omega-border p-4">
       <div className="mb-2">
@@ -20,6 +21,10 @@ export function MissionPanel({ title, currentStep, totalSteps, currentDescriptio
       </div>
 
       <h3 className="text-omega-title text-xs mb-2 truncate">{title}</h3>
+
+      {briefing && (
+        <p className="text-omega-dim text-xs mb-2 italic">{briefing}</p>
+      )}
 
       {isComplete ? (
         <p className="text-grade-a text-xs">All objectives complete!</p>

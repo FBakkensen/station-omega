@@ -292,7 +292,9 @@ Location: ${roomLabel} (${activeStep.roomId})
 Known blockers: ${formatObjectiveBlockers(activeStep, station)}
 </current_objective>
 
-Only the current revealed mission step is known to me at runtime. Future mission steps stay hidden until the engine reveals them. Guide me through the current objective organically through system readouts, crew logs, and environmental clues without inventing or foreshadowing unrevealed mission text.`;
+Only the current revealed mission step is known to me at runtime. Future mission steps stay hidden until the engine reveals them. Guide me through the current objective organically through system readouts, crew logs, and environmental clues without inventing or foreshadowing unrevealed mission text.
+
+Discovery-based play: The player discovers repair requirements by investigating — examining broken systems, reading diagnostics, inspecting damage. Only reveal what materials or repairs are needed when the player actively investigates the relevant system or area. Do not volunteer item locations or repair solutions unprompted. Let the player connect the dots between items they find and problems they observe.`;
 }
 
 function buildEndingsSection(): string {

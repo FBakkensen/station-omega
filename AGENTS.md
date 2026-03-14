@@ -19,7 +19,8 @@
 - `bun run dev:convex` and `bun run dev:web` start each side independently.
 - `bun run check` is the canonical QA gate and must pass before returning code changes.
 - `bun run check:static` runs typecheck, lint, dead-code, and web static checks.
-- `bun run check:tests` runs deterministic tests plus web tests.
+- `bun run test` or `bun run check:tests` runs deterministic tests plus web tests.
+- **NEVER use bare `bun test`** — it bypasses vitest config and jsdom setup, causing false failures in web component tests. Always use `bun run test`.
 - `bun run test:fixture`, `bun run test:creative`, and `bun run test:gm` are required follow-up checks when generation, prompt, or game-master behavior changes.
 - `bun run pw -- <command>` runs the repo-local Playwright CLI for gameplay smoke coverage.
 

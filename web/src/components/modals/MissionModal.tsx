@@ -5,6 +5,7 @@ interface ObjectiveStep {
 
 interface MissionModalProps {
   title: string;
+  briefing?: string;
   steps: ObjectiveStep[];
   currentStepIndex: number;
   isComplete: boolean;
@@ -13,7 +14,7 @@ interface MissionModalProps {
   muted?: boolean;
 }
 
-export function MissionModal({ title, steps, currentStepIndex, isComplete, onClose, videoUrl, muted }: MissionModalProps) {
+export function MissionModal({ title, briefing, steps, currentStepIndex, isComplete, onClose, videoUrl, muted }: MissionModalProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
@@ -54,6 +55,10 @@ export function MissionModal({ title, steps, currentStepIndex, isComplete, onClo
         )}
 
         <h3 className="text-omega-text font-bold mb-4">{title}</h3>
+
+        {briefing && (
+          <p className="text-omega-dim text-sm mb-4 italic">{briefing}</p>
+        )}
 
         {isComplete && (
           <div className="mb-4 px-3 py-2 border border-green-700 bg-green-900/20 text-green-400 text-xs uppercase tracking-wider">

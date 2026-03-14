@@ -20,6 +20,9 @@ export const GameResponseSchema = z.object({
     imagePrompt: z.string().nullable().describe(
       'Flux Schnell image prompt for the current room scene (40-80 words), or null if room did not change'
     ),
+    objectiveVideoPrompt: z.string().nullable().describe(
+      'Cinematic 1-2 sentence video prompt when an objective step was completed this turn. Describe the physical action: machinery activating, items being used, systems powering up. Null otherwise.'
+    ),
 });
 
 export type GameSegment = z.infer<typeof GameSegmentSchema>;

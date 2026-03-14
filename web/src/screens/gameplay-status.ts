@@ -19,7 +19,7 @@ export interface ConvexGameDoc {
   };
   objectivesOverride?: {
     title: string;
-    steps: Array<{ description: string; completed: boolean; revealed?: boolean }>;
+    steps: Array<{ id?: string; description: string; completed: boolean; revealed?: boolean }>;
     currentStepIndex: number;
     completed: boolean;
   };
@@ -56,7 +56,7 @@ export interface ConvexStationDoc {
     arrivalScenario?: { playerCallsign?: string };
     objectives?: {
       title: string;
-      steps: Array<{ description: string; completed: boolean; revealed?: boolean }>;
+      steps: Array<{ id?: string; description: string; completed: boolean; revealed?: boolean }>;
       currentStepIndex: number;
       completed: boolean;
     };
@@ -134,6 +134,7 @@ export function extractGameStatus(
     objectiveCurrentDesc: currentVisibleStep?.description ?? '',
     objectivesComplete: objectives?.completed ?? false,
     objectiveSteps: visibleSteps.map((s) => ({
+      id: s.id,
       description: s.description,
       completed: s.completed,
     })),

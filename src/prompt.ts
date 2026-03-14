@@ -139,7 +139,17 @@ Your response includes an \`imagePrompt\` field — a visual scene description f
 - The image prompt must match what you narrated in your segments — if you described organic growth in the ductwork, it must be in the image prompt
 - NO character names, station names, technical readings (kPa, ppm), or markdown
 - NO first-person text — describe the scene as an objective observer
-- Do NOT include art style tags — those are appended automatically`;
+- Do NOT include art style tags — those are appended automatically
+
+## Objective Video Prompt
+
+Your response includes an \`objectiveVideoPrompt\` field for generating a cinematic video when an objective step is completed.
+
+- Set to \`null\` if NO objective step was completed this turn
+- When complete_objective returned success, write 1-2 cinematic sentences describing the physical action
+- Focus on dynamic motion: machinery activating, energy conduits, doors opening, items inserted into mechanisms
+- NO character names, station names, or UI text — describe pure visual action
+- Write as an objective camera description, not first person`;
 }
 
 function buildCharacterSection(build: CharacterBuild): string {

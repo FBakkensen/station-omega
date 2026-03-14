@@ -184,3 +184,107 @@ describe('extractGameStatus', () => {
     expect(status?.objectiveCurrentDesc).toBe('Repair the relay');
   });
 });
+
+describe('extractGameStatus step ids', () => {
+  it('[Z] returns steps with zero/absent id when step has no id field', () => {
+    const { game, station } = buildDocs();
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveSteps[0].id).toBeUndefined();
+  });
+
+  it('[O] passes through step id when objectivesOverride includes id', () => {
+    const { game, station } = buildDocs();
+    game.objectivesOverride = {
+      title: 'Test',
+      steps: [
+        { id: 'step_0', description: 'Do the thing', completed: true, revealed: true },
+        { id: 'step_1', description: 'Do another thing', completed: false, revealed: true },
+      ],
+      currentStepIndex: 1,
+      completed: false,
+    };
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveSteps[0].id).toBe('step_0');
+    expect(status?.objectiveSteps[1].id).toBe('step_1');
+  });
+
+  it('[M] passes through multiple step ids across revealed steps', () => {
+    const { game, station } = buildDocs();
+    game.objectivesOverride = {
+      title: 'Multi',
+      steps: [
+        { id: 'a', description: 'Step A', completed: true, revealed: true },
+        { id: 'b', description: 'Step B', completed: true, revealed: true },
+        { id: 'c', description: 'Step C', completed: false, revealed: true },
+        { id: 'd', description: 'Step D', completed: false, revealed: false },
+      ],
+      currentStepIndex: 2,
+      completed: false,
+    };
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveSteps).toHaveLength(3);
+    expect(status?.objectiveSteps.map(s => s.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('[B] handles mix of steps with and without id fields', () => {
+    const { game, station } = buildDocs();
+    game.objectivesOverride = {
+      title: 'Mix',
+      steps: [
+        { id: 'has_id', description: 'Has ID', completed: true, revealed: true },
+        { description: 'No ID', completed: false, revealed: true },
+      ],
+      currentStepIndex: 1,
+      completed: false,
+    };
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveSteps[0].id).toBe('has_id');
+    expect(status?.objectiveSteps[1].id).toBeUndefined();
+  });
+
+  it('[I] interface invariant: step id from objectivesOverride takes precedence over station.data.objectives', () => {
+    const { game, station } = buildDocs();
+    const stationData = requireStationData(station);
+    if (stationData.objectives) {
+      stationData.objectives.steps = [
+        { id: 'station_id', description: 'Station step', completed: true, revealed: true },
+        { description: 'Station step 2', completed: false, revealed: true },
+      ];
+    }
+    game.objectivesOverride = {
+      title: 'Override',
+      steps: [
+        { id: 'override_id', description: 'Override step', completed: true, revealed: true },
+        { id: 'override_2', description: 'Override step 2', completed: false, revealed: true },
+      ],
+      currentStepIndex: 1,
+      completed: false,
+    };
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveSteps[0].id).toBe('override_id');
+  });
+
+  it('[E] returns null when station data missing (verify no id regression)', () => {
+    const { game, station } = buildDocs();
+    delete station.data;
+    expect(extractGameStatus(game, station)).toBeNull();
+  });
+
+  it('[S] returns complete step data including id, description, and completed', () => {
+    const { game, station } = buildDocs();
+    game.objectivesOverride = {
+      title: 'Complete',
+      steps: [
+        { id: 'step_final', description: 'Final step', completed: true, revealed: true },
+      ],
+      currentStepIndex: 0,
+      completed: true,
+    };
+    const status = extractGameStatus(game, station);
+    expect(status?.objectiveSteps[0]).toEqual({
+      id: 'step_final',
+      description: 'Final step',
+      completed: true,
+    });
+  });
+});

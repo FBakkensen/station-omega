@@ -240,6 +240,7 @@ export default defineSchema({
       v.literal("briefing"),
       v.literal("briefing_video"),
       v.literal("item_image"),
+      v.literal("objective_video"),
     ),
   })
     .index("by_station_cache", ["stationId", "cacheKey"])

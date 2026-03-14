@@ -28,7 +28,7 @@ export interface GameStatusData {
   objectiveTotal: number;
   objectiveCurrentDesc: string;
   objectivesComplete: boolean;
-  objectiveSteps: Array<{ description: string; completed: boolean }>;
+  objectiveSteps: Array<{ id?: string; description: string; completed: boolean }>;
   systemFailures: Array<{
     systemId: string;
     status: string;

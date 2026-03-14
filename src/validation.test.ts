@@ -20,7 +20,7 @@ describe('validation helpers', () => {
   it('[Z] returns zero guardrail issues when zero response segments are provided', () => {
     const station = cloneFixtureStation();
     const state = cloneFixtureState();
-    const response: GameResponse = { segments: [], imagePrompt: null };
+    const response: GameResponse = { segments: [], imagePrompt: null, objectiveVideoPrompt: null };
 
     const issues = validateGameResponse(response, state, station);
 
@@ -40,6 +40,7 @@ describe('validation helpers', () => {
         },
       ],
       imagePrompt: null,
+      objectiveVideoPrompt: null,
     };
 
     const issues = validateGameResponse(response, state, station);
@@ -160,6 +161,7 @@ describe('validation helpers', () => {
         },
       ],
       imagePrompt: null,
+      objectiveVideoPrompt: null,
     };
 
     const issues = validateNarrativeHooks(response, state, station);
@@ -191,6 +193,7 @@ describe('validation helpers', () => {
         },
       ],
       imagePrompt: null,
+      objectiveVideoPrompt: null,
     };
 
     const issues = validateNarrativeHooks(response, state, station);

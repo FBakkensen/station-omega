@@ -95,6 +95,9 @@ export const processAITurn = internalAction({
       }
       normalizeObjectiveChainWithLegacySupport(stationObj.objectives);
 
+      // Snapshot step completion states for objective video detection
+      const previousStepCompletions = stationObj.objectives.steps.map(s => s.completed);
+
       // Set current room on first turn (entry room)
       if (!state.currentRoom) {
         state.currentRoom = stationObj.entryRoomId;
@@ -359,6 +362,40 @@ export const processAITurn = internalAction({
             cacheKey: `item:${itemId}`,
             category: "item_image" as const,
             prompt: buildItemImagePrompt(item),
+          }));
+        }
+      }
+
+      // ── Schedule objective completion video (image-to-video) ──────
+      const objectiveVideoPrompt = typeof parsedOutput.objectiveVideoPrompt === 'string'
+        ? parsedOutput.objectiveVideoPrompt : null;
+
+      if (objectiveVideoPrompt) {
+        const newlyCompleted = stationObj.objectives.steps.filter(
+          (step, i) => step.completed && !previousStepCompletions[i]
+        );
+        if (newlyCompleted.length > 0) {
+          const step = newlyCompleted[0];
+          const cacheKey = `objective_video:${step.id}`;
+          const sourceCacheKey = step.requiredItemId
+            ? `item:${step.requiredItemId}`
+            : `room:${state.currentRoom}`;
+
+          const sourceImage = await ctx.runQuery(internal.stationImages.getByCacheKey, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey: sourceCacheKey,
+          });
+          const sourceImageUrl = sourceImage?.storageId
+            ? await ctx.storage.getUrl(sourceImage.storageId) : undefined;
+
+          imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateVideo.generate, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey,
+            category: "objective_video" as const,
+            prompt: objectiveVideoPrompt,
+            ...(sourceImageUrl ? { imageUrl: sourceImageUrl } : {}),
           }));
         }
       }

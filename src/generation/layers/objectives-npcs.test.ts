@@ -157,6 +157,22 @@ describe('objectivesNPCsLayer validation', () => {
     expect(errors).toContain('item_missing');
   });
 
+  it('[E] rejects entry-room steps with no active requirements', () => {
+    const output = buildValidOutput();
+    // Replace step_0 with one targeting entry room and no requirements
+    output.objectives.steps[0] = {
+      id: 'step_0',
+      description: 'The corridor hums with failing relays.',
+      roomId: 'room_0',
+      requiredItemId: null,
+      requiredSystemRepair: null,
+    };
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
+    expect(result.success).toBe(false);
+    expect(result.errors?.join(' ')).toContain('entry room');
+    expect(result.errors?.join(' ')).toContain('auto-completing');
+  });
+
   it('[S] ensures the final step targets the escape room', () => {
     const output = buildValidOutput();
     const finalStep = output.objectives.steps[2];

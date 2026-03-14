@@ -91,7 +91,8 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
 - When a step requires BOTH a requiredItemId AND a requiredSystemRepair, the requiredItemId must be one of the materials needed for that system repair
 - The objective chain should be completable given the station layout and available items
 - Avoid "and then later" spoiler phrasing. Each description should read like the immediate next task, not a summary of the whole plan
-- Make the objectives narratively connected to the scenario theme`;
+- Make the objectives narratively connected to the scenario theme
+- Entry room steps MUST have at least one active requirement (requiredItemId or requiredSystemRepair). The player starts in the entry room, so a step there with no requirements would auto-complete without any player action.`;
 
     const roomsSummary = topology.rooms.map(r => {
         const failures = systemsItems.roomFailures.find(rf => rf.roomId === r.id);
@@ -195,6 +196,15 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
         const lastStep = output.objectives.steps[output.objectives.steps.length - 1];
         if (lastStep.roomId !== topology.escapeRoomId) {
             errors.push(`Last objective step must target the escape room (${topology.escapeRoomId}), got ${lastStep.roomId}`);
+        }
+    }
+
+    // 7. Entry room steps must have at least one active requirement
+    for (const step of output.objectives.steps) {
+        if (step.roomId === topology.entryRoomId
+            && !step.requiredItemId
+            && !step.requiredSystemRepair) {
+            errors.push(`Objective step '${step.id}' targets the entry room (${topology.entryRoomId}) with no active requirement — entry room steps need requiredItemId or requiredSystemRepair to avoid auto-completing on arrival`);
         }
     }
 

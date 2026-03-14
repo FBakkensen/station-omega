@@ -25,7 +25,7 @@ describe('buildItemImagePrompt (Void-Isolated Hero Prop)', () => {
     const prompt = buildItemImagePrompt(empty);
     expect(prompt).toContain('Mystery Box');
     expect(prompt).toContain('Dark void background');
-    expect(prompt).toContain('No text');
+    expect(prompt).toContain('No readable text');
     expectNoBannedWords(prompt);
   });
 
@@ -43,7 +43,7 @@ describe('buildItemImagePrompt (Void-Isolated Hero Prop)', () => {
     const results = glowCategories.map(c => buildItemImagePrompt({ name: 'X', description: 'Y.', category: c }));
     expect(results).toHaveLength(5);
     for (const prompt of results) {
-      expect(prompt.toLowerCase()).toMatch(/glow|led|lumin|energy|heat/i);
+      expect(prompt.toLowerCase()).toMatch(/glow|led|lumin|energy|indicator/i);
       expectNoBannedWords(prompt);
     }
   });
@@ -63,7 +63,7 @@ describe('buildItemImagePrompt (Void-Isolated Hero Prop)', () => {
     const lightIdx = prompt.indexOf('amber');
     const bgIdx = prompt.indexOf('Dark void background');
     const cameraIdx = prompt.indexOf('macro lens');
-    const exclIdx = prompt.indexOf('No text');
+    const exclIdx = prompt.indexOf('No readable text');
     expect(subjectIdx).toBeLessThan(lightIdx);
     expect(lightIdx).toBeLessThan(bgIdx);
     expect(bgIdx).toBeLessThan(cameraIdx);
@@ -74,7 +74,7 @@ describe('buildItemImagePrompt (Void-Isolated Hero Prop)', () => {
     const emptyItem = { name: 'Box', description: '', category: 'misc' };
     const prompt = buildItemImagePrompt(emptyItem);
     expect(prompt).toContain('Box');
-    expect(prompt).toContain('No text');
+    expect(prompt).toContain('No readable text');
     expect(prompt).not.toContain('undefined');
     expectNoBannedWords(prompt);
   });
@@ -87,7 +87,7 @@ describe('buildItemImagePrompt (Void-Isolated Hero Prop)', () => {
     expect(prompt).toContain('bio-monitor');
     expect(prompt).toContain('Dark void background');
     expect(prompt).toContain('macro lens');
-    expect(prompt).toContain('No text');
+    expect(prompt).toContain('No readable text');
     expectNoBannedWords(prompt);
   });
 });

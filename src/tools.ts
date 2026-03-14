@@ -21,6 +21,23 @@ import {
     syncObjectiveProgress,
 } from './objectives.js';
 
+// ─── Tool Categorization ────────────────────────────────────────────────────
+
+/** Tools that mutate game state meaningfully — limited to one per turn. */
+export const PRIMARY_ACTION_TOOLS = [
+    'move_to', 'pick_up_item', 'use_item',
+    'repair_system', 'stabilize_hazard', 'improvise_repair',
+    'craft_item', 'attempt_action', 'complete_objective',
+    'bypass_system', 'field_surgery',
+] as const;
+
+/** Tools that are always available (read-only or minimal state change). */
+export const OBSERVATION_TOOLS = [
+    'look_around', 'diagnose_system', 'check_environment', 'analyze_item',
+    'suggest_actions', 'suggest_diagnostics',
+    'record_moral_choice', 'crisis_assessment',
+] as const;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function randInt(min: number, max: number): number {

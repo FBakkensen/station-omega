@@ -33,6 +33,8 @@ export interface StreamStructuredObjectRequest<TSchema> {
   maxOutputTokens?: number;
   stopAfterSteps?: number;
   disableToolsAfterStep?: number;
+  /** Tool names considered primary actions — after one is called, only non-primary tools remain available. */
+  primaryActionTools?: readonly string[];
   abortSignal?: AbortSignal;
   providerOptions?: AIProviderOptions;
 }

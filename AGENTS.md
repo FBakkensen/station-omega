@@ -19,7 +19,8 @@
 - `bun run dev:convex` and `bun run dev:web` start each side independently.
 - `bun run check` is the canonical QA gate and must pass before returning code changes.
 - `bun run check:static` runs typecheck, lint, dead-code, and web static checks.
-- `bun run check:tests` runs deterministic tests plus web tests.
+- `bun run test` or `bun run check:tests` runs deterministic tests plus web tests.
+- **NEVER use bare `bun test`** — it bypasses vitest config and jsdom setup, causing false failures in web component tests. Always use `bun run test`.
 - `bun run test:fixture`, `bun run test:creative`, and `bun run test:gm` are required follow-up checks when generation, prompt, or game-master behavior changes.
 - `bun run pw -- <command>` runs the repo-local Playwright CLI for gameplay smoke coverage.
 
@@ -29,6 +30,10 @@
 - Convex persistence stores plain objects only. When working with station or game state, use `convex/lib/serialization.ts` to convert Maps and Sets to Convex-safe data and back.
 - Deterministic tests run under a no-network harness. Do not add direct `fetch`, `node:http`, `node:https`, `node:net`, or `node:tls` usage outside the explicit allowlist in `eslint.config.js`.
 - Keep `convex/_generated/` untouched; it is generated code.
+
+## Debugging
+- When debugging issues, ALWAYS read actual logs, error messages, and docs BEFORE guessing at causes. Do not speculate or hypothesize without evidence.
+- Never dismiss diagnostic errors, test failures, or UI issues as "stale" or "pre-existing" without verification. Always investigate when the user reports something is wrong.
 
 ## Pitfalls
 - Convex actions may need dynamic `await import()` when loading modules from `src/`. Follow the pattern in `convex/actions/streamTurn.ts` instead of converting those imports to static top-level imports.

@@ -11,6 +11,7 @@ import { useTTS } from '../hooks/useTTS';
 import { MapModal } from '../components/modals/MapModal';
 import { MissionModal } from '../components/modals/MissionModal';
 import { SituationModal } from '../components/modals/SituationModal';
+import { ObjectiveVideoModal } from '../components/modals/ObjectiveVideoModal';
 import { formatCost, type CostSummary } from '../utils/format';
 import { usePreferences } from '../hooks/usePreferences';
 import { useDevSettings } from '../hooks/useDevSettings';
@@ -41,6 +42,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   const [dismissedInitialBriefing, setDismissedInitialBriefing] = useState(false);
   const [showSituation, setShowSituation] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  const [objectiveVideoStepId, setObjectiveVideoStepId] = useState<string | null>(null);
 
   const status = extractGameStatus(game, station);
   const stationName = station?.stationName ?? 'Station Omega';
@@ -104,6 +106,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
   const ttsRef = useRef(tts);
   const ttsEnabledRef = useRef(ttsEnabled);
   const prevForceMuteRef = useRef(devSettings.forceMute);
+  const [prevCompletedStepIds, setPrevCompletedStepIds] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     ttsRef.current = tts;
     ttsEnabledRef.current = ttsEnabled;
@@ -270,6 +273,41 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
     return () => { clearTimeout(timer); };
   }, [gameIsOver, gameWon, isStreaming, twAllFinalized, gameId, onGameOver, onRunSummary]);
 
+  // Detect newly completed objective steps for video modal (set-state-during-render pattern)
+  if (status?.objectiveSteps) {
+    const currentCompletedIds = new Set(
+      status.objectiveSteps
+        .filter((s): s is typeof s & { id: string } => s.completed && !!s.id)
+        .map(s => s.id)
+    );
+
+    if (objectiveVideoStepId === null) {
+      for (const id of currentCompletedIds) {
+        if (!prevCompletedStepIds.has(id)) {
+          setObjectiveVideoStepId(id);
+          break;
+        }
+      }
+    }
+
+    let hasNewIds = currentCompletedIds.size !== prevCompletedStepIds.size;
+    if (!hasNewIds) {
+      for (const id of currentCompletedIds) {
+        if (!prevCompletedStepIds.has(id)) { hasNewIds = true; break; }
+      }
+    }
+    if (hasNewIds) {
+      setPrevCompletedStepIds(currentCompletedIds);
+    }
+  }
+
+  const objectiveVideoUrl = objectiveVideoStepId
+    ? stationImages.get(`objective_video:${objectiveVideoStepId}`)?.url
+    : undefined;
+  const objectiveVideoStep = objectiveVideoStepId && status?.objectiveSteps
+    ? status.objectiveSteps.find(s => s.id === objectiveVideoStepId)
+    : null;
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -289,6 +327,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
         dismissBriefingRef.current();
         setShowSituation(false);
         setShowQuitConfirm(false);
+        setObjectiveVideoStepId(null);
       } else if (e.key === 'F10') {
         e.preventDefault();
         setShowQuitConfirm((prev) => !prev);
@@ -449,6 +488,7 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
       {missionVisible && status && (
         <MissionModal
           title={status.objectiveTitle}
+          briefing={status.objectiveBriefing}
           steps={status.objectiveSteps}
           currentStepIndex={status.objectiveStep - 1}
           isComplete={status.objectivesComplete}
@@ -493,6 +533,15 @@ export function GameplayScreen({ gameId, stationId, onGameOver, onRunSummary, on
             </div>
           </div>
         </div>
+      )}
+
+      {objectiveVideoStepId && (
+        <ObjectiveVideoModal
+          stepDescription={objectiveVideoStep?.description ?? 'Objective step completed'}
+          videoUrl={objectiveVideoUrl}
+          onClose={() => { setObjectiveVideoStepId(null); }}
+          muted={!ttsEnabled}
+        />
       )}
     </div>
   );

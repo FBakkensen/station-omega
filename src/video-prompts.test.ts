@@ -15,6 +15,7 @@ function makeStation(overrides?: Partial<GeneratedStation>): GeneratedStation {
     items: new Map(),
     objectives: {
       title: 'Restore Station',
+      briefing: '',
       steps: [],
       finalObjective: '',
     },

@@ -131,7 +131,7 @@ const CATEGORY_LIGHT_COLOR: Record<string, string> = {
 
 const CATEGORY_GLOW: Record<string, string> = {
   medical: 'faint bio-monitor glow and indicator LEDs',
-  tool: 'dull power indicator and heat-stressed edges',
+  tool: 'dull indicator lights and worn control surfaces',
   component: 'faint circuit traces and status LEDs',
   chemical: 'subtle chemical luminescence from within',
   key: 'faint energy signature pulsing from the core',
@@ -158,7 +158,7 @@ export function buildItemImagePrompt(
 
   parts.push('Extreme close-up, widescreen 16:9 composition, shallow depth of field, macro lens.');
 
-  parts.push('No text, labels, or UI elements.');
+  parts.push('No readable text or written labels.');
 
   return parts.join(' ');
 }

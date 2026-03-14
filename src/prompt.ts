@@ -1,5 +1,6 @@
 import type { GeneratedStation, CharacterBuild, ArrivalScenario } from './types.js';
 import { getActiveObjectiveStep } from './objectives.js';
+import { PRIMARY_ACTION_TOOLS, OBSERVATION_TOOLS } from './tools.js';
 
 function knowledgeLevelGuidance(level: ArrivalScenario['knowledgeLevel']): string {
     switch (level) {
@@ -139,7 +140,17 @@ Your response includes an \`imagePrompt\` field — a visual scene description f
 - The image prompt must match what you narrated in your segments — if you described organic growth in the ductwork, it must be in the image prompt
 - NO character names, station names, technical readings (kPa, ppm), or markdown
 - NO first-person text — describe the scene as an objective observer
-- Do NOT include art style tags — those are appended automatically`;
+- Do NOT include art style tags — those are appended automatically
+
+## Objective Video Prompt
+
+Your response includes an \`objectiveVideoPrompt\` field for generating a cinematic video when an objective step is completed.
+
+- Set to \`null\` if NO objective step was completed this turn
+- When complete_objective returned success, write 1-2 cinematic sentences describing the physical action
+- Focus on dynamic motion: machinery activating, energy conduits, doors opening, items inserted into mechanisms
+- NO character names, station names, or UI text — describe pure visual action
+- Write as an objective camera description, not first person`;
 }
 
 function buildCharacterSection(build: CharacterBuild): string {
@@ -183,6 +194,27 @@ You write my perspective, not a guide's. NEVER:
 Instead: describe what I observe and let me draw conclusions. Crew logs, sensor data, and system readouts provide organic guidance. Trust me to investigate.`;
 }
 
+function buildActionScopeRules(): string {
+    const primary = PRIMARY_ACTION_TOOLS.join(', ');
+    const observation = OBSERVATION_TOOLS.join(', ');
+
+    return `## Action Scope — One Action Per Turn
+
+Each turn resolves ONE primary action that the player explicitly requested.
+
+Primary actions (state-changing): ${primary}.
+
+Observation tools (always available): ${observation}.
+
+Rules:
+1. Execute ONLY the action the player requested. "Pick up the medkit" = call pick_up_item. Do NOT also call move_to.
+2. After the primary action, you may call observation tools to describe the result, but no additional primary actions.
+3. If unsure whether the player requested an action, DON'T do it.
+4. For compound requests ("pick up X and go to Y"), perform the first action and narrate naturally. The player acts again next turn.
+5. look_around after move_to is the one allowed implicit observation.
+
+Legitimate multi-tool sequences: diagnose_system (observation) then repair_system (primary) works fine.`;
+}
 
 function buildNarrationStyle(): string {
     return `## Narration Style
@@ -282,7 +314,9 @@ Location: ${roomLabel} (${activeStep.roomId})
 Known blockers: ${formatObjectiveBlockers(activeStep, station)}
 </current_objective>
 
-Only the current revealed mission step is known to me at runtime. Future mission steps stay hidden until the engine reveals them. Guide me through the current objective organically through system readouts, crew logs, and environmental clues without inventing or foreshadowing unrevealed mission text.`;
+Only the current revealed mission step is known to me at runtime. Future mission steps stay hidden until the engine reveals them. Guide me through the current objective organically through system readouts, crew logs, and environmental clues without inventing or foreshadowing unrevealed mission text.
+
+Discovery-based play: The player discovers repair requirements by investigating — examining broken systems, reading diagnostics, inspecting damage. Only reveal what materials or repairs are needed when the player actively investigates the relevant system or area. Do not volunteer item locations or repair solutions unprompted. Let the player connect the dots between items they find and problems they observe.`;
 }
 
 function buildEndingsSection(): string {
@@ -314,7 +348,8 @@ suggest_actions and suggest_diagnostics must present engineering options by defa
 When calling suggest_actions or suggest_diagnostics, include tactical metadata when possible: relative risk, time/exposure cost, and a concrete consequence or tradeoff.
 Tool results are ground truth — if a tool call fails, narrate the failure honestly. Never claim an action succeeded when the tool returned an error.
 Cascade times: cite from diagnostic tool results for accuracy — the sidebar timer is ground truth.
-Survival-engineer voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity. (6) Machine diagnostics in narration, body consequences in thought segments — what does the broken system mean for ME? (7) Start with a hook, not a summary.`;
+Survival-engineer voice checklist: (1) Show calculations with real numbers from tool results. (2) At least one joke or dry observation per turn in thought segments. (3) Problems get worse before better. (4) Explain science like you're writing a log someone might find next to your body. (5) Self-deprecation, not self-pity. (6) Machine diagnostics in narration, body consequences in thought segments — what does the broken system mean for ME? (7) Start with a hook, not a summary.
+One primary action per turn. Execute only what the player explicitly requested.`;
 }
 
 function buildSurvivalScienceMethod(): string {
@@ -426,6 +461,8 @@ Before handing off, you may call tools (like \`move_to\`) to update game state. 
 ${buildNarrationStyle()}
 
 ${buildPlayerAgencyRules()}
+
+${buildActionScopeRules()}
 
 ${buildEndingsSection()}
 

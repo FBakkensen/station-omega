@@ -28,6 +28,7 @@ const SystemIdEnum = z.enum([
 const ObjectivesNPCsSchema = z.object({
     objectives: z.object({
         title: z.string(),
+        briefing: z.string(),
         // Constraints (3-7 steps) enforced in validator, not schema,
         // because Anthropic's structured output rejects minItems > 1.
         steps: z.array(z.object({
@@ -47,6 +48,7 @@ type ObjectivesNPCsOutput = z.infer<typeof ObjectivesNPCsSchema>;
 export interface ValidatedObjectivesNPCs {
     objectives: {
         title: string;
+        briefing: string;
         steps: Array<{
             id: string;
             description: string;
@@ -68,24 +70,29 @@ function buildObjectivesNPCsPrompt(context: LayerContext, errors?: string[]): { 
 # Objective Design
 - Create a compelling 3-7 step objective chain that guides the player through the station
 - Each step has: id (like "step_0"), description, roomId, optional requiredItemId, optional requiredSystemRepair
+- The "briefing" field is 1-3 sentences describing the crisis or emergency. Atmospheric and stakes-driven. No directions, no specific rooms, no items.
 - Steps should progress logically from entry toward escape as a strict ordered dependency chain
 - Treat the array order as the reveal order: each step must feel unlocked by completing the previous one
 - Each step must stand on its own when revealed later. Do not write descriptions that spoil future rooms, items, repairs, or twists before the player should know them
 - It must still make sense if the player physically reaches a later room or satisfies a later condition early; the revealed text should read like the next discovered objective, not like a retrospective spoiler dump
+- Step descriptions MUST frame the problem or situation, NEVER the solution. Describe what is wrong, broken, or dangerous — not what to collect, carry, or repair.
+- NEVER use raw IDs in descriptions or briefing (no room_X, item_X, system_X patterns). Reference locations by their archetype label: 'the command center', 'engineering', 'the storage bay', 'the escape pod bay'.
+- Do not mention specific items by name or location in descriptions. Do not tell the player what materials they need. The mechanical fields (requiredItemId, requiredSystemRepair) handle completion tracking — descriptions are purely player-facing atmosphere.
 - The LAST step MUST target the escape room (${topology.escapeRoomId})
 - requiredItemId: reference an existing item ID from the items list, or null
 - requiredSystemRepair: reference a system that has a failure in the target room, or null
-- IMPORTANT: When a step requires BOTH a requiredItemId AND a requiredSystemRepair, the requiredItemId must be one of the materials needed for that system repair. The step description MUST mention ALL required materials for the repair (not just the objective item) so the player knows what to collect
 - Step IDs must be unique (like "step_0", "step_1", etc.)
-- Make descriptions action-oriented and specific to the scenario
+- Make descriptions atmospheric and specific to the scenario
 
 # Rules
 - Objective steps must reference rooms that exist in the topology
 - If a step requires an item, that item ID must exist in the items list
 - If a step requires a system repair, that system must have a failure in the specified room
+- When a step requires BOTH a requiredItemId AND a requiredSystemRepair, the requiredItemId must be one of the materials needed for that system repair
 - The objective chain should be completable given the station layout and available items
 - Avoid "and then later" spoiler phrasing. Each description should read like the immediate next task, not a summary of the whole plan
-- Make the objectives narratively connected to the scenario theme`;
+- Make the objectives narratively connected to the scenario theme
+- Entry room steps MUST have at least one active requirement (requiredItemId or requiredSystemRepair). The player starts in the entry room, so a step there with no requirements would auto-complete without any player action.`;
 
     const roomsSummary = topology.rooms.map(r => {
         const failures = systemsItems.roomFailures.find(rf => rf.roomId === r.id);
@@ -192,6 +199,15 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
         }
     }
 
+    // 7. Entry room steps must have at least one active requirement
+    for (const step of output.objectives.steps) {
+        if (step.roomId === topology.entryRoomId
+            && !step.requiredItemId
+            && !step.requiredSystemRepair) {
+            errors.push(`Objective step '${step.id}' targets the entry room (${topology.entryRoomId}) with no active requirement — entry room steps need requiredItemId or requiredSystemRepair to avoid auto-completing on arrival`);
+        }
+    }
+
     if (errors.length > 0) {
         return validationFailure(errors);
     }
@@ -199,6 +215,7 @@ function validateObjectivesNPCs(output: ObjectivesNPCsOutput, context: LayerCont
     return validationSuccess<ValidatedObjectivesNPCs>({
         objectives: {
             title: output.objectives.title,
+            briefing: output.objectives.briefing,
             steps: output.objectives.steps.map(s => ({
                 id: s.id,
                 description: s.description,

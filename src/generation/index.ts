@@ -189,6 +189,7 @@ export async function generateStation(
     const objectives: ObjectiveChain = {
         storyArc: 'cascade_failure', // AI doesn't use fixed story arcs — scenario theme replaces it
         title: objectivesNPCs.objectives.title,
+        briefing: objectivesNPCs.objectives.briefing,
         steps: objectivesNPCs.objectives.steps.map(s => ({
             id: s.id,
             description: s.description,

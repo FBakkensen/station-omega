@@ -42,6 +42,10 @@ export function normalizeObjectiveChain(objectives: ObjectiveChain): ObjectiveCh
 }
 
 export function normalizeObjectiveChainWithLegacySupport(objectives: ObjectiveChain): ObjectiveChain {
+    if (!(objectives as Partial<ObjectiveChain>).briefing) {
+        objectives.briefing = '';
+    }
+
     const missingRevealState = objectives.steps.some((step) => typeof step.revealed !== 'boolean');
     if (missingRevealState) {
         const currentStepIndex = findFirstPendingStepIndex(objectives);

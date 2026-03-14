@@ -105,6 +105,7 @@ function makeSkeleton(overrides: Partial<StationSkeleton> = {}): StationSkeleton
     objectives: {
       storyArc: 'cascade_failure',
       title: 'Restore Path',
+      briefing: 'Stabilize utility systems and reach extraction.',
       steps: [
         {
           id: 'step_0',

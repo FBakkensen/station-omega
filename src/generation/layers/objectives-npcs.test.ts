@@ -62,6 +62,7 @@ function buildValidOutput(): ObjectivesOutput {
   return {
     objectives: {
       title: 'Restore Escape Route',
+      briefing: 'Life support depends on restoring relay control.',
       steps: [
         {
           id: 'step_0',
@@ -97,7 +98,7 @@ function asSchemaValidObjectivesOutput(raw: ObjectivesOutput): ObjectivesOutput 
 describe('objectivesNPCsLayer validation', () => {
   it('[Z] rejects objective chains with no steps', () => {
     const output = asSchemaValidObjectivesOutput({
-      objectives: { title: 'Empty', steps: [] },
+      objectives: { title: 'Empty', briefing: '', steps: [] },
     });
     const result = objectivesNPCsLayer.validate(output, context);
     expect(result.success).toBe(false);
@@ -136,6 +137,9 @@ describe('objectivesNPCsLayer validation', () => {
     expect(prompt.system).toContain('Objective Design');
     expect(prompt.system).toContain('strict ordered dependency chain');
     expect(prompt.system).toContain('Do not write descriptions that spoil future rooms');
+    expect(prompt.system).toContain('NEVER use raw IDs');
+    expect(prompt.system).toContain('frame the problem or situation, NEVER the solution');
+    expect(prompt.system).toContain('briefing');
     expect(prompt.user).toContain('Fix ALL of them');
     expect(prompt.user).toContain('Room mismatch in step_1');
     expect(prompt.user).toContain('Entry: room_0');
@@ -151,6 +155,22 @@ describe('objectivesNPCsLayer validation', () => {
     const errors = result.errors?.join(' ') ?? '';
     expect(errors).toContain('does not exist');
     expect(errors).toContain('item_missing');
+  });
+
+  it('[E] rejects entry-room steps with no active requirements', () => {
+    const output = buildValidOutput();
+    // Replace step_0 with one targeting entry room and no requirements
+    output.objectives.steps[0] = {
+      id: 'step_0',
+      description: 'The corridor hums with failing relays.',
+      roomId: 'room_0',
+      requiredItemId: null,
+      requiredSystemRepair: null,
+    };
+    const result = objectivesNPCsLayer.validate(asSchemaValidObjectivesOutput(output), context);
+    expect(result.success).toBe(false);
+    expect(result.errors?.join(' ')).toContain('entry room');
+    expect(result.errors?.join(' ')).toContain('auto-completing');
   });
 
   it('[S] ensures the final step targets the escape room', () => {

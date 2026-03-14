@@ -13,8 +13,9 @@ import { videoModelConfig } from "../../src/model-catalog.js";
 export const generate = internalAction({
   args: {
     stationId: v.id("stations"),
+    gameId: v.optional(v.id("games")),
     cacheKey: v.string(),
-    category: v.literal("briefing_video"),
+    category: v.union(v.literal("briefing_video"), v.literal("objective_video")),
     prompt: v.string(),
     imageUrl: v.optional(v.string()),
   },
@@ -28,6 +29,7 @@ export const generate = internalAction({
       // Check cache first
       const existing = await ctx.runQuery(internal.stationImages.getByCacheKey, {
         stationId,
+        ...(args.gameId ? { gameId: args.gameId } : {}),
         cacheKey,
       });
       if (existing) {
@@ -37,6 +39,7 @@ export const generate = internalAction({
             provider: "fal" as const,
             operation: "video_generation" as const,
             stationId,
+            gameId: args.gameId,
             prompt,
             status: "cache_hit" as const,
             durationMs: Date.now() - startMs,
@@ -66,6 +69,7 @@ export const generate = internalAction({
       // Save to cache table
       await ctx.runMutation(internal.stationImages.save, {
         stationId,
+        ...(args.gameId ? { gameId: args.gameId } : {}),
         cacheKey,
         storageId,
         prompt,
@@ -79,6 +83,7 @@ export const generate = internalAction({
           provider: "fal" as const,
           operation: "video_generation" as const,
           stationId,
+          gameId: args.gameId,
           modelId: videoModelId,
           prompt,
           status: "success" as const,
@@ -95,6 +100,7 @@ export const generate = internalAction({
           provider: "fal" as const,
           operation: "video_generation" as const,
           stationId,
+          gameId: args.gameId,
           prompt,
           status: "error" as const,
           error: message,

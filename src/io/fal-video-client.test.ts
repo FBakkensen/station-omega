@@ -1,16 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FalVideoClient } from './fal-video-client.js';
-import { VIDEO_MODEL_ID } from '../model-catalog.js';
+import { VIDEO_MODEL_ID, VIDEO_I2V_MODEL_ID } from '../model-catalog.js';
 
 const noopSleep = () => Promise.resolve();
 
 const QUEUE_BASE = `https://queue.fal.run/${VIDEO_MODEL_ID}`;
+const I2V_QUEUE_BASE = `https://queue.fal.run/${VIDEO_I2V_MODEL_ID}`;
 
 function submitBody(id: string) {
   return {
     request_id: id,
     status_url: `${QUEUE_BASE}/requests/${id}/status`,
     response_url: `${QUEUE_BASE}/requests/${id}`,
+  };
+}
+
+function i2vSubmitBody(id: string) {
+  return {
+    request_id: id,
+    status_url: `${I2V_QUEUE_BASE}/requests/${id}/status`,
+    response_url: `${I2V_QUEUE_BASE}/requests/${id}`,
   };
 }
 
@@ -178,6 +187,130 @@ describe('FalVideoClient', () => {
 
     const client = new FalVideoClient('test-key', mockFetch, noopSleep);
     const result = await client.generateVideo({ prompt: 'A space station in deep space' });
+
+    expect(result.videoBytes).toEqual(videoData);
+    expect(result.mimeType).toBe('video/mp4');
+  });
+});
+
+describe('FalVideoClient image-to-video', () => {
+
+  it('[Z] sends request without image_url in body when imageUrl is undefined', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse(submitBody('req_z_i2v')))
+      .mockResolvedValueOnce(mockResponse({ status: 'COMPLETED' }))
+      .mockResolvedValueOnce(mockResponse({ video: { url: 'https://cdn.fal.ai/v.mp4', content_type: 'video/mp4' } }))
+      .mockResolvedValueOnce(mockResponse(new ArrayBuffer(0), { isArrayBuffer: true }));
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+    await client.generateVideo({ prompt: 'test' });
+
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body.image_url).toBeUndefined();
+    // Should use text-to-video URL
+    expect(mockFetch.mock.calls[0][0]).toBe(QUEUE_BASE);
+  });
+
+  it('[O] completes successfully with one poll cycle using image-to-video model', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse(i2vSubmitBody('req_o_i2v')))
+      .mockResolvedValueOnce(mockResponse({ status: 'COMPLETED' }))
+      .mockResolvedValueOnce(mockResponse({ video: { url: 'https://cdn.fal.ai/v.mp4', content_type: 'video/mp4' } }))
+      .mockResolvedValueOnce(mockResponse(new Uint8Array([1, 2, 3]).buffer, { isArrayBuffer: true }));
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+    const result = await client.generateVideo({ prompt: 'machinery activating', imageUrl: 'https://example.com/item.png' });
+
+    expect(result.videoBytes).toHaveLength(3);
+    expect(result.mimeType).toBe('video/mp4');
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('[M] sends correct model URL for image-to-video vs text-to-video across multiple calls', async () => {
+    const makeMocks = (submitFn: typeof submitBody | typeof i2vSubmitBody, id: string) => [
+      mockResponse(submitFn(id)),
+      mockResponse({ status: 'COMPLETED' }),
+      mockResponse({ video: { url: 'https://cdn.fal.ai/v.mp4', content_type: 'video/mp4' } }),
+      mockResponse(new ArrayBuffer(4), { isArrayBuffer: true }),
+    ] as const;
+
+    const [t2vSubmit, t2vStatus, t2vResult, t2vDownload] = makeMocks(submitBody, 't2v');
+    const [i2vSubmit, i2vStatus, i2vResult, i2vDownload] = makeMocks(i2vSubmitBody, 'i2v');
+
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(t2vSubmit)
+      .mockResolvedValueOnce(t2vStatus)
+      .mockResolvedValueOnce(t2vResult)
+      .mockResolvedValueOnce(t2vDownload)
+      .mockResolvedValueOnce(i2vSubmit)
+      .mockResolvedValueOnce(i2vStatus)
+      .mockResolvedValueOnce(i2vResult)
+      .mockResolvedValueOnce(i2vDownload);
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+
+    // Text-to-video call
+    await client.generateVideo({ prompt: 'text prompt' });
+    expect(mockFetch.mock.calls[0][0]).toBe(QUEUE_BASE);
+
+    // Image-to-video call
+    await client.generateVideo({ prompt: 'image prompt', imageUrl: 'https://example.com/img.png' });
+    expect(mockFetch.mock.calls[4][0]).toBe(I2V_QUEUE_BASE);
+  });
+
+  it('[B] includes image_url in body at the boundary between empty and non-empty imageUrl', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse(i2vSubmitBody('req_b_i2v')))
+      .mockResolvedValueOnce(mockResponse({ status: 'COMPLETED' }))
+      .mockResolvedValueOnce(mockResponse({ video: { url: 'https://cdn.fal.ai/v.mp4', content_type: 'video/mp4' } }))
+      .mockResolvedValueOnce(mockResponse(new ArrayBuffer(4), { isArrayBuffer: true }));
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+    await client.generateVideo({ prompt: 'test', imageUrl: 'https://example.com/frame.png' });
+
+    const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body.image_url).toBe('https://example.com/frame.png');
+    expect(body.prompt).toBe('test');
+    expect(body.duration).toBe('5');
+  });
+
+  it('[I] uses VIDEO_I2V_MODEL_ID endpoint URL when imageUrl is provided', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse(i2vSubmitBody('req_i_i2v')))
+      .mockResolvedValueOnce(mockResponse({ status: 'COMPLETED' }))
+      .mockResolvedValueOnce(mockResponse({ video: { url: 'https://cdn.fal.ai/v.mp4', content_type: 'video/mp4' } }))
+      .mockResolvedValueOnce(mockResponse(new ArrayBuffer(4), { isArrayBuffer: true }));
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+    await client.generateVideo({ prompt: 'machinery powers up', imageUrl: 'https://example.com/reactor.png' });
+
+    const submitUrl = mockFetch.mock.calls[0][0] as string;
+    expect(submitUrl).toContain(VIDEO_I2V_MODEL_ID);
+    expect(submitUrl).toBe(I2V_QUEUE_BASE);
+  });
+
+  it('[E] throws on queue submit failure for image-to-video request', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse('Internal Server Error', { ok: false, status: 500 }));
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+    await expect(client.generateVideo({ prompt: 'test', imageUrl: 'https://example.com/img.png' }))
+      .rejects.toThrow('fal.ai video queue submit error (500)');
+  });
+
+  it('[S] produces valid video result with standard image-to-video prompt and image URL', async () => {
+    const videoData = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse(i2vSubmitBody('req_s_i2v')))
+      .mockResolvedValueOnce(mockResponse({ status: 'COMPLETED' }))
+      .mockResolvedValueOnce(mockResponse({ video: { url: 'https://cdn.fal.ai/video.mp4', content_type: 'video/mp4' } }))
+      .mockResolvedValueOnce(mockResponse(videoData.buffer, { isArrayBuffer: true }));
+
+    const client = new FalVideoClient('test-key', mockFetch, noopSleep);
+    const result = await client.generateVideo({
+      prompt: 'A reactor core igniting with blue plasma flooding upward through transparent conduits',
+      imageUrl: 'https://example.com/reactor-room.png',
+    });
 
     expect(result.videoBytes).toEqual(videoData);
     expect(result.mimeType).toBe('video/mp4');

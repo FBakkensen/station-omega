@@ -160,6 +160,7 @@ export interface ObjectiveStep {
 export interface ObjectiveChain {
     storyArc: StoryArc;
     title: string;
+    briefing: string;
     steps: ObjectiveStep[];
     currentStepIndex: number;
     completed: boolean;

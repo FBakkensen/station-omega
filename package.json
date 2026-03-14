@@ -20,6 +20,7 @@
     "pw": "playwright-cli",
     "pw:snapshot": "bash ./scripts/pw-snapshot.sh",
     "pw:install": "playwright-cli install",
+    "test": "bun run check:tests",
     "test:fixture": "bun test/generate-fixture.ts",
     "test:creative": "bun test/test-creative.ts",
     "test:gm": "bun test/test-gamemaster.ts",

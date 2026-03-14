@@ -121,6 +121,7 @@ export function createTestStation(): GeneratedStation {
     objectives: {
       storyArc: 'cascade_failure',
       title: 'Restore Evacuation Path',
+      briefing: 'Stabilize the relay fault and reach the escape gantry before cascade failure.',
       steps: [
         {
           id: 'step_0',

@@ -48,10 +48,29 @@ export class OpenRouterAITextClient implements AITextClient {
     }
 
     const disableToolsAfterStep = request.disableToolsAfterStep;
-    if (typeof disableToolsAfterStep === 'number') {
-      streamOptions.prepareStep = ({ stepNumber }) => {
-        if (stepNumber >= disableToolsAfterStep) {
+
+    // Precompute action gating data (stable across steps)
+    const actionGating = request.primaryActionTools ? {
+      primarySet: new Set(request.primaryActionTools),
+      observationOnly: Object.keys(request.tools ?? {}).filter(
+        n => !new Set(request.primaryActionTools).has(n)
+      ),
+    } : null;
+
+    if (typeof disableToolsAfterStep === 'number' || actionGating) {
+      streamOptions.prepareStep = ({ stepNumber, steps }) => {
+        // Final step: force structured output (existing behavior)
+        if (typeof disableToolsAfterStep === 'number' && stepNumber >= disableToolsAfterStep) {
           return { toolChoice: 'none' as const, activeTools: [] };
+        }
+        // After a primary action tool was called, restrict to observation-only
+        if (actionGating) {
+          const primaryCalled = steps.some(step =>
+            step.toolCalls.some(tc => actionGating.primarySet.has(tc.toolName))
+          );
+          if (primaryCalled) {
+            return { activeTools: actionGating.observationOnly };
+          }
         }
         return undefined;
       };

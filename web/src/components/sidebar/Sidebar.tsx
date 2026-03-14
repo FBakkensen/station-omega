@@ -28,7 +28,8 @@ export interface GameStatusData {
   objectiveTotal: number;
   objectiveCurrentDesc: string;
   objectivesComplete: boolean;
-  objectiveSteps: Array<{ description: string; completed: boolean }>;
+  objectiveBriefing: string;
+  objectiveSteps: Array<{ id?: string; description: string; completed: boolean }>;
   systemFailures: Array<{
     systemId: string;
     status: string;
@@ -104,6 +105,7 @@ export function Sidebar({ status, stationName, stationImages, currentRoomId }: S
 
         <MissionPanel
           title={status.objectiveTitle}
+          briefing={status.objectiveBriefing}
           currentStep={status.objectiveStep}
           totalSteps={status.objectiveTotal}
           currentDescription={status.objectiveCurrentDesc}

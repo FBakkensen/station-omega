@@ -9,6 +9,7 @@ import { buildRoomImagePrompt, buildItemImagePrompt, CINEMATIC_SUFFIX } from "..
 import { EventTracker } from "../../src/events.js";
 import type { EventType } from "../../src/types.js";
 import type { ChoiceSet } from "../../src/tools.js";
+import { PRIMARY_ACTION_TOOLS } from "../../src/tools.js";
 
 /**
  * Process an AI turn — runs the full game loop server-side.
@@ -64,7 +65,7 @@ export const processAITurn = internalAction({
       const { GAME_MASTER_MODEL_ID } = await import("../../src/models.js");
       const { isValidGameMasterModelId } = await import("../../src/model-catalog.js");
       const { createGameToolSets } = await import("../../src/tools.js");
-      const { normalizeObjectiveChainWithLegacySupport } = await import("../../src/objectives.js");
+      const { normalizeObjectiveChainWithLegacySupport, syncObjectiveProgress } = await import("../../src/objectives.js");
       const { buildOrchestratorPrompt } = await import("../../src/prompt.js");
       const { buildTurnContext } = await import("../../src/turn-context.js");
       const { GameResponseSchema } = await import("../../src/schema.js");
@@ -100,7 +101,15 @@ export const processAITurn = internalAction({
         state.currentRoom = stationObj.entryRoomId;
         state.roomsVisited.add(state.currentRoom);
         state.roomVisitCount.set(state.currentRoom, 1);
+
+        // Sync objectives immediately so any steps trivially satisfied by
+        // starting position complete now, not on the first unrelated tool call
+        syncObjectiveProgress(state, stationObj);
       }
+
+      // Snapshot step completion states for objective video detection
+      // (placed after first-turn sync so init-completed steps are excluded)
+      const previousStepCompletions = stationObj.objectives.steps.map(s => s.completed);
 
       // ── EventTracker: restore cooldowns and process pre-turn events ──
       const tracker = new EventTracker();
@@ -187,9 +196,15 @@ export const processAITurn = internalAction({
         maxOutputTokens: 8192,
         stopAfterSteps: MAX_TOOL_STEPS + 1,
         disableToolsAfterStep: MAX_TOOL_STEPS,
+        primaryActionTools: PRIMARY_ACTION_TOOLS,
       });
 
+      const toolCallLog: string[] = [];
+
       for await (const part of result.fullStream) {
+        if (part.type === "tool-call" && typeof part.toolName === "string") {
+          toolCallLog.push(part.toolName);
+        }
         if (part.type === "text-delta" && typeof part.text === "string") {
           rawJson += part.text;
 
@@ -302,6 +317,10 @@ export const processAITurn = internalAction({
             playerInput,
             usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
             costUsd: usage.costUsd,
+            toolCalls: toolCallLog,
+            primaryActionCount: toolCallLog.filter(
+              tc => (PRIMARY_ACTION_TOOLS as readonly string[]).includes(tc)
+            ).length,
           },
         });
       } catch (logErr) {
@@ -359,6 +378,40 @@ export const processAITurn = internalAction({
             cacheKey: `item:${itemId}`,
             category: "item_image" as const,
             prompt: buildItemImagePrompt(item),
+          }));
+        }
+      }
+
+      // ── Schedule objective completion video (image-to-video) ──────
+      const objectiveVideoPrompt = typeof parsedOutput.objectiveVideoPrompt === 'string'
+        ? parsedOutput.objectiveVideoPrompt : null;
+
+      if (objectiveVideoPrompt) {
+        const newlyCompleted = stationObj.objectives.steps.filter(
+          (step, i) => step.completed && !previousStepCompletions[i]
+        );
+        if (newlyCompleted.length > 0) {
+          const step = newlyCompleted[0];
+          const cacheKey = `objective_video:${step.id}`;
+          const sourceCacheKey = step.requiredItemId
+            ? `item:${step.requiredItemId}`
+            : `room:${state.currentRoom}`;
+
+          const sourceImage = await ctx.runQuery(internal.stationImages.getByCacheKey, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey: sourceCacheKey,
+          });
+          const sourceImageUrl = sourceImage?.storageId
+            ? await ctx.storage.getUrl(sourceImage.storageId) : undefined;
+
+          imageSchedules.push(ctx.scheduler.runAfter(0, internal.actions.generateVideo.generate, {
+            stationId: game.stationId,
+            gameId,
+            cacheKey,
+            category: "objective_video" as const,
+            prompt: objectiveVideoPrompt,
+            ...(sourceImageUrl ? { imageUrl: sourceImageUrl } : {}),
           }));
         }
       }
